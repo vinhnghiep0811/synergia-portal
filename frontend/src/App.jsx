@@ -1,18 +1,16 @@
-import { useEffect, useState } from "react";
-import { getHealth } from "./api/http";
+import "./App.css";
+import { Route, Routes } from "react-router-dom";
+import { HomeDashboard } from "./pages/HomeDashboard.jsx";
+import { UploadPage } from "./pages/UploadPage.jsx";
+import { PaperDashboard } from "./pages/PaperDashboard.jsx";
 
 export default function App() {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState("");
-
-  useEffect(() => {
-    getHealth().then(setData).catch((e) => setErr(String(e)));
-  }, []);
-
   return (
-    <div style={{ padding: 16 }}>
-      <h1>Synergia Portal</h1>
-      {err ? <p>Error: {err}</p> : <pre>{JSON.stringify(data, null, 2)}</pre>}
-    </div>
+    <Routes>
+      <Route path="/" element={<HomeDashboard />} />
+      <Route path="/upload" element={<UploadPage />} />
+      <Route path="/papers" element={<PaperDashboard />} />
+      <Route path="/papers/:paperId" element={<PaperDashboard />} />
+    </Routes>
   );
 }
