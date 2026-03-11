@@ -1,0 +1,58 @@
+from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict
+
+
+class PaperUploadResponse(BaseModel):
+    id: UUID
+    original_filename: str
+    storage_path: str
+    mime_type: str
+    file_size_bytes: int
+    file_hash_sha256: str
+    status: str
+    upload_source: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaperListItemResponse(BaseModel):
+    id: UUID
+    original_filename: str
+    status: str
+    mime_type: str
+    file_size_bytes: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaperDetailResponse(BaseModel):
+    id: UUID
+    canonical_document_id: Optional[UUID] = None
+    uploader_id: Optional[str] = None
+
+    original_filename: str
+    storage_path: str
+    mime_type: str
+    file_size_bytes: int
+    file_hash_sha256: str
+
+    upload_source: str
+    status: str
+
+    parse_status: Optional[str] = None
+    parse_error: Optional[str] = None
+
+    extracted_text_preview: Optional[str] = None
+    detected_doi: Optional[str] = None
+    detected_title: Optional[str] = None
+
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
