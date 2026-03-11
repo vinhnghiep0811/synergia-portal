@@ -1,15 +1,54 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { UploadPanel } from "../components/UploadPanel.jsx";
+import { uploadManyPapers } from "../services/paperApi";
 
 export function UploadPage() {
   const [lastUploadedCount, setLastUploadedCount] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
   const navigate = useNavigate();
 
-  function handleUploadMock(files) {
-    setLastUploadedCount(files.length);
-    // Sau này có thể gọi API thật rồi navigate.
-    navigate("/papers");
+  // function handleUploadMock(files) {
+  //   setLastUploadedCount(files.length);
+  //   // Sau này có thể gọi API thật rồi navigate.
+  //   navigate("/papers");
+  // }
+
+  async function handleUpload(files) {
+    setUploadError("");
+    setIsUploading(true);
+
+    try {
+      const fileList = Array.from(files ?? []);
+
+      if (!fileList.length) {
+        setUploadError("Không có file nào để upload.");
+        return false;
+      }
+
+      // Nếu muốn chỉ cho phép PDF ngay từ FE
+      const invalidFiles = fileList.filter(
+        (file) =>
+          file.type !== "application/pdf" &&
+          !file.name.toLowerCase().endsWith(".pdf")
+      );
+
+      if (invalidFiles.length > 0) {
+        setUploadError("Chỉ chấp nhận file PDF.");
+        return false;
+      }
+
+      const results = await uploadManyPapers(fileList);
+
+      setLastUploadedCount(results.length);
+      navigate("/papers");
+    } catch (error) {
+      setUploadError(error.message || "Có lỗi xảy ra khi upload file.");
+      return false;
+    } finally {
+      setIsUploading(false);
+    }
   }
 
   return (
@@ -35,7 +74,11 @@ export function UploadPage() {
 
       <main className="app-main app-main--upload">
         <div className="app-main__full">
-          <UploadPanel onUploadMock={handleUploadMock} />
+          <UploadPanel
+            onUpload={handleUpload}
+            isUploading={isUploading}
+            uploadError={uploadError}
+          />
         </div>
         <div className="app-main__below">
           <section className="card detail-card">
@@ -59,7 +102,25 @@ export function UploadPage() {
                 <code>CanonicalDocument</code>.
               </li>
             </ul>
-            {lastUploadedCount > 0 && (
+            {/* {lastUploadedCount > 0 && (
+              <p style={{ fontSize: "0.85rem", color: "#16a34a" }}>
+                Đã upload {lastUploadedCount} file. Bạn vừa được chuyển sang danh
+                sách tài liệu để xem trạng thái xử lý.
+              </p>
+            )} */}
+            {isUploading && (
+              <p style={{ fontSize: "0.85rem", color: "#2563eb" }}>
+                Đang upload file lên hệ thống...
+              </p>
+            )}
+
+            {/* {uploadError && (
+              <p style={{ fontSize: "0.85rem", color: "#dc2626" }}>
+                {uploadError}
+              </p>
+            )} */}
+
+            {lastUploadedCount > 0 && !isUploading && !uploadError && (
               <p style={{ fontSize: "0.85rem", color: "#16a34a" }}>
                 Đã upload {lastUploadedCount} file. Bạn vừa được chuyển sang danh
                 sách tài liệu để xem trạng thái xử lý.
