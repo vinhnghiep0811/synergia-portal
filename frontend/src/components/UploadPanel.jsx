@@ -1,24 +1,38 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
-export function UploadPanel({ onUploadMock }) {
+export function UploadPanel({ onUpload, isUploading = false, uploadError = "" }) {
   const [files, setFiles] = useState([]);
-  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
   function handleFileChange(e) {
     const list = Array.from(e.target.files ?? []);
     setFiles(list);
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
-    if (!files.length) return;
-    setIsUploading(true);
-    setTimeout(() => {
-      onUploadMock(files);
+    if (!files.length || isUploading) return;
+
+    const success = await onUpload(files);
+
+    if (success) {
       setFiles([]);
-      setIsUploading(false);
-    }, 500);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
   }
+
+  // function handleSubmit(e) {
+  //   e.preventDefault();
+  //   if (!files.length) return;
+  //   setIsUploading(true);
+  //   setTimeout(() => {
+  //     onUploadMock(files);
+  //     setFiles([]);
+  //     setIsUploading(false);
+  //   }, 500);
+  // }
 
   return (
     <section className="card upload-card">
@@ -35,10 +49,12 @@ export function UploadPanel({ onUploadMock }) {
           <label className="form-label">
             PDF files
             <input
+              ref={fileInputRef}
               type="file"
-              accept="application/pdf"
+              accept="application/pdf,.pdf"
               multiple
               onChange={handleFileChange}
+              disabled={isUploading}
             />
           </label>
           <p className="form-help">
@@ -70,6 +86,13 @@ export function UploadPanel({ onUploadMock }) {
             <span>Chưa chọn file nào.</span>
           )}
         </div>
+
+        {uploadError && (
+          <p style={{ fontSize: "0.85rem", color: "#dc2626", marginTop: "0.5rem" }}>
+            {uploadError}
+          </p>
+        )}
+
         <div className="form-actions">
           <button
             type="submit"
