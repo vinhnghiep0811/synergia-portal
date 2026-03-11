@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -14,7 +14,64 @@ from app.services.paper_service import PaperService
 router = APIRouter(prefix="/papers", tags=["papers"])
 
 
-@router.post("/upload", response_model=PaperUploadResponse)
+@router.post("/upload", response_model=PaperUploadResponse,
+             status_code=status.HTTP_201_CREATED,
+    summary="Upload file PDF bài báo",
+    description="""
+API dùng để upload một file PDF bài báo lên hệ thống.
+
+### Chức năng
+- Nhận file PDF từ client
+- Lưu file vào storage
+- Tạo bản ghi paper trong database
+- Trả về thông tin cơ bản của paper vừa upload
+
+### Lưu ý
+- Chỉ chấp nhận file PDF
+- Field upload phải có tên là `file`
+""",
+    response_description="Thông tin bài báo sau khi upload thành công",
+    responses={
+        201: {
+            "description": "Upload PDF thành công",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "8d42b62d-2591-4d54-8efa-e9e3ab06a262",
+                        "original_filename": "Week1DB_Schema.drawio.pdf",
+                        "storage_path": "s3://papers/papers/8d42b62d-2591-4d54-8efa-e9e3ab06a262.pdf",
+                        "mime_type": "application/pdf",
+                        "file_size_bytes": 108810,
+                        "file_hash_sha256": "d764f7be75379fc5cbd32a6f36db7b38ed4e33eb82978aab9b29742cd0ed6c06",
+                        "status": "pending",
+                        "upload_source": "portal",
+                        "created_at": "2026-03-11T12:44:38.541317Z"
+                    }
+                }
+            },
+        },
+        400: {
+            "description": "File không hợp lệ hoặc không phải PDF",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Only PDF files are allowed"
+                    }
+                }
+            },
+        },
+        500: {
+            "description": "Lỗi hệ thống khi upload file",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Internal server error"
+                    }
+                }
+            },
+        },
+    },
+)
 async def upload_paper(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -24,17 +81,151 @@ async def upload_paper(
     return paper
 
 
-@router.get("", response_model=list[PaperListItemResponse])
+@router.get("", response_model=list[PaperListItemResponse],
+            summary="Lấy danh sách bài báo",
+    description="""
+API dùng để lấy danh sách các bài báo đã được upload lên hệ thống.
+
+### Chức năng
+- Hỗ trợ phân trang qua `skip` và `limit`
+- Trả về danh sách paper ngắn gọn để hiển thị ngoài màn hình list
+
+### Dùng cho FE
+FE gọi endpoint này để:
+- Hiển thị danh sách paper
+- Phân trang danh sách
+- Render bảng / card danh sách bài báo
+""",
+    response_description="Danh sách bài báo",
+    responses={
+        200: {
+            "description": "Lấy danh sách bài báo thành công",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id": "8d42b62d-2591-4d54-8efa-e9e3ab06a262",
+                            "original_filename": "Week1DB_Schema.drawio.pdf",
+                            "status": "pending",
+                            "mime_type": "application/pdf",
+                            "file_size_bytes": 108810,
+                            "created_at": "2026-03-11T12:44:38.541317Z",
+                            "updated_at": "2026-03-11T12:44:38.541317Z"
+                        },
+                        {
+                            "id": "7d36df8b-ceb7-4733-805b-2f6e020902dd",
+                            "original_filename": "CO3043-4000.pdf",
+                            "status": "pending",
+                            "mime_type": "application/pdf",
+                            "file_size_bytes": 430497,
+                            "created_at": "2026-03-10T16:59:10.774180Z",
+                            "updated_at": "2026-03-10T16:59:10.774180Z"
+                        },
+                    ]
+                }
+            },
+        },
+        500: {
+            "description": "Lỗi hệ thống khi lấy danh sách bài báo",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Internal server error"
+                    }
+                }
+            },
+        },
+    },
+)
 def list_papers(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    skip: int = Query(0, ge=0, description="Số lượng bản ghi bỏ qua, dùng cho phân trang"),
+    limit: int = Query(20, ge=1, le=100, description="Số lượng bản ghi tối đa trả về trong một lần gọi"),
     db: Session = Depends(get_db),
 ):
     service = PaperService(db)
     return service.list_papers(skip=skip, limit=limit)
 
 
-@router.get("/{paper_id}", response_model=PaperDetailResponse)
+@router.get("/{paper_id}", response_model=PaperDetailResponse,
+            summary="Lấy chi tiết một bài báo",
+    description="""
+API dùng để lấy thông tin chi tiết của một bài báo theo `paper_id`.
+
+### Chức năng
+- Lấy metadata chi tiết của paper
+- Phục vụ màn hình detail bên FE
+
+### Dùng cho FE
+FE gọi endpoint này khi:
+- Người dùng click vào một paper trong danh sách
+- Cần hiển thị trang chi tiết bài báo
+""",
+    response_description="Thông tin chi tiết bài báo",
+    responses={
+        200: {
+            "description": "Lấy chi tiết bài báo thành công",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "907c3e6a-cf17-4dfe-b030-fe1914218e28",
+                        "canonical_document_id": None,
+                        "uploader_id": None,
+                        "original_filename": "Week1DB_Schema.drawio.pdf",
+                        "storage_path": "s3://papers/papers/907c3e6a-cf17-4dfe-b030-fe1914218e28.pdf",
+                        "mime_type": "application/pdf",
+                        "file_size_bytes": 108810,
+                        "file_hash_sha256": "d764f7be75379fc5cbd32a6f36db7b38ed4e33eb82978aab9b29742cd0ed6c06",
+                        "upload_source": "portal",
+                        "status": "pending",
+                        "parse_status": None,
+                        "parse_error": None,
+                        "extracted_text_preview": None,
+                        "detected_doi": None,
+                        "detected_title": None,
+                        "created_at": "2026-03-10T16:44:51.886708Z",
+                        "updated_at": "2026-03-10T16:44:51.886708Z"
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "Không tìm thấy bài báo với paper_id tương ứng",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Paper not found"
+                    }
+                }
+            },
+        },
+        422: {
+            "description": "paper_id không đúng định dạng UUID",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": [
+                            {
+                                "loc": ["path", "paper_id"],
+                                "msg": "value is not a valid uuid",
+                                "type": "type_error.uuid"
+                            }
+                        ]
+                    }
+                }
+            },
+        },
+        500: {
+            "description": "Lỗi hệ thống khi lấy chi tiết bài báo",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Internal server error"
+                    }
+                }
+            },
+        },
+    },
+)
 def get_paper_detail(
     paper_id: UUID,
     db: Session = Depends(get_db),
