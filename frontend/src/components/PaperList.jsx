@@ -21,8 +21,9 @@ export function PaperList({ papers, onSelect, selectedId }) {
     });
   }, [papers, searchText, statusFilter]);
 
-  const pendingPapers = filtered.filter(p => p.status === "pending");
-  const processedPapers = filtered.filter(p => p.status !== "pending");
+  const pendingPapers = filtered.filter((p) => p.status === "pending");
+  const processedPapers = filtered.filter((p) => p.status === "processed");
+  const failedPapers = filtered.filter((p) => p.status === "failed");
 
   return (
     <section className="card list-card">
@@ -55,11 +56,11 @@ export function PaperList({ papers, onSelect, selectedId }) {
       {/* Pending Papers - Simple Table */}
       {pendingPapers.length > 0 && (
         <div style={{ marginBottom: "2rem" }}>
-          <div style={{ 
-            display: "flex", 
-            alignItems: "center", 
+          <div style={{
+            display: "flex",
+            alignItems: "center",
             gap: "0.5rem",
-            marginBottom: "1rem" 
+            marginBottom: "1rem"
           }}>
             <div style={{
               width: "8px",
@@ -68,11 +69,11 @@ export function PaperList({ papers, onSelect, selectedId }) {
               backgroundColor: "#f59e0b",
               animation: "pulse 2s infinite"
             }}></div>
-            <h3 style={{ 
-              fontSize: "0.95rem", 
-              fontWeight: "600", 
-              margin: 0, 
-              color: "#374151" 
+            <h3 style={{
+              fontSize: "0.95rem",
+              fontWeight: "600",
+              margin: 0,
+              color: "#374151"
             }}>
               Đang chờ xử lý ({pendingPapers.length})
             </h3>
@@ -108,13 +109,13 @@ export function PaperList({ papers, onSelect, selectedId }) {
                         {paper.originalFilename || paper.filename || "Unknown file"}
                       </div>
                     </td>
-                    <td>{paper.sizeMB?.toFixed(1)} MB</td>
-                    <td>{formatDate(paper.uploadedAt)}</td>
+                    <td>{paper.sizeMB != null ? `${paper.sizeMB.toFixed(1)} MB` : "-"}</td>
+                    <td>{paper.uploadedAt ? formatDate(paper.uploadedAt) : "-"}</td>
                     <td>
                       <button
                         className="btn btn--link"
-                        style={{ 
-                          fontSize: "0.8rem", 
+                        style={{
+                          fontSize: "0.8rem",
                           padding: "0.2rem 0.4rem",
                           textDecoration: "underline",
                           color: "#4f46e5",
@@ -141,11 +142,11 @@ export function PaperList({ papers, onSelect, selectedId }) {
       {/* Processed Papers - Clean Table */}
       {processedPapers.length > 0 && (
         <div>
-          <div style={{ 
-            display: "flex", 
-            alignItems: "center", 
+          <div style={{
+            display: "flex",
+            alignItems: "center",
             gap: "0.5rem",
-            marginBottom: "1rem" 
+            marginBottom: "1rem"
           }}>
             <div style={{
               width: "8px",
@@ -153,11 +154,11 @@ export function PaperList({ papers, onSelect, selectedId }) {
               borderRadius: "999px",
               backgroundColor: "#22c55e"
             }}></div>
-            <h3 style={{ 
-              fontSize: "0.95rem", 
-              fontWeight: "600", 
-              margin: 0, 
-              color: "#374151" 
+            <h3 style={{
+              fontSize: "0.95rem",
+              fontWeight: "600",
+              margin: 0,
+              color: "#374151"
             }}>
               Đã xử lý ({processedPapers.length})
             </h3>
@@ -203,8 +204,8 @@ export function PaperList({ papers, onSelect, selectedId }) {
                       <PaperStatusBadge status={paper.status} />
                     </td>
                     <td>
-                      <div style={{ 
-                        fontSize: "0.8rem", 
+                      <div style={{
+                        fontSize: "0.8rem",
                         color: "#6b7280",
                         maxWidth: "200px",
                         overflow: "hidden",
@@ -218,8 +219,8 @@ export function PaperList({ papers, onSelect, selectedId }) {
                     <td>
                       <button
                         className="btn btn--link"
-                        style={{ 
-                          fontSize: "0.8rem", 
+                        style={{
+                          fontSize: "0.8rem",
                           padding: "0.2rem 0.4rem",
                           textDecoration: "underline",
                           color: "#4f46e5",

@@ -1,6 +1,11 @@
 import { PaperStatusBadge } from "./PaperStatusBadge.jsx";
 import { formatDate } from "../utils/formatDate.js";
 
+function formatSizeMB(sizeMB) {
+  if (sizeMB == null || Number.isNaN(sizeMB)) return "-";
+  return `${sizeMB.toFixed(1)} MB`;
+}
+
 export function PaperDetail({ paper }) {
   if (!paper) {
     return (
@@ -15,31 +20,57 @@ export function PaperDetail({ paper }) {
     );
   }
 
+  const displayTitle =
+    paper.detectedTitle ||
+    paper.title ||
+    paper.originalFilename ||
+    paper.filename ||
+    "Unknown file";
+
+  const subtitle =
+    paper.status === "pending"
+      ? "File đang chờ xử lý"
+      : paper.detectedDoi
+      ? `DOI: ${paper.detectedDoi}`
+      : "Đã có thông tin chi tiết của tài liệu";
+
+  const parseDisplay =
+    paper.parseStatus === "success"
+      ? "Đã parse thành công"
+      : paper.parseStatus === "failed"
+      ? "Parse thất bại"
+      : "Chưa parse";
+
+  const canonicalDisplay = paper.canonicalDocumentId ? "Đã liên kết" : "Chưa có";
+
+  const timelineParseClass =
+    paper.parseStatus === "success"
+      ? "timeline__item timeline__item--done"
+      : paper.status === "failed" || paper.parseStatus === "failed"
+      ? "timeline__item timeline__item--failed"
+      : "timeline__item timeline__item--pending";
+
+  const timelineCanonicalClass = paper.canonicalDocumentId
+    ? "timeline__item timeline__item--done"
+    : "timeline__item timeline__item--pending";
+
+  const timelineLLMClass = paper.hasLLMExtraction
+    ? "timeline__item timeline__item--done"
+    : "timeline__item timeline__item--pending";
+
   return (
     <section className="card detail-card">
       <header className="card__header">
         <div>
-          <h2 className="card__title">
-            {paper.status === "pending" 
-              ? paper.originalFilename || paper.filename || "Unknown file"
-              : paper.title || "Đang xử lý..."
-            }
-          </h2>
-          <p className="card__subtitle">
-            {paper.status === "pending" 
-              ? "File đang chờ xử lý"
-              : `${(paper.authors || []).join(", ")} · ${paper.year} · ${paper.venue || "Unknown venue"}`
-            }
-          </p>
+          <h2 className="card__title">{displayTitle}</h2>
+          <p className="card__subtitle">{subtitle}</p>
         </div>
         <PaperStatusBadge status={paper.status} />
       </header>
 
       <div className="detail-grid">
         <div className="detail-section">
-          <h3 className="detail-section__title">
-            {paper.status === "pending" ? "Thông tin file" : "Upload & lưu trữ"}
-          </h3>
+          <h3 className="detail-section__title">Thông tin file</h3>
           <dl className="detail-list">
             <div className="detail-list__item">
               <dt>ID</dt>
@@ -47,83 +78,111 @@ export function PaperDetail({ paper }) {
             </div>
             <div className="detail-list__item">
               <dt>Tên file</dt>
-              <dd>{paper.originalFilename || paper.filename || "Unknown file"}</dd>
+              <dd>{paper.originalFilename || paper.filename || "-"}</dd>
             </div>
             <div className="detail-list__item">
               <dt>Trạng thái</dt>
-              <dd><PaperStatusBadge status={paper.status} /></dd>
+              <dd>
+                <PaperStatusBadge status={paper.status} />
+              </dd>
+            </div>
+            <div className="detail-list__item">
+              <dt>Loại file</dt>
+              <dd>{paper.mimeType || "-"}</dd>
             </div>
             <div className="detail-list__item">
               <dt>Kích thước</dt>
-              <dd>{paper.sizeMB?.toFixed(1)} MB</dd>
+              <dd>{formatSizeMB(paper.sizeMB)}</dd>
             </div>
             <div className="detail-list__item">
               <dt>Upload lúc</dt>
-              <dd>{formatDate(paper.uploadedAt)}</dd>
+              <dd>{paper.uploadedAt ? formatDate(paper.uploadedAt) : "-"}</dd>
             </div>
-            {paper.status !== "pending" && (
-              <>
-                <div className="detail-list__item">
-                  <dt>Uploaded by</dt>
-                  <dd>{paper.uploadedBy || "-"}</dd>
-                </div>
-                <div className="detail-list__item">
-                  <dt>Storage path</dt>
-                  <dd>/papers/{paper.id}.pdf</dd>
-                </div>
-              </>
-            )}
+            <div className="detail-list__item">
+              <dt>Cập nhật lúc</dt>
+              <dd>{paper.updatedAt ? formatDate(paper.updatedAt) : "-"}</dd>
+            </div>
+            <div className="detail-list__item">
+              <dt>Upload source</dt>
+              <dd>{paper.uploadSource || "-"}</dd>
+            </div>
+            <div className="detail-list__item">
+              <dt>Storage path</dt>
+              <dd>{paper.storagePath || "-"}</dd>
+            </div>
           </dl>
         </div>
 
-        {paper.status !== "pending" && (
-          <>
-            <div className="detail-section">
-              <h3 className="detail-section__title">Thông tin tài liệu</h3>
-              <dl className="detail-list">
-                <div className="detail-list__item">
-                  <dt>Tiêu đề</dt>
-                  <dd>{paper.title || "-"}</dd>
-                </div>
-                <div className="detail-list__item">
-                  <dt>Tác giả</dt>
-                  <dd>{(paper.authors || []).join(", ") || "-"}</dd>
-                </div>
-                <div className="detail-list__item">
-                  <dt>Năm</dt>
-                  <dd>{paper.year || "-"}</dd>
-                </div>
-                <div className="detail-list__item">
-                  <dt>Kênh xuất bản</dt>
-                  <dd>{paper.venue || "-"}</dd>
-                </div>
-              </dl>
+        <div className="detail-section">
+          <h3 className="detail-section__title">Metadata trích xuất</h3>
+          <dl className="detail-list">
+            <div className="detail-list__item">
+              <dt>Detected title</dt>
+              <dd>{paper.detectedTitle || "-"}</dd>
             </div>
+            <div className="detail-list__item">
+              <dt>Detected DOI</dt>
+              <dd>{paper.detectedDoi || "-"}</dd>
+            </div>
+            <div className="detail-list__item">
+              <dt>Parse status</dt>
+              <dd>{parseDisplay}</dd>
+            </div>
+            <div className="detail-list__item">
+              <dt>Parse error</dt>
+              <dd>{paper.parseError || "-"}</dd>
+            </div>
+            <div className="detail-list__item">
+              <dt>Canonical document</dt>
+              <dd>{canonicalDisplay}</dd>
+            </div>
+            <div className="detail-list__item">
+              <dt>Canonical document ID</dt>
+              <dd>{paper.canonicalDocumentId || "-"}</dd>
+            </div>
+          </dl>
+        </div>
 
-            <div className="detail-section">
-              <h3 className="detail-section__title">Canonical document & metadata</h3>
-              <dl className="detail-list">
-                <div className="detail-list__item">
-                  <dt>Canonical key</dt>
-                  <dd>{paper.canonicalKey || "-"}</dd>
-                </div>
-                <div className="detail-list__item">
-                  <dt>Deterministic parse</dt>
-                  <dd>{paper.hasDeterministicParse ? "Đã parse" : "Chưa parse"}</dd>
-                </div>
-                <div className="detail-list__item">
-                  <dt>Semantic Scholar metadata</dt>
-                  <dd>{paper.hasCanonicalMetadata ? "Đã đồng bộ" : "Chưa có"}</dd>
-                </div>
-                <div className="detail-list__item">
-                  <dt>LLM extraction</dt>
-                  <dd>{paper.hasLLMExtraction ? "Đã trích xuất & cache" : "Chưa có"}</dd>
-                </div>
-              </dl>
+        <div className="detail-section">
+          <h3 className="detail-section__title">Dấu vết lưu trữ</h3>
+          <dl className="detail-list">
+            <div className="detail-list__item">
+              <dt>Uploader ID</dt>
+              <dd>{paper.uploaderId || "-"}</dd>
             </div>
-          </>
-        )}
+            <div className="detail-list__item">
+              <dt>SHA256</dt>
+              <dd
+                style={{
+                  wordBreak: "break-all",
+                }}
+              >
+                {paper.fileHashSha256 || "-"}
+              </dd>
+            </div>
+          </dl>
+        </div>
       </div>
+
+      {paper.extractedTextPreview && (
+        <div className="detail-section">
+          <h3 className="detail-section__title">Text preview</h3>
+          <div
+            style={{
+              fontSize: "0.9rem",
+              lineHeight: 1.6,
+              color: "#374151",
+              background: "#f9fafb",
+              border: "1px solid #e5e7eb",
+              borderRadius: "0.75rem",
+              padding: "1rem",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {paper.extractedTextPreview}
+          </div>
+        </div>
+      )}
 
       <div className="detail-section">
         <h3 className="detail-section__title">Luồng xử lý tài liệu</h3>
@@ -137,54 +196,33 @@ export function PaperDetail({ paper }) {
               </div>
             </div>
           </li>
-          <li
-            className={
-              paper.hasDeterministicParse
-                ? "timeline__item timeline__item--done"
-                : paper.status === "failed"
-                ? "timeline__item timeline__item--failed"
-                : "timeline__item timeline__item--pending"
-            }
-          >
+
+          <li className={timelineParseClass}>
             <div className="timeline__dot" />
             <div className="timeline__content">
-              <div className="timeline__title">PDF parsing (deterministic)</div>
+              <div className="timeline__title">PDF parsing</div>
               <div className="timeline__description">
-                Trích xuất text, DOI, title candidate và fingerprint từ PDF.
+                Trích xuất text preview, DOI và title candidate từ PDF.
               </div>
             </div>
           </li>
-          <li
-            className={
-              paper.hasCanonicalMetadata
-                ? "timeline__item timeline__item--done"
-                : "timeline__item timeline__item--pending"
-            }
-          >
+
+          <li className={timelineCanonicalClass}>
             <div className="timeline__dot" />
             <div className="timeline__content">
-              <div className="timeline__title">
-                Semantic Scholar canonical metadata
-              </div>
+              <div className="timeline__title">Canonical document</div>
               <div className="timeline__description">
-                Lấy metadata nền tảng đáng tin cậy từ Semantic Scholar.
+                Liên kết paper hiện tại với canonical document nếu đã được nhận diện.
               </div>
             </div>
           </li>
-          <li
-            className={
-              paper.hasLLMExtraction
-                ? "timeline__item timeline__item--done"
-                : "timeline__item timeline__item--pending"
-            }
-          >
+
+          <li className={timelineLLMClass}>
             <div className="timeline__dot" />
             <div className="timeline__content">
-              <div className="timeline__title">
-                LLM metadata chuyên biệt + evidence
-              </div>
+              <div className="timeline__title">LLM metadata chuyên biệt</div>
               <div className="timeline__description">
-                Trích xuất Problem / Method / Contribution / Limitation / Evaluation kèm evidence.
+                Trích xuất metadata nâng cao kèm evidence khi pipeline giai đoạn sau được bật.
               </div>
             </div>
           </li>
@@ -193,4 +231,3 @@ export function PaperDetail({ paper }) {
     </section>
   );
 }
-

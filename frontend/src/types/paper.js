@@ -45,4 +45,6 @@
 
 export const PAPER_STATUS = {
   PENDING: "pending",
+  PROCESSED: "processed",
+  FAILED: "failed",
 };
