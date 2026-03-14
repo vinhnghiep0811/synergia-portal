@@ -17,7 +17,7 @@ export function AuthCallbackPage() {
     localStorage.setItem("access_token", token);
 
     apiClient
-      .get("/auth/me")
+      .get("/api/auth/me")
       .then(() => {
         navigate("/", { replace: true });
       })

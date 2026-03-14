@@ -31,7 +31,7 @@ router = APIRouter(tags=["auth"])
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
-FRONTEND_AUTH_CALLBACK_URL = "http://localhost:5173/auth/callback"
+FRONTEND_AUTH_CALLBACK_URL = "http://localhost:3000/auth/callback"
 
 
 def _require_config() -> None:
