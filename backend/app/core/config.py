@@ -64,3 +64,21 @@ MINIO_SECURE = get_env_bool("MINIO_SECURE", False)
 # =========================
 MAX_UPLOAD_SIZE_MB = get_env_int("MAX_UPLOAD_SIZE_MB", 20)
 MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+
+# =========================
+# Auth - Google OAuth2
+# =========================
+GOOGLE_CLIENT_ID = get_env("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = get_env("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = get_env(
+    "GOOGLE_REDIRECT_URI",
+    "http://localhost:8000/api/auth/google/callback",
+)
+ALLOWED_EMAIL_DOMAIN = get_env("ALLOWED_EMAIL_DOMAIN", "hcmut.edu.vn")
+
+# =========================
+# Auth - JWT
+# =========================
+JWT_SECRET_KEY = get_env("JWT_SECRET_KEY", "change-me-in-production")
+JWT_ALGORITHM = get_env("JWT_ALGORITHM", "HS256")
+JWT_EXPIRE_MINUTES = get_env_int("JWT_EXPIRE_MINUTES", 60 * 24 * 7)  # 7 ngày
