@@ -82,3 +82,13 @@ ALLOWED_EMAIL_DOMAIN = get_env("ALLOWED_EMAIL_DOMAIN", "hcmut.edu.vn")
 JWT_SECRET_KEY = get_env("JWT_SECRET_KEY", "change-me-in-production")
 JWT_ALGORITHM = get_env("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_MINUTES = get_env_int("JWT_EXPIRE_MINUTES", 60 * 24 * 7)  # 7 ngày
+
+# =========================
+# Queue - Redis / RQ
+# =========================
+REDIS_HOST = get_env("REDIS_HOST", "127.0.0.1")
+REDIS_PORT = get_env_int("REDIS_PORT", 6379)
+REDIS_DB = get_env_int("REDIS_DB", 0)
+REDIS_URL = get_env("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
+
+RQ_PARSE_QUEUE = get_env("RQ_PARSE_QUEUE", "parse_queue")
