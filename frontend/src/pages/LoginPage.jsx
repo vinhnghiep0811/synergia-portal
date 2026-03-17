@@ -8,7 +8,8 @@ export function LoginPage() {
     return params.get("error");
   }, [location.search]);
 
-  const backendLoginUrl = "http://localhost:8000/api/auth/google/login";
+  const backendBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+  const backendLoginUrl = `${backendBase.replace(/\/$/, "")}/api/auth/google/login`;
 
   return (
     <div className="app-shell" style={{ maxWidth: 720 }}>

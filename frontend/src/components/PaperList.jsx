@@ -21,7 +21,7 @@ export function PaperList({ papers, onSelect, selectedId }) {
     });
   }, [papers, searchText, statusFilter]);
 
-  const pendingPapers = filtered.filter((p) => p.status === "pending");
+  const pendingPapers = filtered.filter((p) => p.status === "parse_queued");
   const processedPapers = filtered.filter((p) => p.status === "processed");
   const failedPapers = filtered.filter((p) => p.status === "failed");
 

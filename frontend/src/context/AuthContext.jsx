@@ -12,60 +12,51 @@ import { apiClient } from "../services/apiClient";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const navigate = useNavigate();
-  const [token, setToken] = useState(() => localStorage.getItem("access_token"));
   const [user, setUser] = useState(null);
-  const [isLoading, setIsLoading] = useState(Boolean(token));
+  const [isLoading, setIsLoading] = useState(true);
+  const navigate = useNavigate();
 
   const logout = useCallback(() => {
-    localStorage.removeItem("access_token");
-    setToken(null);
-    setUser(null);
-    navigate("/login", { replace: true });
+    // Call backend to clear server-side cookie, then clear client state
+    apiClient
+      .post("/auth/logout")
+      .finally(() => {
+        setUser(null);
+        setIsLoading(false);
+        navigate("/login", { replace: true });
+      });
   }, [navigate]);
 
   useEffect(() => {
-    if (!token) {
-      setIsLoading(false);
-      setUser(null);
-      return;
-    }
-
     let cancelled = false;
     setIsLoading(true);
-
     apiClient
-      .get("/auth/me")
+      .get("/api/auth/me")
       .then((res) => {
         if (cancelled) return;
         setUser(res.data);
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
-        logout();
+        setUser(null);
       })
       .finally(() => {
         if (cancelled) return;
         setIsLoading(false);
       });
-
     return () => {
       cancelled = true;
     };
-  }, [token, logout]);
+  }, []);
 
   const value = useMemo(
     () => ({
       user,
-      token,
-      isLoading,
-      setToken: (newToken) => {
-        localStorage.setItem("access_token", newToken);
-        setToken(newToken);
-      },
+      setUser,
       logout,
+      isLoading,
     }),
-    [user, token, isLoading, logout]
+    [user, logout, isLoading]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

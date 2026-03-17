@@ -1,5 +1,6 @@
 from sqlalchemy import Column, DateTime, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import relationship
 import uuid
 
 from app.core.database import Base
@@ -14,7 +15,7 @@ class CanonicalDocument(Base):
     canonical_type = Column(String(20), nullable=False)  # DOI | FINGERPRINT
 
     doi = Column(String(255), nullable=True, unique=True)
-    fingerprint = Column(String(255), nullable=False, unique=True)
+    fingerprint = Column(String(255), nullable=True, unique=True)
 
     title_candidate = Column(Text, nullable=True)
     normalized_title = Column(Text, nullable=True)
@@ -42,3 +43,5 @@ class CanonicalDocument(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    paper_records = relationship("PaperRecord", back_populates="canonical_document")
