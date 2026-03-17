@@ -16,47 +16,56 @@ export function AuthProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
 
-  const logout = useCallback(() => {
-    // Call backend to clear server-side cookie, then clear client state
-    apiClient
-      .post("/auth/logout")
-      .finally(() => {
-        setUser(null);
-        setIsLoading(false);
-        navigate("/login", { replace: true });
-      });
+  const checkSession = useCallback(async () => {
+    try {
+      const res = await apiClient.get("/api/auth/me");
+      setUser(res.data);
+      return res.data;
+    } catch (err) {
+      setUser(null);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      // Đảm bảo URL đồng nhất /api/auth/logout
+      await apiClient.post("/api/auth/logout");
+    } finally {
+      setUser(null);
+      setIsLoading(false);
+      navigate("/login", { replace: true });
+    }
   }, [navigate]);
 
   useEffect(() => {
-    let cancelled = false;
-    setIsLoading(true);
-    apiClient
-      .get("/api/auth/me")
+    let isMounted = true;
+    
+    apiClient.get("/api/auth/me")
       .then((res) => {
-        if (cancelled) return;
-        setUser(res.data);
+        if (isMounted) setUser(res.data);
       })
-      .catch((err) => {
-        if (cancelled) return;
-        setUser(null);
+      .catch(() => {
+        if (isMounted) setUser(null);
       })
       .finally(() => {
-        if (cancelled) return;
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
+    return () => { isMounted = false; };
+  }, []);
+  
   const value = useMemo(
     () => ({
       user,
       setUser,
       logout,
       isLoading,
+      checkSession
     }),
-    [user, logout, isLoading]
+    [user, logout, isLoading, checkSession]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

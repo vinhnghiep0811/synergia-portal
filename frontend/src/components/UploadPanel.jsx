@@ -1,8 +1,10 @@
 import { useRef, useState } from "react";
+import { useAuth } from "../context/AuthContext";
 
 export function UploadPanel({ onUpload, isUploading = false, uploadError = "" }) {
   const [files, setFiles] = useState([]);
   const fileInputRef = useRef(null);
+  const { user } = useAuth();
 
   function handleFileChange(e) {
     const list = Array.from(e.target.files ?? []);
@@ -62,13 +64,20 @@ export function UploadPanel({ onUpload, isUploading = false, uploadError = "" })
             backend).
           </p>
         </div>
+        {files.length > 0 && (
+          <div className="file-preview-list">
+            {files.map((f, i) => (
+              <div key={i} className="file-item-tag">{f.name}</div>
+            ))}
+          </div>
+        )}
         <div className="form-row form-row--inline">
           <label className="form-label">
             Người upload
             <input
               type="text"
-              name="uploader"
-              defaultValue="can.nguyen"
+              // Hiển thị email hoặc tên của user từ AuthContext
+              value={user?.full_name || user?.email || "Đang xác thực..."}
               disabled
             />
           </label>
@@ -88,9 +97,9 @@ export function UploadPanel({ onUpload, isUploading = false, uploadError = "" })
         </div>
 
         {uploadError && (
-          <p style={{ fontSize: "0.85rem", color: "#dc2626", marginTop: "0.5rem" }}>
+          <div className="error-message-box">
             {uploadError}
-          </p>
+          </div>
         )}
 
         <div className="form-actions">
@@ -99,7 +108,7 @@ export function UploadPanel({ onUpload, isUploading = false, uploadError = "" })
             className="btn btn--primary"
             disabled={!files.length || isUploading}
           >
-            {isUploading ? "Đang upload & xử lý..." : "Upload & xử lý"}
+            {isUploading ? "🚀 Đang xử lý..." : `Tải lên ${files.length} tài liệu`}
           </button>
         </div>
       </form>

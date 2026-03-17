@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { PaperList } from "../components/PaperList.jsx";
 import { getPapers } from "../services/paperApi.js";
 
@@ -116,10 +116,21 @@ function mapPaperDetail(detail) {
 }
 
 export function PaperDashboard() {
-  const [papers, setPapers] = useState(MOCK_PAPERS);
+  const [papers, setPapers] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState("");
   const navigate = useNavigate();
+  const location = useLocation(); // Hook để lấy state từ router
+  const [successMessage, setSuccessMessage] = useState("");
+
+  useEffect(() => {
+    if (location.state?.message) {
+      setSuccessMessage(location.state.message);
+      const timer = setTimeout(() => setSuccessMessage(""), 5000);
+      window.history.replaceState({}, document.title);
+      return () => clearTimeout(timer);
+    }
+  }, [location]);
 
   useEffect(() => {
     let isMounted = true;
@@ -150,7 +161,7 @@ export function PaperDashboard() {
     return () => {
       isMounted = false;
     };
-  }, [navigate]);
+  }, []);
 
   return (
     <div className="app-shell">
@@ -177,6 +188,22 @@ export function PaperDashboard() {
 
       <main className="app-main app-main--papers">
         <div className="app-main__full">
+          {successMessage && (
+            <div className="card" style={{ 
+              backgroundColor: "#f0fdf4", 
+              color: "#16a34a", 
+              padding: "1rem", 
+              marginBottom: "1rem",
+              border: "1px solid #bbf7d0",
+              borderRadius: "8px",
+              display: "flex",
+              justifyContent: "space-between"
+            }}>
+              <span>{successMessage}</span>
+              <button onClick={() => setSuccessMessage("")} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#16a34a' }}>✕</button>
+            </div>
+          )}
+
           {loadingList ? (
             <div className="card" style={{ padding: "1rem" }}>
               Đang tải danh sách tài liệu...
