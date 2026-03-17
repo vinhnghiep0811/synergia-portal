@@ -43,7 +43,7 @@ export function LoginPage() {
 
           <div className="form-actions" style={{ justifyContent: "flex-start" }}>
             <a className="btn btn--primary" href={backendLoginUrl}>
-              Đăng nhập với Google (@hcmut.edu.vn)
+              Đăng nhập với Googleeee (@hcmut.edu.vn)
             </a>
           </div>
         </section>
