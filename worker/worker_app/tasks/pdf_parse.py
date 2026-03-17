@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 from uuid import UUID
+from sqlalchemy.exc import IntegrityError
 
 sys.path.append("/backend")
 
@@ -114,8 +115,18 @@ def pdf_parse(paper_id: str) -> None:
                 title_candidate=title,
             )
             db.add(canonical)
-            db.commit()
-            db.refresh(canonical)
+            try:
+                db.commit()
+                db.refresh(canonical)
+            except IntegrityError:
+                db.rollback()
+                canonical = (
+                    db.query(CanonicalDocument)
+                    .filter(CanonicalDocument.canonical_key == canonical_key)
+                    .first()
+                )
+                if not canonical:
+                    raise
 
         paper.canonical_document_id = canonical.id
 

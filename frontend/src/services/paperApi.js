@@ -1,4 +1,5 @@
-import { API_BASE_URL, parseApiError } from "../utils/api";
+import { apiClient } from "./apiClient"; // Import instance Axios đã có Interceptor
+import { parseApiError } from "../utils/api";
 
 /**
  * Upload một file PDF
@@ -9,21 +10,21 @@ export async function uploadPaper(file) {
     const formData = new FormData();
     formData.append("file", file);
 
-    const response = await fetch(`${API_BASE_URL}/api/papers/upload`, {
-        method: "POST",
-        body: formData,
-    });
-
-    if (!response.ok) {
-        const message = await parseApiError(response);
+    try {
+        // Axios tự động xử lý Content-Type cho FormData
+        // Không cần truyền API_BASE_URL vì đã có trong apiClient config
+        const response = await apiClient.post("/api/papers/upload", formData);
+        
+        return response.data; // Axios trả về dữ liệu trong thuộc tính .data
+    } catch (error) {
+        // Xử lý lỗi thông qua hàm parse chung
+        const message = await parseApiError(error);
         throw new Error(`${file.name}: ${message}`);
     }
-
-    return response.json();
 }
 
 /**
- * Upload nhiều file PDF
+ * Upload nhiều file PDF song song
  * @param {File[]} files
  * @returns {Promise<import("../types/paper").PaperUploadResponse[]>}
  */
@@ -38,16 +39,15 @@ export async function uploadManyPapers(files) {
  * @returns {Promise<import("../types/paper").PaperListItemResponse[]>}
  */
 export async function getPapers(skip = 0, limit = 50) {
-    const response = await fetch(
-        `${API_BASE_URL}/api/papers?skip=${skip}&limit=${limit}`
-    );
-
-    if (!response.ok) {
-        const message = await parseApiError(response);
+    try {
+        const response = await apiClient.get("/api/papers", {
+            params: { skip, limit } // Truyền query params dạng object cực kỳ sạch sẽ
+        });
+        return response.data;
+    } catch (error) {
+        const message = await parseApiError(error);
         throw new Error(message);
     }
-
-    return response.json();
 }
 
 /**
@@ -56,12 +56,11 @@ export async function getPapers(skip = 0, limit = 50) {
  * @returns {Promise<import("../types/paper").PaperDetailResponse>}
  */
 export async function getPaperDetail(paperId) {
-  const response = await fetch(`${API_BASE_URL}/api/papers/${paperId}`);
-
-  if (!response.ok) {
-    const message = await parseApiError(response);
-    throw new Error(message);
-  }
-
-  return response.json();
+    try {
+        const response = await apiClient.get(`/api/papers/${paperId}`);
+        return response.data;
+    } catch (error) {
+        const message = await parseApiError(error);
+        throw new Error(message);
+    }
 }

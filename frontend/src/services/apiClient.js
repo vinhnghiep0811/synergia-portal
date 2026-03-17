@@ -1,10 +1,10 @@
 import axios from "axios";
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "/api";
+import { API_BASE_URL } from "./apiConfig";
+// const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "/api";
 
 export const apiClient = axios.create({
-  baseURL: apiBaseUrl,
-  withCredentials: true, // Always send cookies
+  baseURL: API_BASE_URL, // Dùng chung một nguồn hằng số
+  withCredentials: true,
 });
 
 let isRefreshing = false;
