@@ -7,25 +7,18 @@ export function AuthCallbackPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const token = params.get("token");
-    if (!token) {
-      navigate("/login?error=auth_failed", { replace: true });
-      return;
-    }
-
-    localStorage.setItem("access_token", token);
-
     apiClient
       .get("/api/auth/me")
       .then(() => {
         navigate("/", { replace: true });
       })
       .catch(() => {
-        localStorage.removeItem("access_token");
-        navigate("/login?error=auth_failed", { replace: true });
+        // Only redirect to /login if not already there
+        if (window.location.pathname !== "/login") {
+          navigate("/login?error=auth_failed", { replace: true });
+        }
       });
-  }, [location.search, navigate]);
+  }, [navigate]);
 
   return (
     <div className="app-shell" style={{ maxWidth: 720 }}>
