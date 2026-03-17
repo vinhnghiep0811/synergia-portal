@@ -44,8 +44,6 @@ class PaperDetailResponse(BaseModel):
 
     upload_source: str
     status: str
-    parse_status: Optional[str] = None
-    parse_error: Optional[str] = None
 
     parse_status: Optional[str] = None
     parse_error: Optional[str] = None
