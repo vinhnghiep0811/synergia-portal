@@ -3,6 +3,7 @@ import { Route, Routes } from "react-router-dom";
 import { HomeDashboard } from "./pages/HomeDashboard.jsx";
 import { UploadPage } from "./pages/UploadPage.jsx";
 import { PaperDashboard } from "./pages/PaperDashboard.jsx";
+import { PaperDetailPage } from "./pages/PaperDetailPage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage.jsx";
 import { ProtectedRoute } from "./components/ProtectedRoute.jsx";
@@ -17,7 +18,7 @@ export default function App() {
         <Route path="/" element={<HomeDashboard />} />
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/papers" element={<PaperDashboard />} />
-        <Route path="/papers/:paperId" element={<PaperDashboard />} />
+        <Route path="/papers/:paperId" element={<PaperDetailPage />} />
       </Route>
     </Routes>
   );

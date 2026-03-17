@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { PaperStatusBadge } from "./PaperStatusBadge.jsx";
 import { formatDate } from "../utils/formatDate.js";
 
-export function PaperList({ papers, onSelect, selectedId }) {
+export function PaperList({ papers, selectedId }) {
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const navigate = useNavigate();
 
   const filtered = useMemo(() => {
     return papers.filter((p) => {
@@ -21,8 +23,8 @@ export function PaperList({ papers, onSelect, selectedId }) {
     });
   }, [papers, searchText, statusFilter]);
 
-  const pendingPapers = filtered.filter((p) => p.status === "parse_queued");
-  const processedPapers = filtered.filter((p) => p.status === "processed");
+  const pendingPapers = filtered.filter((p) => p.status === "parse_queued" || p.status === "canonicalized" || p.status === "pending");
+  const processedPapers = filtered.filter((p) => p.status === "processed" || p.status === "duplicate_detected");
   const failedPapers = filtered.filter((p) => p.status === "failed");
 
   return (
@@ -99,7 +101,7 @@ export function PaperList({ papers, onSelect, selectedId }) {
                         : "paper-row"
                     }
                     style={{ cursor: "pointer" }}
-                    onClick={() => onSelect(paper.id)}
+                    onClick={() => navigate(`/papers/${paper.id}`)}
                   >
                     <td>
                       <div className="simple-list-id">{paper.id}</div>
@@ -125,7 +127,7 @@ export function PaperList({ papers, onSelect, selectedId }) {
                         }}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onSelect(paper.id);
+                          navigate(`/papers/${paper.id}`);
                         }}
                       >
                         Xem chi tiết
@@ -185,7 +187,7 @@ export function PaperList({ papers, onSelect, selectedId }) {
                         : "paper-row"
                     }
                     style={{ cursor: "pointer" }}
-                    onClick={() => onSelect(paper.id)}
+                    onClick={() => navigate(`/papers/${paper.id}`)}
                   >
                     <td>
                       <div className="simple-list-id">{paper.id}</div>
@@ -230,7 +232,7 @@ export function PaperList({ papers, onSelect, selectedId }) {
                         }}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onSelect(paper.id);
+                          navigate(`/papers/${paper.id}`);
                         }}
                       >
                         Xem chi tiết
