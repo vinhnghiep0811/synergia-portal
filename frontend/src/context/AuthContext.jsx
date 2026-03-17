@@ -31,7 +31,7 @@ export function AuthProvider({ children }) {
     let cancelled = false;
     setIsLoading(true);
     apiClient
-      .get("/auth/me")
+      .get("/api/auth/me")
       .then((res) => {
         if (cancelled) return;
         setUser(res.data);

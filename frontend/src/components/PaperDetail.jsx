@@ -35,7 +35,7 @@ export function PaperDetail({ paper }) {
       : "Đã có thông tin chi tiết của tài liệu";
 
   const parseDisplay =
-    paper.parseStatus === "success"
+    paper.parseStatus === "done"
       ? "Đã parse thành công"
       : paper.parseStatus === "failed"
       ? "Parse thất bại"
@@ -44,7 +44,7 @@ export function PaperDetail({ paper }) {
   const canonicalDisplay = paper.canonicalDocumentId ? "Đã liên kết" : "Chưa có";
 
   const timelineParseClass =
-    paper.parseStatus === "success"
+    paper.parseStatus === "done"
       ? "timeline__item timeline__item--done"
       : paper.status === "failed" || paper.parseStatus === "failed"
       ? "timeline__item timeline__item--failed"
