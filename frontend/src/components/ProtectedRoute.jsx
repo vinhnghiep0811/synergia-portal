@@ -1,16 +1,18 @@
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export function ProtectedRoute() {
   const { user, isLoading } = useAuth();
-  const location = window.location.pathname;
-  if (isLoading) return null;
+  const location = useLocation();
+  if (isLoading) return (
+      <div className="loading-screen">
+        <p>Đang kiểm tra quyền truy cập...</p>
+      </div>
+    );
+
   if (!user) {
     // Avoid redirect loop if already on login or callback
-    if (location !== "/login" && location !== "/auth/callback") {
-      return <Navigate to="/login" replace />;
-    }
-    return null;
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
   return <Outlet />;
 }

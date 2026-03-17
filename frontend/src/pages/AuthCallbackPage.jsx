@@ -1,24 +1,30 @@
-import { useEffect } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { apiClient } from "../services/apiClient";
+import { useAuth } from "../context/AuthContext";
 
 export function AuthCallbackPage() {
-  const location = useLocation();
+  const { checkSession } = useAuth();
   const navigate = useNavigate();
-
+  const called = useRef(false);
+  // const from = location.state?.from?.pathname || "/";
   useEffect(() => {
-    apiClient
-      .get("/api/auth/me")
+    if (called.current) return;
+    called.current = true;
+
+    // Lấy lại địa chỉ trang cũ đã lưu trong localStorage (nếu có)
+    const savedPath = localStorage.getItem("redirect_after_login") || "/";
+
+    checkSession()
       .then(() => {
-        navigate("/", { replace: true });
+        // Xóa dấu vết sau khi dùng xong
+        localStorage.removeItem("redirect_after_login");
+        navigate(savedPath, { replace: true });
       })
       .catch(() => {
-        // Only redirect to /login if not already there
-        if (window.location.pathname !== "/login") {
-          navigate("/login?error=auth_failed", { replace: true });
-        }
+        navigate("/login?error=auth_failed", { replace: true });
       });
-  }, [navigate]);
+  }, [checkSession, navigate]);
 
   return (
     <div className="app-shell" style={{ maxWidth: 720 }}>

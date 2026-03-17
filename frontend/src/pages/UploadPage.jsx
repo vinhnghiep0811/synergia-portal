@@ -9,43 +9,30 @@ export function UploadPage() {
   const [uploadError, setUploadError] = useState("");
   const navigate = useNavigate();
 
-  // function handleUploadMock(files) {
-  //   setLastUploadedCount(files.length);
-  //   // Sau này có thể gọi API thật rồi navigate.
-  //   navigate("/papers");
-  // }
-
   async function handleUpload(files) {
     setUploadError("");
+    const fileList = Array.from(files ?? []);
+
+    if (!fileList.length) {
+      setUploadError("Không có file nào để upload.");
+      return;
+    }
+
+    const invalidFiles = fileList.filter(
+      (file) => file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")
+    );
+
+    if (invalidFiles.length > 0) {
+      setUploadError("Hệ thống chỉ chấp nhận định dạng file PDF.");
+      return;
+    }
+
     setIsUploading(true);
-
     try {
-      const fileList = Array.from(files ?? []);
-
-      if (!fileList.length) {
-        setUploadError("Không có file nào để upload.");
-        return false;
-      }
-
-      // Nếu muốn chỉ cho phép PDF ngay từ FE
-      const invalidFiles = fileList.filter(
-        (file) =>
-          file.type !== "application/pdf" &&
-          !file.name.toLowerCase().endsWith(".pdf")
-      );
-
-      if (invalidFiles.length > 0) {
-        setUploadError("Chỉ chấp nhận file PDF.");
-        return false;
-      }
-
-      const results = await uploadManyPapers(fileList);
-
-      setLastUploadedCount(results.length);
-      navigate("/papers");
+      await uploadManyPapers(fileList);
+      navigate("/papers", { state: { message: `Đã tải lên thành công ${fileList.length} tài liệu.` } });
     } catch (error) {
-      setUploadError(error.message || "Có lỗi xảy ra khi upload file.");
-      return false;
+      setUploadError(error.message);
     } finally {
       setIsUploading(false);
     }

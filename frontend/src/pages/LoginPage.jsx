@@ -1,15 +1,18 @@
 import { useMemo } from "react";
 import { useLocation } from "react-router-dom";
+import { API_BASE_URL } from "../utils/api";
 
 export function LoginPage() {
   const location = useLocation();
-  const error = useMemo(() => {
-    const params = new URLSearchParams(location.search);
-    return params.get("error");
-  }, [location.search]);
+  const error = new URLSearchParams(location.search).get("error");
 
-  const backendBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-  const backendLoginUrl = `${backendBase.replace(/\/$/, "")}/api/auth/google/login`;
+  const backendLoginUrl = `${API_BASE_URL}/api/auth/google/login`;
+
+  const from = location.state?.from?.pathname || "/";
+
+  const handleLoginClick = () => {
+    localStorage.setItem("redirect_after_login", from);
+  };
 
   return (
     <div className="app-shell" style={{ maxWidth: 720 }}>
@@ -42,8 +45,8 @@ export function LoginPage() {
           )}
 
           <div className="form-actions" style={{ justifyContent: "flex-start" }}>
-            <a className="btn btn--primary" href={backendLoginUrl}>
-              Đăng nhập với Googleeee (@hcmut.edu.vn)
+            <a className="btn btn--primary" href={backendLoginUrl} onClick={handleLoginClick}>
+              Đăng nhập với Google (@hcmut.edu.vn)
             </a>
           </div>
         </section>
