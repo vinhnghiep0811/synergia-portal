@@ -1,8 +1,8 @@
 from uuid import UUID
-
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from io import BytesIO
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status, HTTPException
 from sqlalchemy.orm import Session
-
+from fastapi.responses import StreamingResponse
 from app.core.database import get_db
 from app.schemas.paper import (
     PaperDetailResponse,
@@ -10,6 +10,7 @@ from app.schemas.paper import (
     PaperUploadResponse,
 )
 from app.services.paper_service import PaperService
+from app.services.storage_service import StorageService
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 
@@ -181,6 +182,7 @@ FE gọi endpoint này khi:
                         "parse_error": None,
                         "extracted_text_preview": None,
                         "detected_doi": None,
+                        "detected_fingerprint": None,
                         "detected_title": None,
                         "created_at": "2026-03-10T16:44:51.886708Z",
                         "updated_at": "2026-03-10T16:44:51.886708Z"
@@ -232,3 +234,99 @@ def get_paper_detail(
 ):
     service = PaperService(db)
     return service.get_paper_detail(paper_id)
+
+@router.get("/{paper_id}/file-url",
+    summary="Lấy URL truy cập file PDF",
+    description="""
+        API trả về presigned URL để client có thể mở hoặc tải file PDF.
+
+        ### Chức năng
+        - Lấy storage_path từ database
+        - Generate presigned URL từ MinIO
+        - Trả về URL để FE mở file
+
+        ### Lưu ý
+        - URL có thời hạn (mặc định 10 phút)
+        """,
+        )
+def get_paper_file_url(
+    paper_id: UUID,
+    db: Session = Depends(get_db),
+):
+    service = PaperService(db)
+    paper = service.get_paper_detail(paper_id)
+
+    storage_service = StorageService()
+    file_url = storage_service.generate_presigned_get_url(
+        paper.storage_path
+    )
+
+    return {
+        "file_url": file_url
+    }
+
+@router.get(
+    "/{paper_id}/file",
+    response_class=StreamingResponse,
+    summary="Xem file PDF của bài báo",
+    description="""
+API trả trực tiếp file PDF để client có thể mở lại trong browser.
+
+### Chức năng
+- Lấy storage_path từ database
+- Đọc file từ MinIO
+- Trả file PDF về cho client
+
+### Dùng cho FE
+FE có thể mở endpoint này bằng tab mới để xem PDF.
+""",
+    responses={
+        200: {
+            "description": "Trả file PDF thành công",
+        },
+        404: {
+            "description": "Không tìm thấy bài báo với paper_id tương ứng",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Paper not found"
+                    }
+                }
+            },
+        },
+        500: {
+            "description": "Không thể đọc file từ storage",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Cannot load file from storage"
+                    }
+                }
+            },
+        },
+    },
+)
+def get_paper_file(
+    paper_id: UUID,
+    db: Session = Depends(get_db),
+):
+    service = PaperService(db)
+    paper = service.get_paper_detail(paper_id)
+
+    storage_service = StorageService()
+
+    try:
+        file_bytes = storage_service.download_by_storage_path(paper.storage_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Cannot load file from storage: {str(e)}",
+        )
+
+    return StreamingResponse(
+        BytesIO(file_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{paper.original_filename}"'
+        },
+    )

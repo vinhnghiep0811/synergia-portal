@@ -78,6 +78,7 @@ def pdf_parse(paper_id: str) -> None:
         # --------------------------------
         doi = detect_doi(full_text)
         paper.detected_doi = doi
+        paper.detected_fingerprint = None
 
         # --------------------------------
         # 5. detect title
@@ -94,6 +95,7 @@ def pdf_parse(paper_id: str) -> None:
             fingerprint = None
         else:
             fingerprint = build_fingerprint(full_text, title)
+            paper.detected_fingerprint = fingerprint
             canonical_key = fingerprint
             canonical_type = "fingerprint"
 

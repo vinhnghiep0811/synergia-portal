@@ -42,6 +42,7 @@ class PaperRecord(Base):
 
     extracted_text_preview = Column(Text, nullable=True)
     detected_doi = Column(String(255), nullable=True)
+    detected_fingerprint = Column(String(255), nullable=True)
     detected_title = Column(Text, nullable=True)
 
     is_duplicate = Column(

@@ -30,13 +30,18 @@ function mapPaperDetail(detail) {
     parseError: detail.parse_error,
     extractedTextPreview: detail.extracted_text_preview,
     detectedDoi: detail.detected_doi,
+    detectedFingerprint: detail.detected_fingerprint,
     detectedTitle: detail.detected_title,
 
     // fallback
     authors: [],
     year: null,
     venue: null,
-    canonicalKey: detail.detected_doi || detail.canonical_document_id || "",
+    canonicalKey:
+      detail.detected_doi ||
+      detail.detected_fingerprint ||
+      detail.canonical_document_id ||
+      "",
     hasDeterministicParse: detail.parse_status === "success",
     hasCanonicalMetadata: !!detail.canonical_document_id,
     hasLLMExtraction: false,

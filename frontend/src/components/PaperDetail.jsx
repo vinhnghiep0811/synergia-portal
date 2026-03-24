@@ -109,6 +109,10 @@ export function PaperDetail({ paper }) {
               <dd>{paper.detectedDoi || "-"}</dd>
             </div>
             <div className="detail-list__item">
+              <dt>Detected fingerprint</dt>
+              <dd>{paper.detectedFingerprint || "-"}</dd>
+            </div>
+            <div className="detail-list__item">
               <dt>Parse status</dt>
               <dd>{parseDisplay}</dd>
             </div>

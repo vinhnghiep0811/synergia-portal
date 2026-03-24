@@ -64,3 +64,14 @@ export async function getPaperDetail(paperId) {
         throw new Error(message);
     }
 }
+
+/**
+ * Lấy URL để mở PDF của paper trên tab mới
+ * @param {string} paperId
+ * @returns {string}
+ */
+export function getPaperFileViewUrl(paperId) {
+    return apiClient.getUri({
+        url: `/api/papers/${paperId}/file`,
+    });
+}

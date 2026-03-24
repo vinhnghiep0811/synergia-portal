@@ -67,6 +67,9 @@ MINIO_SECRET_KEY = get_env("MINIO_SECRET_KEY", "minioadmin")
 MINIO_BUCKET = get_env("MINIO_BUCKET", "papers")
 MINIO_SECURE = get_env_bool("MINIO_SECURE", False)
 
+MINIO_PUBLIC_ENDPOINT = get_env("MINIO_PUBLIC_ENDPOINT", "localhost:9000")
+MINIO_PUBLIC_SECURE = get_env_bool("MINIO_PUBLIC_SECURE", False)
+
 # =========================
 # Upload constraints
 # =========================

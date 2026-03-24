@@ -1,9 +1,8 @@
 import axios from "axios";
 import { API_BASE_URL } from "../utils/api.js";
-// const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "/api";
 
 export const apiClient = axios.create({
-  baseURL: API_BASE_URL, // Dùng chung một nguồn hằng số
+  baseURL: API_BASE_URL, 
   withCredentials: true,
 });
 
@@ -22,8 +21,8 @@ apiClient.interceptors.response.use(
     if (
       error.response?.status !== 401 ||
       originalRequest._retry ||
-      originalRequest.url?.includes("/auth/refresh") ||
-      originalRequest.url?.includes("/auth/google")
+      originalRequest.url?.includes("/api/auth/refresh") ||
+      originalRequest.url?.includes("/api/auth/google")
     ) {
       return Promise.reject(error);
     }
@@ -37,7 +36,7 @@ apiClient.interceptors.response.use(
 
     isRefreshing = true;
     try {
-      await apiClient.post("/auth/refresh");
+      await apiClient.post("/api/auth/refresh");
       processQueue(null);
       return apiClient(originalRequest);
     } catch {

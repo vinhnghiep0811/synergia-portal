@@ -50,6 +50,7 @@ class PaperDetailResponse(BaseModel):
 
     extracted_text_preview: Optional[str] = None
     detected_doi: Optional[str] = None
+    detected_fingerprint: Optional[str] = None
     detected_title: Optional[str] = None
 
     is_duplicate: bool
