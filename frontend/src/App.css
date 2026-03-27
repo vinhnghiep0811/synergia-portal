@@ -569,6 +569,105 @@
   color: #111827;
 }
 
+.semantic-section {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 0.9rem;
+  background: #f8fafc;
+}
+
+.semantic-status-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.semantic-status-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.semantic-status-badge--enriched {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.semantic-status-badge--unmatched {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.semantic-status-badge--rate_limited {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.semantic-status-badge--pending,
+.semantic-status-badge--enriching {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.semantic-status-badge--not_linked,
+.semantic-status-badge--unknown {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.semantic-status-note {
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+.semantic-detail-list {
+  margin-top: 0.25rem;
+}
+
+.semantic-metadata {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed #d1d5db;
+}
+
+.semantic-metadata__title {
+  margin: 0 0 0.45rem;
+  font-size: 0.88rem;
+  color: #111827;
+}
+
+.semantic-abstract {
+  margin-top: 0.7rem;
+  padding: 0.7rem;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.semantic-abstract__title {
+  margin: 0 0 0.3rem;
+  font-size: 0.82rem;
+  color: #1f2937;
+}
+
+.semantic-abstract__content {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.semantic-empty-note {
+  margin: 0.7rem 0 0;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
 .timeline {
   margin: 0;
   padding: 0;

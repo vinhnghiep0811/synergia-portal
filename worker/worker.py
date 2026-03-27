@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 from pathlib import Path
 
 from redis import Redis
@@ -22,6 +23,13 @@ redis_conn = Redis.from_url(REDIS_URL)
 queue = Queue(QUEUE_NAME, connection=redis_conn)
 
 if __name__ == "__main__":
+    log_level_name = os.getenv("WORKER_LOG_LEVEL", "INFO").upper()
+    log_level = getattr(logging, log_level_name, logging.INFO)
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
     use_simple_worker = sys.platform == "darwin" and os.getenv("RQ_USE_FORK", "0") != "1"
     worker_cls = SimpleWorker if use_simple_worker else Worker
     worker = worker_cls([queue], connection=redis_conn)

@@ -8,6 +8,12 @@ import pdfplumber
 DOI_REGEX = re.compile(r"(?<![\d.])10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", re.IGNORECASE)
 
 
+def strip_nul_chars(text: Optional[str]) -> str:
+    if not text:
+        return ""
+    return text.replace("\x00", "")
+
+
 def extract_pdf_text_and_preview(
     file_path: str,
     max_pages: int = 3,
@@ -19,10 +25,11 @@ def extract_pdf_text_and_preview(
         pages = pdf.pages[:max_pages]
         for page in pages:
             page_text = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
+            page_text = strip_nul_chars(page_text)
             if page_text.strip():
                 texts.append(page_text)
 
-    full_text = "\n".join(texts).strip()
+    full_text = strip_nul_chars("\n".join(texts)).strip()
     preview = full_text[:preview_chars] if full_text else ""
 
     if not full_text:
@@ -32,12 +39,13 @@ def extract_pdf_text_and_preview(
 
 
 def normalize_doi(raw_doi: str) -> str:
-    doi = raw_doi.strip().lower()
+    doi = strip_nul_chars(raw_doi).strip().lower()
     doi = doi.rstrip(").,;:]}")
     return doi
 
 
 def detect_doi(text: str) -> Optional[str]:
+    text = strip_nul_chars(text)
     match = DOI_REGEX.search(text)
     if not match:
         return None
@@ -45,6 +53,7 @@ def detect_doi(text: str) -> Optional[str]:
 
 
 def clean_line(line: str) -> str:
+    line = strip_nul_chars(line)
     line = re.sub(r"\s+", " ", line).strip()
     return line
 
@@ -59,7 +68,7 @@ def detect_title(file_path: str) -> Optional[str]:
         max_size = max(w["size"] for w in words)
         
         title_words = [
-            w["text"] for w in words 
+            strip_nul_chars(w["text"]) for w in words 
             if w["size"] >= (max_size - 0.5) 
             and w["top"] < (first_page.height / 2)
         ]
@@ -67,11 +76,11 @@ def detect_title(file_path: str) -> Optional[str]:
         if not title_words:
             return None
             
-        title = " ".join(title_words)
+        title = strip_nul_chars(" ".join(title_words))
         return re.sub(r"\s+", " ", title).strip()
 
 def normalize_text_for_fingerprint(text: str) -> str:
-    text = text.lower()
+    text = strip_nul_chars(text).lower()
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"[^a-z0-9\s]", "", text)
     return text.strip()

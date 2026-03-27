@@ -7,6 +7,46 @@ function formatSizeMB(sizeMB) {
   return `${sizeMB.toFixed(1)} MB`;
 }
 
+function formatMatchConfidence(confidence) {
+  if (confidence == null || confidence === "") return "-";
+  const numeric = Number(confidence);
+  if (Number.isNaN(numeric)) return String(confidence);
+  return numeric.toFixed(3);
+}
+
+function getSemanticStatusLabel(status) {
+  switch (status) {
+    case "enriched":
+      return "Matched";
+    case "unmatched":
+      return "Unmatched";
+    case "rate_limited":
+      return "Rate limited";
+    case "pending":
+    case "enriching":
+      return "Dang enrich";
+    case "not_linked":
+      return "Chua link canonical";
+    default:
+      return "Khong ro";
+  }
+}
+
+function getMatchTypeLabel(matchStatus) {
+  switch (matchStatus) {
+    case "matched_by_doi":
+      return "Matched by DOI";
+    case "matched_by_title":
+      return "Matched by title";
+    case "unmatched":
+      return "Unmatched";
+    case "rate_limited":
+      return "Rate limited";
+    default:
+      return "-";
+  }
+}
+
 export function PaperDetail({ paper }) {
   if (!paper) {
     return (
@@ -43,6 +83,11 @@ export function PaperDetail({ paper }) {
       : "Chưa parse";
 
   const canonicalDisplay = paper.canonicalDocumentId ? "Đã liên kết" : "Chưa có";
+  const semanticStatus = getSemanticStatusLabel(paper.semanticScholarStatus);
+  const hasMatchedMetadata = paper.semanticScholarStatus === "enriched";
+  const authorsDisplay = paper.canonicalAuthors?.length
+    ? paper.canonicalAuthors.join(", ")
+    : "-";
 
   return (
     <section className="card detail-card">
@@ -130,6 +175,78 @@ export function PaperDetail({ paper }) {
             </div>
           </dl>
         </div>
+      </div>
+
+      <div className="detail-section semantic-section">
+        <h3 className="detail-section__title">Semantic Scholar enrichment</h3>
+        <div className="semantic-status-row">
+          <span
+            className={`semantic-status-badge semantic-status-badge--${paper.semanticScholarStatus || "unknown"}`}
+          >
+            {semanticStatus}
+          </span>
+          <span className="semantic-status-note">
+            {paper.canonicalDocumentId
+              ? "Trang thai enrich metadata cua canonical document"
+              : "Can parse/canonicalize xong de bat dau enrich"}
+          </span>
+        </div>
+
+        <dl className="detail-list semantic-detail-list">
+          <div className="detail-list__item">
+            <dt>Match type</dt>
+            <dd>{getMatchTypeLabel(paper.matchStatus)}</dd>
+          </div>
+          <div className="detail-list__item">
+            <dt>Match confidence</dt>
+            <dd>{formatMatchConfidence(paper.ssMatchConfidence)}</dd>
+          </div>
+          <div className="detail-list__item">
+            <dt>Metadata source</dt>
+            <dd>{paper.semanticSource || "-"}</dd>
+          </div>
+          <div className="detail-list__item">
+            <dt>Semantic Scholar paper ID</dt>
+            <dd>{paper.ssPaperId || "-"}</dd>
+          </div>
+        </dl>
+
+        {hasMatchedMetadata ? (
+          <div className="semantic-metadata">
+            <h4 className="semantic-metadata__title">Canonical metadata</h4>
+            <dl className="detail-list semantic-detail-list">
+              <div className="detail-list__item">
+                <dt>Title</dt>
+                <dd>{paper.canonicalTitle || paper.canonicalTitleCandidate || "-"}</dd>
+              </div>
+              <div className="detail-list__item">
+                <dt>Publication year</dt>
+                <dd>{paper.canonicalPublicationYear || "-"}</dd>
+              </div>
+              <div className="detail-list__item">
+                <dt>Venue</dt>
+                <dd>{paper.canonicalVenue || "-"}</dd>
+              </div>
+              <div className="detail-list__item">
+                <dt>Authors</dt>
+                <dd>{authorsDisplay}</dd>
+              </div>
+            </dl>
+
+            {paper.canonicalAbstract && (
+              <div className="semantic-abstract">
+                <h5 className="semantic-abstract__title">Abstract</h5>
+                <p className="semantic-abstract__content">{paper.canonicalAbstract}</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="semantic-empty-note">
+            {paper.semanticScholarStatus === "rate_limited"
+              ? "Semantic Scholar dang rate limit. Vui long thu lai sau 5 phut."
+              : "Chua co metadata canonical de hien thi. Neu status la Unmatched thi he thong khong tim duoc ket qua phu hop."}
+          </p>
+        )}
       </div>
 
       {paper.extractedTextPreview && (

@@ -1,4 +1,5 @@
 import logging
+import json
 import sys
 import time
 from uuid import UUID
@@ -13,12 +14,41 @@ from app.models.canonical_document import CanonicalDocument
 logger = logging.getLogger(__name__)
 
 SS_API_BASE = "https://api.semanticscholar.org/graph/v1"
+SS_LOG_BODY_MAX_CHARS = 4000
+SS_MAX_ATTEMPTS = 30
+SS_RETRY_DELAY_SECONDS = 2
 
 # Cac truong can lay tu Semantic Scholar
 SS_FIELDS = "title,authors,year,venue,abstract,externalIds"
 
 # Nguong similarity de chap nhan match khi tim qua title (0.0 - 1.0)
 TITLE_MATCH_THRESHOLD = 0.82
+
+
+def _truncate(text: str, max_chars: int = SS_LOG_BODY_MAX_CHARS) -> str:
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}...<truncated>"
+
+
+def _log_ss_request(method: str, url: str, params: dict, attempt: int) -> None:
+    logger.info(
+        "[SS HTTP REQUEST] method=%s url=%s params=%s attempt=%s",
+        method,
+        url,
+        json.dumps(params, ensure_ascii=True),
+        attempt,
+    )
+
+
+def _log_ss_response(method: str, url: str, status_code: int, body_text: str) -> None:
+    logger.info(
+        "[SS HTTP RESPONSE] method=%s url=%s status=%s body=%s",
+        method,
+        url,
+        status_code,
+        _truncate(body_text),
+    )
 
 
 # -------------------------------------------------------
@@ -54,67 +84,123 @@ def _title_similarity(a: str, b: str) -> float:
 # Helper: goi Semantic Scholar, co retry don gian
 # -------------------------------------------------------
 
-def _get_by_doi(doi: str) -> dict | None:
+def _get_by_doi(doi: str) -> tuple[dict | None, bool]:
     """
     Goi truc tiep theo DOI.
-    Tra ve dict du lieu paper hoac None neu khong tim thay.
+    Tra ve (paper_data, is_rate_limited_exhausted).
     """
     url = f"{SS_API_BASE}/paper/{doi}"
     params = {"fields": SS_FIELDS}
 
-    for attempt in range(3):
+    for attempt in range(SS_MAX_ATTEMPTS):
         try:
+            _log_ss_request("GET", url, params, attempt + 1)
             resp = httpx.get(url, params=params, timeout=15)
+            _log_ss_response("GET", str(resp.request.url), resp.status_code, resp.text)
             if resp.status_code == 200:
-                return resp.json()
+                return resp.json(), False
             if resp.status_code == 404:
                 logger.info(f"[SS] DOI not found: {doi}")
-                return None
+                return None, False
             if resp.status_code == 429:
-                wait = 2 ** attempt
-                logger.warning(f"[SS] Rate limited, waiting {wait}s")
-                time.sleep(wait)
+                if attempt < SS_MAX_ATTEMPTS - 1:
+                    logger.warning(
+                        "[SS] Rate limited for DOI %s, waiting %ss before retry (%s/%s)",
+                        doi,
+                        SS_RETRY_DELAY_SECONDS,
+                        attempt + 1,
+                        SS_MAX_ATTEMPTS,
+                    )
+                    time.sleep(SS_RETRY_DELAY_SECONDS)
+                    continue
+                logger.warning("[SS] Exhausted retries for DOI %s", doi)
+                return None, True
+
+            if 500 <= resp.status_code < 600:
+                if attempt < SS_MAX_ATTEMPTS - 1:
+                    logger.warning(
+                        "[SS] Server error status=%s for DOI %s, waiting %ss before retry (%s/%s)",
+                        resp.status_code,
+                        doi,
+                        SS_RETRY_DELAY_SECONDS,
+                        attempt + 1,
+                        SS_MAX_ATTEMPTS,
+                    )
+                    time.sleep(SS_RETRY_DELAY_SECONDS)
+                    continue
+                logger.warning("[SS] Exhausted retries for DOI %s with last status=%s", doi, resp.status_code)
                 continue
             logger.warning(f"[SS] Unexpected status {resp.status_code} for DOI {doi}")
-            return None
+            return None, False
         except httpx.RequestError as e:
-            logger.warning(f"[SS] Request error attempt {attempt + 1}: {e}")
-            if attempt < 2:
-                time.sleep(2)
+            logger.warning(
+                "[SS] Request error attempt %s method=GET url=%s params=%s error=%s",
+                attempt + 1,
+                url,
+                json.dumps(params, ensure_ascii=True),
+                e,
+            )
+            if attempt < SS_MAX_ATTEMPTS - 1:
+                time.sleep(SS_RETRY_DELAY_SECONDS)
+            else:
+                logger.warning("[SS] Exhausted request-error retries for DOI %s", doi)
 
-    return None
+    return None, False
 
 
-def _search_by_title(title: str) -> dict | None:
+def _search_by_title(title: str) -> tuple[dict | None, bool]:
     """
     Tim kiem theo title, lay ket qua dau tien co similarity >= nguong.
-    Tra ve dict du lieu paper hoac None neu khong du tin cay.
+    Tra ve (paper_data, is_rate_limited_exhausted).
     """
     url = f"{SS_API_BASE}/paper/search"
     params = {
         "query": title,
-        "limit": 5,
+        "limit": 10,
         "fields": SS_FIELDS,
     }
 
-    for attempt in range(3):
+    for attempt in range(SS_MAX_ATTEMPTS):
         try:
+            _log_ss_request("GET", url, params, attempt + 1)
             resp = httpx.get(url, params=params, timeout=15)
+            _log_ss_response("GET", str(resp.request.url), resp.status_code, resp.text)
             if resp.status_code == 200:
                 data = resp.json()
                 results = data.get("data", [])
+                logger.info(
+                    "[SS SEARCH] query_title=%s returned_results=%s",
+                    _truncate(title, 200),
+                    len(results),
+                )
                 if not results:
-                    return None
+                    return None, False
 
                 # So sanh similarity voi tung ket qua, lay cai tot nhat
                 best_paper = None
                 best_score = 0.0
-                for paper in results:
+                for idx, paper in enumerate(results, start=1):
                     ss_title = paper.get("title", "")
                     score = _title_similarity(title, ss_title)
+                    logger.info(
+                        "[SS SEARCH CANDIDATE] rank=%s score=%.4f threshold=%.2f paper_id=%s title=%s",
+                        idx,
+                        score,
+                        TITLE_MATCH_THRESHOLD,
+                        paper.get("paperId"),
+                        _truncate(ss_title, 220),
+                    )
                     if score > best_score:
                         best_score = score
                         best_paper = paper
+
+                logger.info(
+                    "[SS SEARCH BEST] best_score=%.4f threshold=%.2f best_paper_id=%s best_title=%s",
+                    best_score,
+                    TITLE_MATCH_THRESHOLD,
+                    (best_paper or {}).get("paperId"),
+                    _truncate((best_paper or {}).get("title", ""), 220),
+                )
 
                 if best_score >= TITLE_MATCH_THRESHOLD:
                     logger.info(
@@ -123,28 +209,63 @@ def _search_by_title(title: str) -> dict | None:
                     )
                     # Gan score vao de luu vao DB
                     best_paper["_match_score"] = best_score
-                    return best_paper
+                    return best_paper, False
                 else:
                     logger.info(
                         f"[SS] No confident match: best_score={best_score:.2f} for '{title[:60]}'"
                     )
-                    return None
+                    return None, False
 
             if resp.status_code == 429:
-                wait = 2 ** attempt
-                logger.warning(f"[SS] Rate limited, waiting {wait}s")
-                time.sleep(wait)
+                if attempt < SS_MAX_ATTEMPTS - 1:
+                    logger.warning(
+                        "[SS] Rate limited for title query '%s', waiting %ss before retry (%s/%s)",
+                        title[:60],
+                        SS_RETRY_DELAY_SECONDS,
+                        attempt + 1,
+                        SS_MAX_ATTEMPTS,
+                    )
+                    time.sleep(SS_RETRY_DELAY_SECONDS)
+                    continue
+                logger.warning("[SS] Exhausted retries for title query '%s'", title[:60])
+                return None, True
+
+            if 500 <= resp.status_code < 600:
+                if attempt < SS_MAX_ATTEMPTS - 1:
+                    logger.warning(
+                        "[SS] Server error status=%s for title query '%s', waiting %ss before retry (%s/%s)",
+                        resp.status_code,
+                        title[:60],
+                        SS_RETRY_DELAY_SECONDS,
+                        attempt + 1,
+                        SS_MAX_ATTEMPTS,
+                    )
+                    time.sleep(SS_RETRY_DELAY_SECONDS)
+                    continue
+                logger.warning(
+                    "[SS] Exhausted retries for title query '%s' with last status=%s",
+                    title[:60],
+                    resp.status_code,
+                )
                 continue
 
             logger.warning(f"[SS] Search status {resp.status_code} for title '{title[:60]}'")
-            return None
+            return None, False
 
         except httpx.RequestError as e:
-            logger.warning(f"[SS] Request error attempt {attempt + 1}: {e}")
-            if attempt < 2:
-                time.sleep(2)
+            logger.warning(
+                "[SS] Request error attempt %s method=GET url=%s params=%s error=%s",
+                attempt + 1,
+                url,
+                json.dumps(params, ensure_ascii=True),
+                e,
+            )
+            if attempt < SS_MAX_ATTEMPTS - 1:
+                time.sleep(SS_RETRY_DELAY_SECONDS)
+            else:
+                logger.warning("[SS] Exhausted request-error retries for title query '%s'", title[:60])
 
-    return None
+    return None, False
 
 
 # -------------------------------------------------------
@@ -216,16 +337,18 @@ def semantic_scholar_enrich(canonical_document_id: str) -> None:
 
         paper_data = None
         match_type = None
+        is_rate_limited = False
 
         # Uu tien DOI
         if canonical.doi:
-            paper_data = _get_by_doi(canonical.doi)
+            paper_data, is_rate_limited = _get_by_doi(canonical.doi)
             if paper_data:
                 match_type = "matched_by_doi"
 
         # Fallback: tim theo title_candidate
         if paper_data is None and canonical.title_candidate:
-            paper_data = _search_by_title(canonical.title_candidate)
+            paper_data, title_rate_limited = _search_by_title(canonical.title_candidate)
+            is_rate_limited = is_rate_limited or title_rate_limited
             if paper_data:
                 match_type = "matched_by_title"
 
@@ -233,6 +356,11 @@ def semantic_scholar_enrich(canonical_document_id: str) -> None:
         if paper_data and match_type:
             _apply_ss_data(canonical, paper_data, match_type)
             logger.info(f"[SS enrich] Enriched: {cid} via {match_type}")
+        elif is_rate_limited:
+            canonical.enrichment_status = "rate_limited"
+            canonical.match_status = "rate_limited"
+            canonical.metadata_source = "semantic_scholar"
+            logger.info("[SS enrich] Rate limited after %s attempts. Please retry after 5 minutes: %s", SS_MAX_ATTEMPTS, cid)
         else:
             canonical.enrichment_status = "unmatched"
             canonical.match_status = "unmatched"
