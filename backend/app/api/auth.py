@@ -46,10 +46,17 @@ async def get_current_user(
 # --- ROUTES ---
 
 @router.get("/google/login", summary="Khởi tạo đăng nhập Google")
-async def google_login(service: AuthService = Depends(get_auth_service)):
+async def google_login(
+    oauth_state: str = Cookie(None, alias="oauth_state"),
+    service: AuthService = Depends(get_auth_service),
+):
     # 1. Gọi service để kiểm tra config và lấy dữ liệu (state, url)
     service.require_config()
-    state, login_url = service.generate_google_login_data()
+    if oauth_state:
+        state = oauth_state
+        login_url = service.build_google_login_url(state)
+    else:
+        state, login_url = service.generate_google_login_data()
 
     # 2. Tạo RedirectResponse với status code 307 (Yêu cầu của bạn)
     response = RedirectResponse(
@@ -78,8 +85,12 @@ async def google_callback(
     service: AuthService = Depends(get_auth_service)
 ):
     service.require_config()
-    if not code or state != oauth_state:
-        raise HTTPException(status_code=400, detail="Invalid state or missing code.")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code.")
+    if not state or not oauth_state:
+        raise HTTPException(status_code=400, detail="Missing OAuth state.")
+    if not secrets.compare_digest(state, oauth_state):
+        raise HTTPException(status_code=400, detail="Invalid OAuth state.")
 
     info = await service.get_google_user_info(code, GOOGLE_REDIRECT_URI)
     user = service.sync_user(info)

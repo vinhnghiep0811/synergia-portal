@@ -1,5 +1,6 @@
 from fastapi import APIRouter, status
 from app.api.papers import router as papers_router
+from app.api.canonical_documents import router as canonical_documents_router 
 
 router = APIRouter()
 
@@ -36,3 +37,4 @@ def health():
     return {"status": "ok"}
 
 router.include_router(papers_router)
+router.include_router(canonical_documents_router) 

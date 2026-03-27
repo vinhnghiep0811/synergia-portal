@@ -8,9 +8,9 @@ def clear_minio() -> None:
     storage = StorageService()
     storage.ensure_bucket_exists()
 
-    objects = storage.client.list_objects(storage.bucket_name, recursive=True)
+    objects = storage.internal_client.list_objects(storage.bucket_name, recursive=True)
     for obj in objects:
-        storage.client.remove_object(storage.bucket_name, obj.object_name)
+        storage.internal_client.remove_object(storage.bucket_name, obj.object_name)
 
     print("Cleared MinIO objects")
 

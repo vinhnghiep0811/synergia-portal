@@ -110,11 +110,13 @@ export function PaperDetailPage() {
   useEffect(() => {
     if (!paperId || !paper) return;
 
-    // Only poll if paper is still processing
-    const isProcessing = paper.status === 'parse_queued' || 
-                       paper.status === 'canonicalized' || 
-                       paper.status === 'pending' ||
-                       paper.parseStatus === 'processing';
+    // Only poll while parse pipeline is still running
+    const isProcessing =
+      paper.status === "parse_queued" ||
+      paper.status === "pending" ||
+      paper.status === "parsing" ||
+      paper.parseStatus === "queued" ||
+      paper.parseStatus === "processing";
 
     if (!isProcessing) return;
 
