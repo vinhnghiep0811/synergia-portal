@@ -24,7 +24,7 @@ function getSemanticStatusLabel(status) {
       return "Rate limited";
     case "pending":
     case "enriching":
-      return "Dang enrich";
+      return "Enriching";
     case "not_linked":
       return "Chua link canonical";
     default:
