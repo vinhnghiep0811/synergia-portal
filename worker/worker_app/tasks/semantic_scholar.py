@@ -1,6 +1,8 @@
 import logging
 import json
+import os
 import sys
+import threading
 import time
 from uuid import UUID
 
@@ -15,8 +17,13 @@ logger = logging.getLogger(__name__)
 
 SS_API_BASE = "https://api.semanticscholar.org/graph/v1"
 SS_LOG_BODY_MAX_CHARS = 4000
-SS_MAX_ATTEMPTS = 30
-SS_RETRY_DELAY_SECONDS = 2
+SS_MAX_ATTEMPTS = max(1, int(os.getenv("SEMANTIC_SCHOLAR_MAX_ATTEMPTS", "1")))
+SS_RETRY_DELAY_SECONDS = max(1.0, float(os.getenv("SEMANTIC_SCHOLAR_RETRY_DELAY_SECONDS", "60")))
+SS_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
+SS_MIN_INTERVAL_SECONDS = max(1.0, float(os.getenv("SEMANTIC_SCHOLAR_MIN_INTERVAL_SECONDS", "1.05")))
+
+_ss_rate_lock = threading.Lock()
+_last_ss_request_ts = 0.0
 
 # Cac truong can lay tu Semantic Scholar
 SS_FIELDS = "title,authors,year,venue,abstract,externalIds"
@@ -33,11 +40,12 @@ def _truncate(text: str, max_chars: int = SS_LOG_BODY_MAX_CHARS) -> str:
 
 def _log_ss_request(method: str, url: str, params: dict, attempt: int) -> None:
     logger.info(
-        "[SS HTTP REQUEST] method=%s url=%s params=%s attempt=%s",
+        "[SS HTTP REQUEST] method=%s url=%s params=%s attempt=%s has_api_key=%s",
         method,
         url,
         json.dumps(params, ensure_ascii=True),
         attempt,
+        bool(SS_API_KEY),
     )
 
 
@@ -49,6 +57,26 @@ def _log_ss_response(method: str, url: str, status_code: int, body_text: str) ->
         status_code,
         _truncate(body_text),
     )
+
+
+def _wait_for_rate_slot() -> None:
+    """Enforce minimum gap between Semantic Scholar requests in this worker process."""
+    global _last_ss_request_ts
+
+    with _ss_rate_lock:
+        now = time.monotonic()
+        elapsed = now - _last_ss_request_ts
+        if elapsed < SS_MIN_INTERVAL_SECONDS:
+            wait = SS_MIN_INTERVAL_SECONDS - elapsed
+            logger.info("[SS RATE] Waiting %.2fs to respect min interval %.2fs", wait, SS_MIN_INTERVAL_SECONDS)
+            time.sleep(wait)
+        _last_ss_request_ts = time.monotonic()
+
+
+def _ss_headers() -> dict:
+    if not SS_API_KEY:
+        return {}
+    return {"x-api-key": SS_API_KEY}
 
 
 # -------------------------------------------------------
@@ -91,11 +119,13 @@ def _get_by_doi(doi: str) -> tuple[dict | None, bool]:
     """
     url = f"{SS_API_BASE}/paper/{doi}"
     params = {"fields": SS_FIELDS}
+    headers = _ss_headers()
 
     for attempt in range(SS_MAX_ATTEMPTS):
         try:
+            _wait_for_rate_slot()
             _log_ss_request("GET", url, params, attempt + 1)
-            resp = httpx.get(url, params=params, timeout=15)
+            resp = httpx.get(url, params=params, headers=headers, timeout=15)
             _log_ss_response("GET", str(resp.request.url), resp.status_code, resp.text)
             if resp.status_code == 200:
                 return resp.json(), False
@@ -156,14 +186,16 @@ def _search_by_title(title: str) -> tuple[dict | None, bool]:
     url = f"{SS_API_BASE}/paper/search"
     params = {
         "query": title,
-        "limit": 10,
+        "limit": 5,
         "fields": SS_FIELDS,
     }
+    headers = _ss_headers()
 
     for attempt in range(SS_MAX_ATTEMPTS):
         try:
+            _wait_for_rate_slot()
             _log_ss_request("GET", url, params, attempt + 1)
-            resp = httpx.get(url, params=params, timeout=15)
+            resp = httpx.get(url, params=params, headers=headers, timeout=15)
             _log_ss_response("GET", str(resp.request.url), resp.status_code, resp.text)
             if resp.status_code == 200:
                 data = resp.json()
@@ -327,6 +359,9 @@ def semantic_scholar_enrich(canonical_document_id: str) -> None:
         if not canonical:
             logger.error(f"[SS enrich] CanonicalDocument not found: {cid}")
             return
+
+        if not SS_API_KEY:
+            logger.warning("[SS enrich] SEMANTIC_SCHOLAR_API_KEY is not set; requests may be heavily rate-limited.")
 
         # Neu da duoc enrich roi thi bo qua (canonical caching)
         if canonical.enrichment_status == "enriched":

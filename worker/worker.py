@@ -3,12 +3,16 @@ import sys
 import logging
 from pathlib import Path
 
+from dotenv import load_dotenv
 from redis import Redis
 from rq import Worker, Queue, SimpleWorker
 
 WORKER_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = WORKER_DIR.parent
 BACKEND_DIR = PROJECT_ROOT / "backend"
+
+load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(BACKEND_DIR / ".env")
 
 for path in (str(WORKER_DIR), str(BACKEND_DIR)):
     if path not in sys.path:
