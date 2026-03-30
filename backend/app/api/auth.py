@@ -5,6 +5,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from uuid import UUID
 
+from app.core.security import get_current_user
 from app.core.database import get_db
 from app.repositories.user_repository import UserRepository
 from app.services.auth_service import AuthService
@@ -21,27 +22,27 @@ def get_auth_service(db: Session = Depends(get_db)):
     return AuthService(UserRepository(db))
 
 # --- DEPENDENCY: GET_CURRENT_USER ---
-async def get_current_user(
-    service: AuthService = Depends(get_auth_service),
-    authorization: str = Header(None, alias="Authorization"),
-    access_token_cookie: str = Cookie(None, alias="access_token"),
-) -> User:
-    token = None
-    if authorization and authorization.lower().startswith("bearer "):
-        token = authorization.split(" ", 1)[1].strip()
-    elif access_token_cookie:
-        token = access_token_cookie
+# async def get_current_user(
+#     service: AuthService = Depends(get_auth_service),
+#     authorization: str = Header(None, alias="Authorization"),
+#     access_token_cookie: str = Cookie(None, alias="access_token"),
+# ) -> User:
+#     token = None
+#     if authorization and authorization.lower().startswith("bearer "):
+#         token = authorization.split(" ", 1)[1].strip()
+#     elif access_token_cookie:
+#         token = access_token_cookie
 
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing token.")
+#     if not token:
+#         raise HTTPException(status_code=401, detail="Missing token.")
     
-    payload = service.decode_token(token, JWT_SECRET_KEY)
-    user_id = UUID(str(payload.get("sub")))
-    user = service.user_repo.get_by_id(user_id)
+#     payload = service.decode_token(token, JWT_SECRET_KEY)
+#     user_id = UUID(str(payload.get("sub")))
+#     user = service.user_repo.get_by_id(user_id)
     
-    if not user or not user.is_active:
-        raise HTTPException(status_code=401, detail="User not found or inactive.")
-    return user
+#     if not user or not user.is_active:
+#         raise HTTPException(status_code=401, detail="User not found or inactive.")
+#     return user
 
 # --- ROUTES ---
 
