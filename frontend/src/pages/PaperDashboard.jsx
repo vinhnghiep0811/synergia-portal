@@ -1,7 +1,8 @@
 import { useMemo, useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { PaperList } from "../components/PaperList.jsx";
-import { getPapers } from "../services/paperApi.js";
+import { getPapers, getPaperDetail } from "../services/paperApi.js";
+import { AppHeader } from "../components/AppHeader.jsx";
 
 const MOCK_PAPERS = [
   {
@@ -77,6 +78,9 @@ function mapPaperListItem(item) {
     year: null,
     venue: null,
     canonicalKey: "",
+    detectedTitle: null, // Will be fetched later for processed papers
+    detectedDoi: null, // Will be fetched later for processed papers
+    detectedFingerprint: null, // Will be fetched later for processed papers
   };
 }
 
@@ -149,8 +153,58 @@ export function PaperDashboard() {
 
         if (!isMounted) return;
 
-        const mapped = data.map(mapPaperListItem);
-        setPapers(mapped);
+        const mappedPapers = data.map(mapPaperListItem);
+
+        // Fetch details for processed papers to get detected_title
+        const processedPapers = mappedPapers.filter(
+          (p) => p.status === "processed" || p.status === "duplicate_detected"
+        );
+
+        if (processedPapers.length > 0) {
+          const detailedPapers = await Promise.all(
+            processedPapers.map(async (paper) => {
+              try {
+                const detail = await getPaperDetail(paper.id);
+                console.log(`Full API response for paper ${paper.id}:`, detail);
+                console.log(`Available DOI fields:`, {
+                  detected_doi: detail.detected_doi,
+                  doi: detail.doi,
+                  canonical_doi: detail.canonical_doi,
+                  metadata_doi: detail.metadata_doi,
+                  paper_doi: detail.paper_doi,
+                  allKeys: Object.keys(detail)
+                });
+                return {
+                  ...paper,
+                  detectedTitle: detail.detected_title,
+                  title: detail.detected_title || paper.title,
+                  detectedDoi: detail.detected_doi || detail.doi || detail.canonical_doi || detail.metadata_doi || detail.paper_doi,
+                  detectedFingerprint: detail.detected_fingerprint,
+                  canonicalKey: detail.detected_doi || detail.detected_fingerprint || detail.canonical_document_id || "",
+                  authors: detail.authors || [],
+                  year: detail.year || null,
+                  venue: detail.venue || null,
+                };
+              } catch (error) {
+                // If detail fetch fails, keep original
+                console.warn(`Failed to fetch details for paper ${paper.id}:`, error);
+                return paper;
+              }
+            })
+          );
+
+          // Merge processed papers with their details
+          const finalPapers = mappedPapers.map((paper) => {
+            const detailed = detailedPapers.find((d) => d.id === paper.id);
+            return detailed || paper;
+          });
+
+          if (!isMounted) return;
+          setPapers(finalPapers);
+        } else {
+          if (!isMounted) return;
+          setPapers(mappedPapers);
+        }
       } catch (error) {
         if (!isMounted) return;
         setListError(error.message || "Không thể tải danh sách paper");
@@ -170,26 +224,10 @@ export function PaperDashboard() {
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <div className="app-header__main">
-          <button
-            type="button"
-            className="app-logo"
-            onClick={() => navigate("/")}
-          >
-            SY
-          </button>
-          <div className="app-header__titles">
-            <h1 className="app-title">Danh sách tài liệu</h1>
-            <p className="app-subtitle">
-              Xem các paper đã upload và trạng thái xử lý.
-            </p>
-          </div>
-        </div>
-        <div className="app-header__meta">
-          <span className="app-tag">Single workspace · VM on-prem</span>
-        </div>
-      </header>
+      <AppHeader 
+        title="Danh sách tài liệu"
+        subtitle="Xem các paper đã upload và trạng thái xử lý."
+      />
 
       <main className="app-main app-main--papers">
         <div className="app-main__full">
