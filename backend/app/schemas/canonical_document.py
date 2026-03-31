@@ -34,7 +34,6 @@ class CanonicalDocumentResponse(BaseModel):
 
     created_at: datetime
     updated_at: datetime
-
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -52,5 +51,6 @@ class CanonicalDocumentListItemResponse(BaseModel):
     match_status: Optional[str] = None
     metadata_source: Optional[str] = None
     created_at: datetime
+    paper_count: int
 
     model_config = ConfigDict(from_attributes=True)

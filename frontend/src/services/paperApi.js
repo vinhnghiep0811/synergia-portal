@@ -128,3 +128,8 @@ export function getPaperFileViewUrl(paperId) {
         url: `/api/papers/${paperId}/file`,
     });
 }
+
+export async function getPapersByCanonicalId(canonicalId) {
+  const res = await apiRequest(`/canonical-documents/${canonicalId}/papers`);
+  return res;
+}

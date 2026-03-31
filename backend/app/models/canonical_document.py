@@ -44,4 +44,4 @@ class CanonicalDocument(Base):
         nullable=False,
     )
 
-    paper_records = relationship("PaperRecord", back_populates="canonical_document")
+    papers = relationship("PaperRecord", back_populates="canonical_document", lazy="selectin")
