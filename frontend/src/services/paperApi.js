@@ -86,6 +86,39 @@ export async function getCanonicalDocumentByPaper(paperId) {
 }
 
 /**
+ * Lấy danh sách tất cả canonical documents
+ * @param {number} [skip=0]
+ * @param {number} [limit=50]
+ * @returns {Promise<Array>}
+ */
+export async function getCanonicalDocuments(skip = 0, limit = 50) {
+    try {
+        const response = await apiClient.get("/api/canonical-documents", {
+            params: { skip, limit }
+        });
+        return response.data;
+    } catch (error) {
+        const message = await parseApiError(error);
+        throw new Error(message);
+    }
+}
+
+/**
+ * Lấy chi tiết canonical document theo id
+ * @param {string} canonicalId
+ * @returns {Promise<Object>}
+ */
+export async function getCanonicalDocumentDetail(canonicalId) {
+    try {
+        const response = await apiClient.get(`/api/canonical-documents/${canonicalId}`);
+        return response.data;
+    } catch (error) {
+        const message = await parseApiError(error);
+        throw new Error(message);
+    }
+}
+
+/**
  * Lấy URL để mở PDF của paper trên tab mới
  * @param {string} paperId
  * @returns {string}

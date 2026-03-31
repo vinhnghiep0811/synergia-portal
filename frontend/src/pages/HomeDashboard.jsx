@@ -1,49 +1,33 @@
 import { useNavigate } from "react-router-dom";
+import { AppHeader } from "../components/AppHeader.jsx";
 
 export function HomeDashboard() {
   const navigate = useNavigate();
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <div className="app-header__main">
-          <button
-            type="button"
-            className="app-logo"
-            onClick={() => navigate("/")}
-          >
-            SY
-          </button>
-          <div className="app-header__titles">
-            <h1 className="app-title">Synergia Portal</h1>
-            <p className="app-subtitle">
-              Cổng quản lý và chia sẻ tài liệu nghiên cứu cho nhóm.
-            </p>
-          </div>
-        </div>
-        <div className="app-header__meta">
-          <span className="app-tag">Single workspace · VM on-prem</span>
-        </div>
-      </header>
+      <AppHeader 
+        title="Synergia Portal"
+        subtitle="Cổng quản lý và chia sẻ tài liệu nghiên cứu cho nhóm."
+      />
 
       <main className="app-main app-main--home">
         <div className="app-main__left">
           <section
-            className="card upload-card home-card"
+            className="card list-card home-card"
             style={{ cursor: "pointer" }}
-            onClick={() => navigate("/upload")}
+            onClick={() => navigate("/canonical")}
           >
             <header className="card__header">
               <div>
-                <h2 className="card__title">Upload PDF</h2>
+                <h2 className="card__title">Canonical Documents</h2>
                 <p className="card__subtitle">
-                  Tải lên paper hoặc báo cáo nghiên cứu mới vào kho tài liệu.
+                  Quản lý và xem các tài liệu canonical đã được trích xuất.
                 </p>
               </div>
             </header>
             <p style={{ fontSize: "0.85rem", color: "#4b5563" }}>
-              Chuyển đến màn hình upload chi tiết với form chọn file, thông tin
-              người upload và workspace.
+              Xem danh sách các canonical documents, DOI, và số lượng papers liên quan.
             </p>
           </section>
 

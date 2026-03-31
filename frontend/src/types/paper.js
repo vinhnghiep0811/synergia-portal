@@ -38,6 +38,10 @@
  * @property {string | null} parse_error
  * @property {string | null} extracted_text_preview
  * @property {string | null} detected_doi
+ * @property {string | null} doi
+ * @property {string | null} canonical_doi
+ * @property {string | null} metadata_doi
+ * @property {string | null} paper_doi
  * @property {string | null} detected_fingerprint
  * @property {string | null} detected_title
  * @property {string} created_at

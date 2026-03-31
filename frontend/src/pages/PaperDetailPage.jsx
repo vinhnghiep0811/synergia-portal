@@ -5,6 +5,7 @@ import {
   getCanonicalDocumentByPaper,
   getPaperDetail,
 } from "../services/paperApi.js";
+import { AppHeader } from "../components/AppHeader.jsx";
 
 function bytesToMB(bytes) {
   if (!bytes || Number.isNaN(bytes)) return 0;
@@ -168,32 +169,20 @@ export function PaperDetailPage() {
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <div className="app-header__main">
-          <button
-            type="button"
-            className="app-logo"
-            onClick={() => navigate("/")}
-          >
-            SY
-          </button>
-          <div className="app-header__titles">
-            <h1 className="app-title">Chi tiết tài liệu</h1>
-            <p className="app-subtitle">
-              Xem thông tin chi tiết của tài liệu đã chọn.
-            </p>
-          </div>
-        </div>
-        <div className="app-header__meta">
+      <AppHeader 
+        title="Chi tiết tài liệu"
+        subtitle="Xem thông tin chi tiết của tài liệu đã chọn."
+        showUploadButton={true}
+        extraAction={
           <button
             className="btn btn--secondary"
             onClick={() => navigate("/papers")}
+            style={{ marginRight: "1rem" }}
           >
             ← Quay lại danh sách
           </button>
-          <span className="app-tag">Single workspace · VM on-prem</span>
-        </div>
-      </header>
+        }
+      />
 
       <main className="app-main app-main--papers">
         <div className="app-main__full">

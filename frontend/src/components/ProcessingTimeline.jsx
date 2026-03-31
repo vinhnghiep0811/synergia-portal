@@ -54,22 +54,22 @@ export function ProcessingTimeline({ paper }) {
     }
   }, [paper]);
 
-  useEffect(() => {
-    if (!isProcessing) return;
+  // useEffect(() => {
+  //   if (!isProcessing) return;
 
-    const interval = setInterval(() => {
-      setCurrentStep((prev) => {
-        const nextStep = prev + 1;
-        if (nextStep >= steps.length) {
-          setIsProcessing(false);
-          return prev;
-        }
-        return nextStep;
-      });
-    }, 3000); // Simulate processing time
+  //   const interval = setInterval(() => {
+  //     setCurrentStep((prev) => {
+  //       const nextStep = prev + 1;
+  //       if (nextStep >= steps.length) {
+  //         setIsProcessing(false);
+  //         return prev;
+  //       }
+  //       return nextStep;
+  //     });
+  //   }, 3000); // Simulate processing time
 
-    return () => clearInterval(interval);
-  }, [isProcessing, steps.length]);
+  //   return () => clearInterval(interval);
+  // }, [isProcessing, steps.length]);
 
   return (
     <div className="detail-section">
