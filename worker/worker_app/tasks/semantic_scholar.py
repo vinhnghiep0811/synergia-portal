@@ -5,13 +5,14 @@ import sys
 import threading
 import time
 from uuid import UUID
-
+from difflib import SequenceMatcher
 import httpx
 
 sys.path.append("/backend")
 
 from app.core.database import SessionLocal
 from app.models.canonical_document import CanonicalDocument
+from app.models.paper_record import PaperRecord
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,24 @@ SS_FIELDS = "title,authors,year,venue,abstract,externalIds"
 # Nguong similarity de chap nhan match khi tim qua title (0.0 - 1.0)
 TITLE_MATCH_THRESHOLD = 0.82
 
+def _sync_title_to_papers(db, canonical: CanonicalDocument, ss_title: str) -> None:
+    """
+    Đồng bộ title chuẩn từ Semantic Scholar xuống các PaperRecord
+    đang trỏ tới canonical này.
+    """
+    if not ss_title:
+        return
+
+    papers = (
+        db.query(PaperRecord)
+        .filter(PaperRecord.canonical_document_id == canonical.id)
+        .all()
+    )
+
+    for paper in papers:
+        # chỉ ghi đè khi paper chưa có title hoặc đang giữ title detect tạm
+        if not paper.detected_title or paper.detected_title.strip() == "" or paper.detected_title == canonical.title_candidate:
+            paper.detected_title = ss_title
 
 def _truncate(text: str, max_chars: int = SS_LOG_BODY_MAX_CHARS) -> str:
     if len(text) <= max_chars:
@@ -86,6 +105,7 @@ def _ss_headers() -> dict:
 def _normalize_title(title: str) -> str:
     """Chuyen ve lowercase, bo dau cau de so sanh."""
     import re
+    title = re.sub(r"([a-z])([A-Z])", r"\1 \2", title)
     title = title.lower().strip()
     title = re.sub(r"[^a-z0-9\s]", "", title)
     title = re.sub(r"\s+", " ", title)
@@ -97,15 +117,19 @@ def _title_similarity(a: str, b: str) -> float:
     Tinh he so Jaccard similarity giua 2 chuoi dua tren tap tu.
     Khong can thu vien ngoai, du dung cho viec so sanh title paper.
     """
-    if not a or not b:
+    na = _normalize_title(a)
+    nb = _normalize_title(b)
+    if not na or not nb:
         return 0.0
-    set_a = set(_normalize_title(a).split())
-    set_b = set(_normalize_title(b).split())
-    if not set_a or not set_b:
-        return 0.0
-    intersection = set_a & set_b
-    union = set_a | set_b
-    return len(intersection) / len(union)
+    if na.replace(" ", "") == nb.replace(" ", ""):
+        return 1.0
+    set_a = set(na.split())
+    set_b = set(nb.split())
+    
+    token_score = len(set_a & set_b) / len(set_a | set_b) if (set_a and set_b) else 0.0
+    seq_score = SequenceMatcher(None, na, nb).ratio()
+
+    return 0.6 * seq_score + 0.4 * token_score
 
 
 # -------------------------------------------------------
@@ -390,6 +414,10 @@ def semantic_scholar_enrich(canonical_document_id: str) -> None:
         # Ap dung ket qua
         if paper_data and match_type:
             _apply_ss_data(canonical, paper_data, match_type)
+
+            ss_title = paper_data.get("title")
+            _sync_title_to_papers(db, canonical, ss_title)
+
             logger.info(f"[SS enrich] Enriched: {cid} via {match_type}")
         elif is_rate_limited:
             canonical.enrichment_status = "rate_limited"

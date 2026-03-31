@@ -83,7 +83,10 @@ def pdf_parse(paper_id: str) -> None:
         # --------------------------------
         # 5. detect title
         # --------------------------------
+        # logger.warning("CALLING detect_title with %s", tmp_path)
+
         title = detect_title(tmp_path)
+        # logger.warning("DETECTED TITLE = %s", title)
         paper.detected_title = title
 
          # --------------------------------
