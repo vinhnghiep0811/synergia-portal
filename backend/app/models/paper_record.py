@@ -60,7 +60,7 @@ class PaperRecord(Base):
         nullable=False,
     )
 
-    canonical_document = relationship("CanonicalDocument", back_populates="paper_records")
+    canonical_document = relationship("CanonicalDocument", back_populates="papers")
     duplicate_of_paper = relationship(
         "PaperRecord",
         remote_side=[id],

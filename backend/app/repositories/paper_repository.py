@@ -2,7 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
-
+from typing import List
 from app.models.paper_record import PaperRecord
 
 
@@ -23,11 +23,19 @@ class PaperRepository:
             .first()
         )
 
-    def list(self, skip: int = 0, limit: int = 20) -> list[PaperRecord]:
+    def list_papers(self, skip: int = 0, limit: int = 20) -> list[PaperRecord]:
         return (
             self.db.query(PaperRecord)
             .order_by(PaperRecord.created_at.desc())
             .offset(skip)
             .limit(limit)
+            .all()
+        )
+    
+    def get_papers_by_canonical_id(self, canonical_id: UUID) -> list[PaperRecord]:
+        return (
+            self.db.query(PaperRecord)
+            .filter(PaperRecord.canonical_document_id == canonical_id)
+            .order_by(PaperRecord.created_at.asc())
             .all()
         )

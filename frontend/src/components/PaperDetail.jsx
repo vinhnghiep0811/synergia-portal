@@ -47,6 +47,12 @@ function getMatchTypeLabel(matchStatus) {
   }
 }
 
+function formatSemanticSource(source) {
+  if (!source) return "-";
+  if (source === "semantic_scholar") return "Semantic Scholar";
+  return source;
+}
+
 export function PaperDetail({ paper }) {
   if (!paper) {
     return (
@@ -187,8 +193,8 @@ export function PaperDetail({ paper }) {
           </span>
           <span className="semantic-status-note">
             {paper.canonicalDocumentId
-              ? "Trang thai enrich metadata cua canonical document"
-              : "Can parse/canonicalize xong de bat dau enrich"}
+              ? "Canonical document enrich metadata status"
+              : "Parsing and canonicalization completed. Ready to start enrichment."}
           </span>
         </div>
 
@@ -203,7 +209,7 @@ export function PaperDetail({ paper }) {
           </div>
           <div className="detail-list__item">
             <dt>Metadata source</dt>
-            <dd>{paper.semanticSource || "-"}</dd>
+            <dd>{formatSemanticSource(paper.semanticSource)}</dd>
           </div>
           <div className="detail-list__item">
             <dt>Semantic Scholar paper ID</dt>

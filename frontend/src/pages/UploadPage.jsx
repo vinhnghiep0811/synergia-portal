@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { UploadPanel } from "../components/UploadPanel.jsx";
 import { uploadManyPapers } from "../services/paperApi";
+import { AppHeader } from "../components/AppHeader.jsx";
 
 export function UploadPage() {
   const [lastUploadedCount, setLastUploadedCount] = useState(0);
@@ -40,24 +41,11 @@ export function UploadPage() {
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <div className="app-header__main">
-          <button
-            type="button"
-            className="app-logo"
-            onClick={() => navigate("/")}
-          >
-            SY
-          </button>
-          <div className="app-header__titles">
-            <h1 className="app-title">Upload PDF</h1>
-            <p className="app-subtitle">Tải tài liệu nghiên cứu lên hệ thống.</p>
-          </div>
-        </div>
-        <div className="app-header__meta">
-          <span className="app-tag">Week 2 · Ingestion MVP</span>
-        </div>
-      </header>
+      <AppHeader 
+        title="Upload PDF"
+        subtitle="Tải tài liệu nghiên cứu lên hệ thống."
+        showUploadButton={false}
+      />
 
       <main className="app-main app-main--upload">
         <div className="app-main__full">

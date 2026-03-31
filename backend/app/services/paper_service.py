@@ -101,7 +101,7 @@ class PaperService:
         return paper
 
     def list_papers(self, skip: int = 0, limit: int = 20):
-        return self.repo.list(skip=skip, limit=limit)
+        return self.repo.list_papers(skip=skip, limit=limit)
 
     def get_paper_detail(self, paper_id):
         paper = self.repo.get_by_id(paper_id)

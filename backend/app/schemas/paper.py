@@ -59,3 +59,17 @@ class PaperDetailResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+class PaperInCanonicalResponse(BaseModel):
+    id: UUID
+    canonical_document_id: Optional[UUID] = None
+    original_filename: str
+    status: str
+    parse_status: Optional[str] = None
+    detected_title: Optional[str] = None
+    detected_doi: Optional[str] = None
+    is_duplicate: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
