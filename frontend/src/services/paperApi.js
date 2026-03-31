@@ -66,6 +66,26 @@ export async function getPaperDetail(paperId) {
 }
 
 /**
+ * Lấy canonical document theo paper id.
+ * Trả về null khi paper chưa được link canonical.
+ * @param {string} paperId
+ * @returns {Promise<Object | null>}
+ */
+export async function getCanonicalDocumentByPaper(paperId) {
+    try {
+        const response = await apiClient.get(`/api/canonical-documents/by-paper/${paperId}`);
+        return response.data;
+    } catch (error) {
+        if (error?.response?.status === 404) {
+            return null;
+        }
+
+        const message = await parseApiError(error);
+        throw new Error(message);
+    }
+}
+
+/**
  * Lấy URL để mở PDF của paper trên tab mới
  * @param {string} paperId
  * @returns {string}

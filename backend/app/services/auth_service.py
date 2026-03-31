@@ -101,6 +101,9 @@ class AuthService:
     
     def generate_google_login_data(self) -> tuple[str, str]:
         state = secrets.token_urlsafe(32)
+        return state, self.build_google_login_url(state)
+
+    def build_google_login_url(self, state: str) -> str:
         params = {
             "client_id": GOOGLE_CLIENT_ID,
             "redirect_uri": GOOGLE_REDIRECT_URI,
@@ -111,5 +114,5 @@ class AuthService:
             "state": state
         }
         url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
-        return state, url
+        return url
     

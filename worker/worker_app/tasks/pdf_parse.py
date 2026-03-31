@@ -157,6 +157,20 @@ def pdf_parse(paper_id: str) -> None:
         paper.parse_status = "done"
         db.commit()
 
+        # --------------------------------
+        # 10. enqueue Semantic Scholar enrichment
+        # --------------------------------
+        try:
+            from app.core.queue import parse_queue
+            parse_queue.enqueue(
+                "worker_app.tasks.semantic_scholar.semantic_scholar_enrich",
+                str(canonical.id)
+            )
+            logger.info(f"[pdf_parse] Enqueued SS enrichment for canonical_id={canonical.id}")
+        except Exception as e:
+            # Khong lam hong flow chinh neu enqueue that bai
+            logger.warning(f"[pdf_parse] Failed to enqueue SS enrichment: {e}")
+
         logger.info(f"[pdf_parse] Completed paper_id={paper_uuid}")
 
         os.remove(tmp_path)

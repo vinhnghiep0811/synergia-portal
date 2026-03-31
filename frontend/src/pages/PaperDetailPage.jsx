@@ -1,19 +1,40 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { PaperDetail } from "../components/PaperDetail.jsx";
-import { getPaperDetail } from "../services/paperApi.js";
+import {
+  getCanonicalDocumentByPaper,
+  getPaperDetail,
+} from "../services/paperApi.js";
 
 function bytesToMB(bytes) {
   if (!bytes || Number.isNaN(bytes)) return 0;
   return bytes / (1024 * 1024);
 }
 
-function mapPaperDetail(detail) {
+function mapCanonicalAuthors(authors) {
+  if (!Array.isArray(authors)) return [];
+  return authors
+    .map((author) => author?.name)
+    .filter(Boolean);
+}
+
+function mapPaperDetail(detail, canonical) {
+  const matchStatus = canonical?.match_status || null;
+  const enrichmentStatus = canonical?.enrichment_status || null;
+
+  const semanticScholarStatus = !detail.canonical_document_id
+    ? "not_linked"
+    : enrichmentStatus || "pending";
+
   return {
     id: detail.id,
     originalFilename: detail.original_filename,
     filename: detail.original_filename,
-    title: detail.detected_title || detail.original_filename,
+    title:
+      canonical?.title ||
+      canonical?.title_candidate ||
+      detail.detected_title ||
+      detail.original_filename,
     status: detail.status,
     mimeType: detail.mime_type,
     fileSizeBytes: detail.file_size_bytes,
@@ -32,18 +53,31 @@ function mapPaperDetail(detail) {
     detectedDoi: detail.detected_doi,
     detectedFingerprint: detail.detected_fingerprint,
     detectedTitle: detail.detected_title,
+    semanticScholarStatus,
+    matchStatus,
+    canonicalEnrichmentStatus: enrichmentStatus,
+    semanticSource: canonical?.metadata_source || null,
+    ssMatchConfidence: canonical?.ss_match_confidence || null,
+    ssPaperId: canonical?.ss_paper_id || null,
+    canonicalTitle: canonical?.title || null,
+    canonicalTitleCandidate: canonical?.title_candidate || null,
+    canonicalAbstract: canonical?.abstract || null,
+    canonicalVenue: canonical?.venue || null,
+    canonicalPublicationYear: canonical?.publication_year || null,
+    canonicalAuthors: mapCanonicalAuthors(canonical?.authors_json),
 
-    // fallback
-    authors: [],
-    year: null,
-    venue: null,
+    // fallback for existing consumers
+    authors: mapCanonicalAuthors(canonical?.authors_json),
+    year: canonical?.publication_year || null,
+    venue: canonical?.venue || null,
     canonicalKey:
+      canonical?.canonical_key ||
       detail.detected_doi ||
       detail.detected_fingerprint ||
       detail.canonical_document_id ||
       "",
-    hasDeterministicParse: detail.parse_status === "success",
-    hasCanonicalMetadata: !!detail.canonical_document_id,
+    hasDeterministicParse: detail.parse_status === "done",
+    hasCanonicalMetadata: enrichmentStatus === "enriched",
     hasLLMExtraction: false,
   };
 }
@@ -64,7 +98,8 @@ export function PaperDetailPage() {
     try {
       setError("");
       const detail = await getPaperDetail(paperId);
-      setPaper(mapPaperDetail(detail));
+      const canonical = await getCanonicalDocumentByPaper(paperId);
+      setPaper(mapPaperDetail(detail, canonical));
     } catch (error) {
       setError(error.message || "Không thể tải chi tiết paper");
       setPaper(null);
@@ -85,10 +120,11 @@ export function PaperDetailPage() {
         setError("");
 
         const detail = await getPaperDetail(paperId);
+        const canonical = await getCanonicalDocumentByPaper(paperId);
 
         if (!isMounted) return;
 
-        setPaper(mapPaperDetail(detail));
+        setPaper(mapPaperDetail(detail, canonical));
       } catch (error) {
         if (!isMounted) return;
         setError(error.message || "Không thể tải chi tiết paper");
@@ -110,13 +146,20 @@ export function PaperDetailPage() {
   useEffect(() => {
     if (!paperId || !paper) return;
 
-    // Only poll if paper is still processing
-    const isProcessing = paper.status === 'parse_queued' || 
-                       paper.status === 'canonicalized' || 
-                       paper.status === 'pending' ||
-                       paper.parseStatus === 'processing';
+    // Only poll while parse pipeline is still running
+    const isParseProcessing =
+      paper.status === "parse_queued" ||
+      paper.status === "pending" ||
+      paper.status === "parsing" ||
+      paper.parseStatus === "queued" ||
+      paper.parseStatus === "processing";
 
-    if (!isProcessing) return;
+    const isEnrichProcessing =
+      paper.canonicalDocumentId &&
+      (paper.semanticScholarStatus === "pending" ||
+        paper.semanticScholarStatus === "enriching");
+
+    if (!isParseProcessing && !isEnrichProcessing) return;
 
     const interval = setInterval(loadPaperDetail, 5000); // Poll every 5 seconds
 

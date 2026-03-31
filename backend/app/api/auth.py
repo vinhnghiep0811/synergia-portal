@@ -5,6 +5,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from uuid import UUID
 
+from app.core.security import get_current_user
 from app.core.database import get_db
 from app.repositories.user_repository import UserRepository
 from app.services.auth_service import AuthService
@@ -21,35 +22,42 @@ def get_auth_service(db: Session = Depends(get_db)):
     return AuthService(UserRepository(db))
 
 # --- DEPENDENCY: GET_CURRENT_USER ---
-async def get_current_user(
-    service: AuthService = Depends(get_auth_service),
-    authorization: str = Header(None, alias="Authorization"),
-    access_token_cookie: str = Cookie(None, alias="access_token"),
-) -> User:
-    token = None
-    if authorization and authorization.lower().startswith("bearer "):
-        token = authorization.split(" ", 1)[1].strip()
-    elif access_token_cookie:
-        token = access_token_cookie
+# async def get_current_user(
+#     service: AuthService = Depends(get_auth_service),
+#     authorization: str = Header(None, alias="Authorization"),
+#     access_token_cookie: str = Cookie(None, alias="access_token"),
+# ) -> User:
+#     token = None
+#     if authorization and authorization.lower().startswith("bearer "):
+#         token = authorization.split(" ", 1)[1].strip()
+#     elif access_token_cookie:
+#         token = access_token_cookie
 
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing token.")
+#     if not token:
+#         raise HTTPException(status_code=401, detail="Missing token.")
     
-    payload = service.decode_token(token, JWT_SECRET_KEY)
-    user_id = UUID(str(payload.get("sub")))
-    user = service.user_repo.get_by_id(user_id)
+#     payload = service.decode_token(token, JWT_SECRET_KEY)
+#     user_id = UUID(str(payload.get("sub")))
+#     user = service.user_repo.get_by_id(user_id)
     
-    if not user or not user.is_active:
-        raise HTTPException(status_code=401, detail="User not found or inactive.")
-    return user
+#     if not user or not user.is_active:
+#         raise HTTPException(status_code=401, detail="User not found or inactive.")
+#     return user
 
 # --- ROUTES ---
 
 @router.get("/google/login", summary="Khởi tạo đăng nhập Google")
-async def google_login(service: AuthService = Depends(get_auth_service)):
+async def google_login(
+    oauth_state: str = Cookie(None, alias="oauth_state"),
+    service: AuthService = Depends(get_auth_service),
+):
     # 1. Gọi service để kiểm tra config và lấy dữ liệu (state, url)
     service.require_config()
-    state, login_url = service.generate_google_login_data()
+    if oauth_state:
+        state = oauth_state
+        login_url = service.build_google_login_url(state)
+    else:
+        state, login_url = service.generate_google_login_data()
 
     # 2. Tạo RedirectResponse với status code 307 (Yêu cầu của bạn)
     response = RedirectResponse(
@@ -78,8 +86,12 @@ async def google_callback(
     service: AuthService = Depends(get_auth_service)
 ):
     service.require_config()
-    if not code or state != oauth_state:
-        raise HTTPException(status_code=400, detail="Invalid state or missing code.")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code.")
+    if not state or not oauth_state:
+        raise HTTPException(status_code=400, detail="Missing OAuth state.")
+    if not secrets.compare_digest(state, oauth_state):
+        raise HTTPException(status_code=400, detail="Invalid OAuth state.")
 
     info = await service.get_google_user_info(code, GOOGLE_REDIRECT_URI)
     user = service.sync_user(info)
