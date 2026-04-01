@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func, Boolean
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 import uuid
@@ -18,9 +18,12 @@ class ExtractionRun(Base):
         index=True,
     )
 
+    provider = Column(String(50), nullable=False)
     model_name = Column(String(100), nullable=False)
     prompt_version = Column(String(50), nullable=False)
     status = Column(String(30), nullable=False, default="running", server_default="running")
+
+    result_json = Column(JSONB, nullable=True)
 
     problem_statement = Column(JSONB, nullable=True)
     main_method = Column(JSONB, nullable=True)
@@ -34,7 +37,18 @@ class ExtractionRun(Base):
     token_output = Column(Integer, nullable=True)
     error_message = Column(Text, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    is_from_cache = Column(Boolean, default=False)
 
-    canonical_document = relationship("CanonicalDocument")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    canonical_document = relationship(
+        "CanonicalDocument",
+        back_populates="extraction_runs",
+        foreign_keys=[canonical_document_id],
+    )
     publish_versions = relationship("PublishVersion", back_populates="source_extraction")
