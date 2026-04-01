@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Integer, Numeric, String, Text, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 import uuid
@@ -45,3 +45,17 @@ class CanonicalDocument(Base):
     )
 
     papers = relationship("PaperRecord", back_populates="canonical_document", lazy="selectin")
+    extraction_runs = relationship(
+        "ExtractionRun",
+        back_populates="canonical_document",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        foreign_keys="ExtractionRun.canonical_document_id",
+    )
+    latest_extraction_run_id = Column(UUID(as_uuid=True), ForeignKey("extraction_runs.id"), nullable=True)
+    latest_extraction_run = relationship(
+        "ExtractionRun",
+        foreign_keys=[latest_extraction_run_id],
+        post_update=True,
+    )
+    
