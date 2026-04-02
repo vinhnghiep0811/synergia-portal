@@ -1,9 +1,9 @@
 import hashlib
+import logging
 import re
 from typing import Optional, Tuple
 
 import pdfplumber
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +15,10 @@ def strip_nul_chars(text: Optional[str]) -> str:
         return ""
     return text.replace("\x00", "")
 
+
 def normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
 
 def normalize_ligatures(text: str) -> str:
     ligatures = {
@@ -32,12 +34,37 @@ def normalize_ligatures(text: str) -> str:
         text = text.replace(k, v)
     return text
 
+
+def extract_pdf_full_text(
+    file_path: str,
+    max_pages: Optional[int] = None,
+) -> str:
+    texts: list[str] = []
+
+    with pdfplumber.open(file_path) as pdf:
+        pages = pdf.pages if max_pages is None else pdf.pages[:max_pages]
+
+        for page in pages:
+            page_text = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
+            page_text = strip_nul_chars(page_text)
+            page_text = normalize_ligatures(page_text)
+
+            if page_text.strip():
+                texts.append(page_text.strip())
+
+    full_text = "\n\n".join(texts).strip()
+
+    if not full_text:
+        raise ValueError("Could not extract full text from PDF")
+
+    return full_text
+
+
 def is_likely_noise(word: dict, page_width: float, page_height: float) -> bool:
     text = strip_nul_chars(word.get("text", ""))
     if not text:
         return True
 
-    # Bỏ chữ xoay dọc / không nằm ngang
     if not word.get("upright", True):
         return True
 
@@ -48,23 +75,14 @@ def is_likely_noise(word: dict, page_width: float, page_height: float) -> bool:
     height = bottom - top
     width = x1 - x0
 
-    # Bỏ text quá sát mép trên/dưới (header/footer)
     if top < 10 or bottom > page_height - 10:
         return True
 
-    # Bỏ text quá sát mép trái/phải, thường là text dọc, số trang, note
-    # if x0 < 20 or x1 > page_width - 20:
-    #     return True
-
-    # Bỏ word cực ngắn 1 ký tự nằm riêng lẻ, rất dễ là nhiễu
-    # if len(text) == 1 and not text.isdigit():
-    #     return True
-
-    # Bỏ các khối quá cao và hẹp, dễ là chữ xoay hoặc artifact
     if height > width * 1.5 and len(text) <= 3:
         return True
 
     return False
+
 
 def group_words_into_lines(words: list[dict], y_tolerance: float = 4.0) -> list[list[dict]]:
     """
@@ -95,6 +113,7 @@ def group_words_into_lines(words: list[dict], y_tolerance: float = 4.0) -> list[
     lines.append(sorted(current_line, key=lambda x: x["x0"]))
     return lines
 
+
 def line_text(line: list[dict]) -> str:
     if not line:
         return ""
@@ -109,8 +128,6 @@ def line_text(line: list[dict]) -> str:
 
         if prev is not None:
             gap = w["x0"] - prev["x1"]
-
-            # nếu token rất sát nhau thì không chèn space
             if gap > 1.5:
                 pieces.append(" ")
 
@@ -121,15 +138,16 @@ def line_text(line: list[dict]) -> str:
     text = normalize_ligatures(text)
     text = normalize_space(text)
 
-    # cleanup punctuation
     text = re.sub(r"\s+([:;,.\)])", r"\1", text)
     text = re.sub(r"([(\[])\s+", r"\1", text)
 
     return text
 
+
 def line_avg_size(line: list[dict]) -> float:
     sizes = [w["size"] for w in line if "size" in w]
     return sum(sizes) / len(sizes) if sizes else 0.0
+
 
 def _extract_lines_from_words(page) -> list[dict]:
     words = page.extract_words(extra_attrs=["size", "fontname", "upright"])
@@ -184,7 +202,6 @@ def _extract_lines_from_chars(page) -> list[dict]:
 
     filtered = sorted(filtered, key=lambda c: (c["top"], c["x0"]))
 
-    # group chars into lines
     char_lines = []
     current = [filtered[0]]
     current_top = filtered[0]["top"]
@@ -208,7 +225,6 @@ def _extract_lines_from_chars(page) -> list[dict]:
             t = ch.get("text", "")
             if prev is not None:
                 gap = ch["x0"] - prev["x1"]
-                # heuristic chèn space
                 if gap > max(1.2, avg_size * 0.18):
                     pieces.append(" ")
             pieces.append(t)
@@ -245,11 +261,6 @@ def _looks_broken(lines: list[dict]) -> bool:
     if re.search(r"\b[a-z]{2}\s+nition\b", joined):
         return True
 
-    if re.search(r"\b[a-z]{1,3}\s+[a-z]{4,}\b", joined) and "abstract" not in joined:
-        # heuristic hơi rộng, chỉ dùng làm tín hiệu phụ
-        pass
-
-    # quá nhiều line toàn chữ dính liền
     dense_bad = 0
     for line in lines[:8]:
         text = line["text"]
@@ -302,7 +313,6 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
             - abs(center_x - page_center) * 0.01
         )
 
-        # chỉ phạt author-like line khi thực sự giống author
         if upper_ratio > 0.85 and len(text) > 25 and "," not in text and ":" not in text:
             score -= 4
 
@@ -319,7 +329,6 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
 
     selected = [seed]
 
-    # mở rộng lên trên
     prev = seed
     for i in range(seed_idx - 1, -1, -1):
         line = sorted_lines[i]
@@ -334,7 +343,6 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
         selected.insert(0, line)
         prev = line
 
-    # mở rộng xuống dưới
     prev = seed
     for i in range(seed_idx + 1, len(sorted_lines)):
         line = sorted_lines[i]
@@ -352,27 +360,44 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
     title = normalize_space(" ".join(line["text"] for line in selected))
     return title or None
 
+
+def build_text_preview(full_text: str, preview_chars: int = 2000) -> str:
+    full_text = strip_nul_chars(full_text).strip()
+    return full_text[:preview_chars] if full_text else ""
+
+
 def extract_pdf_text_and_preview(
     file_path: str,
     max_pages: int = 3,
     preview_chars: int = 2000,
 ) -> Tuple[str, str]:
-    texts: list[str] = []
+    """
+    Dùng cho parse/canonical flow hiện tại:
+    - chỉ lấy một phần số trang đầu để giữ behavior cũ ổn định
+    - full_text ở đây là full_text giới hạn theo max_pages
+    """
+    full_text = extract_pdf_full_text(
+        file_path=file_path,
+        max_pages=max_pages,
+    )
+    preview = build_text_preview(full_text, preview_chars=preview_chars)
+    return full_text, preview
 
-    with pdfplumber.open(file_path) as pdf:
-        pages = pdf.pages[:max_pages]
-        for page in pages:
-            page_text = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
-            page_text = strip_nul_chars(page_text)
-            if page_text.strip():
-                texts.append(page_text)
 
-    full_text = strip_nul_chars("\n".join(texts)).strip()
-    preview = full_text[:preview_chars] if full_text else ""
-
-    if not full_text:
-        raise ValueError("Could not extract text from PDF")
-
+def extract_pdf_text_for_llm(
+    file_path: str,
+    preview_chars: int = 2000,
+) -> Tuple[str, str]:
+    """
+    Dùng cho LLM pipeline:
+    - cố gắng lấy full text của toàn bộ PDF
+    - preview chỉ để hiển thị nhanh / debug
+    """
+    full_text = extract_pdf_full_text(
+        file_path=file_path,
+        max_pages=None,
+    )
+    preview = build_text_preview(full_text, preview_chars=preview_chars)
     return full_text, preview
 
 
@@ -395,39 +420,30 @@ def clean_line(line: str) -> str:
     line = re.sub(r"\s+", " ", line).strip()
     return line
 
+
 def detect_title(file_path: str) -> Optional[str]:
     with pdfplumber.open(file_path) as pdf:
         if not pdf.pages:
             return None
 
         first_page = pdf.pages[0]
-        for w in first_page.extract_words(extra_attrs=["size", "fontname", "upright"]):
-            if w["top"] < first_page.height * 0.2:
-                        logger.warning(
-                            "[TITLE DEBUG WORD] text=%r x0=%.2f x1=%.2f top=%.2f",
-                            w.get("text", ""),
-                            w.get("x0", 0.0),
-                            w.get("x1", 0.0),
-                            w.get("top", 0.0),
-                        )
-                    
+
         word_lines = _extract_lines_from_words(first_page)
-        logger.warning("[TITLE DEBUG] word_lines=%s", word_lines[:10])
-        # if word_lines and not _looks_broken(word_lines):
-        #     title = _select_title_from_lines(word_lines, first_page.width)
-        #     if title:
-        #         return title
+        if word_lines and not _looks_broken(word_lines):
+            title = _select_title_from_lines(word_lines, first_page.width)
+            if title:
+                return title
 
-        # char_lines = _extract_lines_from_chars(first_page)
-        # title = _select_title_from_lines(char_lines, first_page.width)
-        # if title:
-        #     return title
+        char_lines = _extract_lines_from_chars(first_page)
+        if char_lines:
+            title = _select_title_from_lines(char_lines, first_page.width)
+            if title:
+                return title
 
-        # fallback cuối
         title = _select_title_from_lines(word_lines, first_page.width)
-        logger.warning("[TITLE DEBUG] selected_title=%r", title)
         return title
-    
+
+
 def normalize_text_for_fingerprint(text: str) -> str:
     text = strip_nul_chars(text).lower()
     text = re.sub(r"\s+", " ", text)

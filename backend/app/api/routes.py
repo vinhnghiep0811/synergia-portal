@@ -1,7 +1,7 @@
 from fastapi import APIRouter, status
 from app.api.papers import router as papers_router
 from app.api.canonical_documents import router as canonical_documents_router 
-
+from app.api.extraction_runs import router as extraction_run_router
 router = APIRouter()
 
 @router.get("/health",
@@ -38,3 +38,4 @@ def health():
 
 router.include_router(papers_router)
 router.include_router(canonical_documents_router) 
+router.include_router(extraction_run_router)

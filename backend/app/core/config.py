@@ -112,3 +112,16 @@ REDIS_URL = get_env("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
 RQ_PARSE_QUEUE = get_env("RQ_PARSE_QUEUE", "parse_queue")
 REFRESH_TOKEN_SECRET_KEY  = get_env("REFRESH_TOKEN_SECRET_KEY", "change-refresh-secret")
 REFRESH_TOKEN_EXPIRE_DAYS = get_env_int("REFRESH_TOKEN_EXPIRE_DAYS", 30)
+
+# =========================
+# LLM - Gemini (Week 5)
+# =========================
+LLM_PROVIDER = get_env("LLM_PROVIDER", "gemini")
+
+GEMINI_API_KEY = get_env("GEMINI_API_KEY", "")
+GEMINI_MODEL = get_env("GEMINI_MODEL", "gemini-2.5-pro")
+
+GEMINI_TEMPERATURE = float(get_env("GEMINI_TEMPERATURE", "0"))
+GEMINI_MAX_OUTPUT_TOKENS = get_env_int("GEMINI_MAX_OUTPUT_TOKENS", 4096)
+
+LLM_TIMEOUT_SECONDS = get_env_int("LLM_TIMEOUT_SECONDS", 60)
