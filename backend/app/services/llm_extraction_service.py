@@ -1,20 +1,22 @@
 import os
 import logging
 import tempfile
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
-from typing import Optional
+
 from sqlalchemy.orm import Session
-from app.schemas.extraction_result import ExtractionResultSchema
-from app.services.storage_service import StorageService
-from app.services.pdf_parse_service import extract_pdf_text_for_llm
+
 from app.models.canonical_document import CanonicalDocument
 from app.models.extraction_run import ExtractionRun
 from app.repositories.extraction_run_repository import ExtractionRunRepository
-from app.services.llm.provider_factory import LLMProviderFactory
+from app.schemas.extraction_result import ExtractionResultSchema
 from app.services.llm.input_builder import LLMInputBuilder
 from app.services.llm.prompt_builder import LLMPromptBuilder
 from app.services.llm.constants import PROMPT_VERSION
+from app.services.llm.provider_factory import LLMProviderFactory
+from app.services.pdf_parse_service import extract_pdf_text_for_llm
+from app.services.storage_service import StorageService
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,58 +28,9 @@ class LLMExtractionService:
         self.input_builder = LLMInputBuilder()
         self.prompt_builder = LLMPromptBuilder()
 
-    def _load_full_text_for_canonical(self, canonical: CanonicalDocument) -> Optional[str]:
-        """
-        Load full text từ 1 paper đại diện của canonical document
-        (reuse đúng pattern của pdf_parse worker)
-        """
-        if not canonical.papers:
-            return None
-
-        # chọn paper đầu tiên (canonical-level là đủ)
-        paper = canonical.papers[0]
-
-        if not paper.storage_path:
-            return None
-
-        storage = StorageService()
-        tmp_path=None
-        try:
-            pdf_bytes = storage.download_by_storage_path(paper.storage_path)
-
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(pdf_bytes)
-                tmp_path = tmp.name
-
-            full_text, _ = extract_pdf_text_for_llm(tmp_path)
-
-            return full_text
-
-        except Exception as e:
-            logger.warning(
-                "[LLM SERVICE] Failed to load full text for canonical=%s error=%s",
-                canonical.id,
-                str(e),
-            )
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
-        return None
-
     def run_for_canonical_document(self, canonical_document_id: UUID) -> ExtractionRun:
-        canonical = (
-            self.db.query(CanonicalDocument)
-            .filter(CanonicalDocument.id == canonical_document_id)
-            .first()
-        )
+        canonical = self._get_canonical_or_raise(canonical_document_id)
 
-        if not canonical:
-            raise ValueError(f"CanonicalDocument not found: {canonical_document_id}")
-
-        # 1. cache check
         cached_run = self.repo.get_latest_completed_by_canonical_document_id(canonical.id)
         if cached_run:
             logger.info("[LLM SERVICE] Cache hit for canonical_document_id=%s", canonical.id)
@@ -85,20 +38,9 @@ class LLMExtractionService:
 
         logger.info("[LLM SERVICE] Cache miss for canonical_document_id=%s", canonical.id)
 
-        # 2. create run
-        run = self.repo.create(
-            ExtractionRun(
-                canonical_document_id=canonical.id,
-                provider="pending",
-                model_name="pending",
-                prompt_version=PROMPT_VERSION,
-                status="running",
-                is_from_cache=False,
-            )
-        )
+        run = self._create_running_extraction_run(canonical.id)
 
         try:
-            # 3. prepare input
             full_text = self._load_full_text_for_canonical(canonical)
             if not full_text or len(full_text.strip()) < 500:
                 logger.warning(
@@ -106,6 +48,7 @@ class LLMExtractionService:
                     canonical.id,
                 )
                 raise ValueError("Insufficient text for LLM extraction")
+
             input_text = self.input_builder.build(
                 canonical,
                 parsed_text=None,
@@ -114,17 +57,13 @@ class LLMExtractionService:
             prompt = self.prompt_builder.build_extraction_prompt(input_text)
             provider_result = self.provider.extract_metadata(prompt)
 
-            # 5. validate / normalize output
             raw_result = provider_result.get("result_json")
-
             if raw_result is None:
                 raw_text = provider_result.get("raw_text")
-
                 logger.error(
                     "[LLM SERVICE] Invalid JSON from provider. raw_text=%s",
                     raw_text[:2000] if raw_text else None,
                 )
-
                 raise ValueError("LLM returned invalid JSON format")
 
             result_json = self._normalize_result(raw_result)
@@ -132,7 +71,6 @@ class LLMExtractionService:
             run.provider = provider_result.get("provider")
             run.model_name = provider_result.get("model")
 
-            # 6. save completed run
             run = self.repo.mark_completed(
                 run,
                 result_json=result_json,
@@ -161,6 +99,64 @@ class LLMExtractionService:
             self.db.commit()
             raise
 
+    def _get_canonical_or_raise(self, canonical_document_id: UUID) -> CanonicalDocument:
+        canonical = (
+            self.db.query(CanonicalDocument)
+            .filter(CanonicalDocument.id == canonical_document_id)
+            .first()
+        )
+        if not canonical:
+            raise ValueError(f"CanonicalDocument not found: {canonical_document_id}")
+        return canonical
+
+    def _create_running_extraction_run(self, canonical_document_id: UUID) -> ExtractionRun:
+        return self.repo.create(
+            ExtractionRun(
+                canonical_document_id=canonical_document_id,
+                provider="pending",
+                model_name="pending",
+                prompt_version=PROMPT_VERSION,
+                status="running",
+                is_from_cache=False,
+            )
+        )
+
+    def _load_full_text_for_canonical(self, canonical: CanonicalDocument) -> Optional[str]:
+        if not canonical.papers:
+            return None
+
+        paper = canonical.papers[0]
+        if not paper.storage_path:
+            return None
+
+        storage = StorageService()
+        tmp_path = None
+
+        try:
+            pdf_bytes = storage.download_by_storage_path(paper.storage_path)
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(pdf_bytes)
+                tmp_path = tmp.name
+
+            full_text, _ = extract_pdf_text_for_llm(tmp_path)
+            return full_text
+
+        except Exception as e:
+            logger.warning(
+                "[LLM SERVICE] Failed to load full text for canonical=%s error=%s",
+                canonical.id,
+                str(e),
+            )
+            return None
+
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
     def _normalize_evidence(self, value: Any) -> list[dict[str, Any]]:
         if not isinstance(value, list):
             return []
@@ -183,7 +179,6 @@ class LLMExtractionService:
             )
 
         return normalized
-
 
     def _normalize_scalar_field(self, raw: Any) -> dict[str, Any]:
         if raw is None:
@@ -210,14 +205,13 @@ class LLMExtractionService:
             "evidence": evidence,
         }
 
-
     def _normalize_list_field(self, raw: Any) -> dict[str, Any]:
         if raw is None:
             return {"items": [], "evidence": []}
 
         if isinstance(raw, list):
-            items = [str(x).strip() for x in raw if str(x).strip()]
-            return {"items": [], "evidence": []} if items else {"items": [], "evidence": []}
+            items = [x.strip() for x in raw if isinstance(x, str) and x.strip()]
+            return {"items": items, "evidence": []}
 
         if not isinstance(raw, dict):
             return {"items": [], "evidence": []}
@@ -229,7 +223,7 @@ class LLMExtractionService:
         if not isinstance(raw_items, list):
             raw_items = []
 
-        items = [str(x).strip() for x in raw_items if isinstance(x, str) and x.strip()]
+        items = [x.strip() for x in raw_items if isinstance(x, str) and x.strip()]
         evidence = self._normalize_evidence(raw.get("evidence"))
 
         if items and not evidence:
@@ -239,7 +233,6 @@ class LLMExtractionService:
             "items": items,
             "evidence": evidence,
         }
-
 
     def _normalize_evaluation_setup(self, raw: Any) -> dict[str, Any]:
         empty_value = {
@@ -277,7 +270,6 @@ class LLMExtractionService:
             "evidence": evidence,
         }
 
-
     def _normalize_result(self, raw: dict[str, Any] | None) -> dict[str, Any]:
         raw = raw or {}
 
@@ -289,5 +281,4 @@ class LLMExtractionService:
             "evaluation_setup": self._normalize_evaluation_setup(raw.get("evaluation_setup")),
         }
 
-        # validate lần cuối bằng Pydantic
         return ExtractionResultSchema(**normalized).model_dump()

@@ -49,9 +49,9 @@ def pdf_parse(paper_id: str) -> None:
         # --------------------------------
         # 1. set status parsing
         # --------------------------------
-        paper.status = "parsing"
-        paper.parse_status = "processing"
-        paper.parse_error = None
+        paper.processing_status = "pending"
+        paper.processing_stage = "parsing"
+        paper.processing_error = None
         db.commit()
 
         # --------------------------------
@@ -148,16 +148,16 @@ def pdf_parse(paper_id: str) -> None:
         if first_paper and first_paper.id != paper.id:
             paper.is_duplicate = True
             paper.duplicate_of_paper_id = first_paper.id
-            paper.status = "duplicate_detected"
         else:
             paper.is_duplicate = False
-            paper.duplicate_of_paper_id = None
-            paper.status = "canonicalized"
+            paper.duplicate_of_paper_id = None  
 
         # --------------------------------
         # 9. mark parse done
         # --------------------------------
-        paper.parse_status = "done"
+        paper.processing_status = "pending"
+        paper.processing_stage = "parsed"
+        paper.processing_error = None
         db.commit()
 
         # --------------------------------
@@ -188,9 +188,9 @@ def pdf_parse(paper_id: str) -> None:
                 .first()
             )
             if paper:
-                paper.status = "parse_failed"
-                paper.parse_status = "failed"
-                paper.parse_error = str(e)
+                paper.processing_status = "failed"
+                paper.processing_stage = "parsing"
+                paper.processing_error = str(e)
                 db.commit()
         except Exception:
             db.rollback()

@@ -35,10 +35,32 @@ class PaperRecord(Base):
     file_hash_sha256 = Column(String(64), nullable=False)
 
     upload_source = Column(String(30), nullable=False, default="portal", server_default="portal")
-    status = Column(String(30), nullable=False, default="uploaded", server_default="uploaded")
+    # status = Column(String(30), nullable=False, default="uploaded", server_default="uploaded")
+    processing_status = Column(
+        String(30),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+        index=True,
+    )
 
-    parse_status = Column(String(30), nullable=True)
-    parse_error = Column(Text, nullable=True)
+    # 2) Đang ở bước nào trong pipeline
+    processing_stage = Column(
+        String(30),
+        nullable=True,
+        index=True,
+    )
+
+    # 3) Trạng thái nghiệp vụ công bố
+    publication_status = Column(
+        String(30),
+        nullable=False,
+        default="draft",
+        server_default="draft",
+        index=True,
+    )
+    # parse_status = Column(String(30), nullable=True)
+    processing_error = Column(Text, nullable=True)
 
     extracted_text_preview = Column(Text, nullable=True)
     detected_doi = Column(String(255), nullable=True)
