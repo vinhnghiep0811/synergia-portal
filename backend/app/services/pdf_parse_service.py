@@ -386,6 +386,15 @@ def extract_pdf_text_and_preview(
     preview = build_text_preview(full_text, preview_chars=preview_chars)
     return full_text, preview
 
+def _clean_extracted_text(text: str) -> str:
+    text = text.replace("\x00", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r'(?<=[a-zA-Z])(?=\d)', ' ', text)
+    text = re.sub(r'(?<=\d)(?=[a-zA-Z])', ' ', text)
+    text = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', text)
+    text = re.sub(r'(?<=[,.;:])(?=[A-Za-z])', ' ', text)
+    return text.strip()
 
 def extract_pdf_text_for_llm(
     file_path: str,
@@ -402,6 +411,7 @@ def extract_pdf_text_for_llm(
     with pdfplumber.open(file_path) as pdf:
         for idx, page in enumerate(pdf.pages, start=1):
             text = page.extract_text() or ""
+            text = _clean_extracted_text(text)
             text = text.strip()
 
             pages.append({

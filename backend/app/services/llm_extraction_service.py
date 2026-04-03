@@ -347,13 +347,20 @@ class LLMExtractionService:
 
             # xử lý một số pattern dính phổ biến
             snippet = re.sub(r'(?<=[a-z])(?=[A-Z][a-z])', ' ', snippet)
-
+            # fix missing spaces heuristic
+            # snippet = re.sub(r'([a-z])([a-z]{2,})', r'\1 \2', snippet)
             snippet = re.sub(r'\s+', ' ', snippet).strip()
 
             if not snippet:
                 continue
 
-            snippet = snippet[:180]
+            if len(snippet) > 180:
+                cut = snippet[:180]
+                last_stop = max(cut.rfind("."), cut.rfind(";"), cut.rfind(","), cut.rfind(" "))
+                if last_stop > 80:
+                    snippet = cut[:last_stop].strip()
+                else:
+                    snippet = cut.strip()
 
             normalized.append(
                 {
@@ -395,8 +402,32 @@ class LLMExtractionService:
             return {"items": [], "evidence": []}
 
         if isinstance(raw, list):
-            items = [x.strip() for x in raw if isinstance(x, str) and x.strip()]
-            return {"items": items, "evidence": []}
+            # case 1: ["a", "b"]
+            if all(isinstance(x, str) for x in raw):
+                items = [x.strip() for x in raw if isinstance(x, str) and x.strip()]
+                return {"items": items, "evidence": []}
+
+            # case 2: [{"value": "...", "evidence": [...]}, ...]
+            items: list[str] = []
+            merged_evidence: list[dict[str, Any]] = []
+
+            for x in raw:
+                if not isinstance(x, dict):
+                    continue
+
+                value = x.get("value")
+                if isinstance(value, str) and value.strip():
+                    items.append(value.strip())
+
+                merged_evidence.extend(self._normalize_evidence(x.get("evidence")))
+
+            if items and not merged_evidence:
+                items = []
+
+            return {
+                "items": items,
+                "evidence": merged_evidence,
+            }
 
         if not isinstance(raw, dict):
             return {"items": [], "evidence": []}

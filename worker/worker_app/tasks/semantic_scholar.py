@@ -63,7 +63,7 @@ def semantic_scholar_enrich(canonical_document_id: str) -> None:
         # --------------------------------
         # 3. update paper statuses
         # --------------------------------
-        if result == "enriched":
+        if result in {"enriched", "unmatched", "skipped_already_enriched"}:
             for paper in papers:
                 if paper.processing_status != "failed":
                     paper.processing_status = "pending"
@@ -77,7 +77,7 @@ def semantic_scholar_enrich(canonical_document_id: str) -> None:
             )
             logger.info("[SS enrich] Enqueued LLM extraction for canonical_id=%s", canonical.id)
 
-        elif result in {"unmatched", "rate_limited", "skipped_already_enriched"}:
+        elif result == "rate_limited":
             for paper in papers:
                 if paper.processing_status != "failed":
                     paper.processing_status = "pending"
