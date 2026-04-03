@@ -16,34 +16,23 @@ function formatMatchConfidence(confidence) {
 
 function getSemanticStatusLabel(status) {
   switch (status) {
-    case "enriched":
-      return "Matched";
-    case "unmatched":
-      return "Unmatched";
-    case "rate_limited":
-      return "Rate limited";
+    case "enriched": return "Matched";
+    case "unmatched": return "Unmatched";
+    case "rate_limited": return "Rate limited";
     case "pending":
-    case "enriching":
-      return "Enriching";
-    case "not_linked":
-      return "Chua link canonical";
-    default:
-      return "Khong ro";
+    case "enriching": return "Enriching";
+    case "not_linked": return "Chua link canonical";
+    default: return "Unclear";
   }
 }
 
 function getMatchTypeLabel(matchStatus) {
   switch (matchStatus) {
-    case "matched_by_doi":
-      return "Matched by DOI";
-    case "matched_by_title":
-      return "Matched by title";
-    case "unmatched":
-      return "Unmatched";
-    case "rate_limited":
-      return "Rate limited";
-    default:
-      return "-";
+    case "matched_by_doi": return "Matched by DOI";
+    case "matched_by_title": return "Matched by title";
+    case "unmatched": return "Unmatched";
+    case "rate_limited": return "Rate limited";
+    default: return "-";
   }
 }
 
@@ -249,8 +238,8 @@ export function PaperDetail({ paper }) {
         ) : (
           <p className="semantic-empty-note">
             {paper.semanticScholarStatus === "rate_limited"
-              ? "Semantic Scholar dang rate limit. Vui long thu lai sau 5 phut."
-              : "Chua co metadata canonical de hien thi. Neu status la Unmatched thi he thong khong tim duoc ket qua phu hop."}
+              ? "Semantic Scholar is rate limited. Please try again in a few minutes."
+              : "There is no canonical metadata available to display. If the status is Unmatched, it means the system could not find a suitable matching result."}
           </p>
         )}
       </div>

@@ -64,8 +64,9 @@ function mapPaperListItem(item) {
   return {
     id: item.id,
     originalFilename: item.original_filename,
-    filename: item.original_filename,
-    status: item.status,
+    publication_status: item.publication_status,
+    processing_stage: item.processing_stage,
+    processing_status: item.processing_status,
     mimeType: item.mime_type,
     fileSizeBytes: item.file_size_bytes,
     sizeMB: bytesToMB(item.file_size_bytes),
@@ -90,7 +91,8 @@ function mapPaperDetail(detail) {
     originalFilename: detail.original_filename,
     filename: detail.original_filename,
     title: detail.detected_title || detail.original_filename,
-    status: detail.status,
+    processing_status: detail.processing_status,
+    processing_stage: detail.processing_stage,
     mimeType: detail.mime_type,
     fileSizeBytes: detail.file_size_bytes,
     sizeMB: bytesToMB(detail.file_size_bytes),
@@ -150,10 +152,16 @@ export function PaperDashboard() {
         setListError("");
 
         const data = await getPapers(0, 50);
+        
+        // console.log("Raw API response:", data);
+        // console.log("First item from API:", data[0]);
 
         if (!isMounted) return;
 
         const mappedPapers = data.map(mapPaperListItem);
+        
+        // console.log("Mapped papers:", mappedPapers);
+        // console.log("First mapped paper:", mappedPapers[0]);
 
         // Fetch details for processed papers to get detected_title
         const processedPapers = mappedPapers.filter(

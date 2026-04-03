@@ -1,75 +1,85 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 
 export function ProcessingTimeline({ paper }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const steps = [
+  // ✅ Tách steps ra useMemo để ổn định reference
+  const steps = useMemo(() => [
     {
       id: 'uploaded',
-      title: 'Uploaded',
+      title: 'Tải lên tài liệu',
       description: 'File đã được nhận và lưu vào storage.',
       isCompleted: true,
-      isActive: false
+      isActive: false,
+      hasError: false
     },
     {
       id: 'parsing',
-      title: 'PDF parsing',
-      description: 'Trích xuất text preview, DOI và title candidate từ PDF.',
-      isCompleted: paper.parseStatus === 'done' || paper.parseStatus === 'success',
-      isActive: paper.parseStatus === 'processing' || (paper.status === 'parse_queued' && currentStep === 1),
-      hasError: paper.parseStatus === 'failed'
+      title: 'Phân tích tài liệu',
+      description: 'Trích xuất text preview, DOI và title từ PDF.',
+      isCompleted: 
+        paper.processing_stage === 'enriching' ||
+        paper.processing_stage === 'llm_extracting' ||
+        paper.processing_status === 'parsed' ||
+        paper.processing_status === 'processed' ||
+        paper.processing_status === 'completed' ||  // thêm
+        paper.processing_status === 'failed',
+      isActive: paper.processing_stage === 'parsing',
+      hasError: paper.processing_status === 'failed' && paper.processing_stage === 'parsing'
     },
     {
-      id: 'canonical',
-      title: 'Canonical document',
-      description: 'Liên kết paper hiện tại với canonical document nếu đã được nhận diện.',
-      isCompleted: !!paper.canonicalDocumentId,
-      isActive: false,
-      hasError: false
+      id: 'enriching',
+      title: 'Làm giàu tài liệu',
+      description: 'Liên kết với canonical document và làm giàu metadata.',
+      isCompleted: 
+        paper.processing_stage === 'llm_extracting' ||
+        paper.processing_status === 'completed' ||
+        paper.processing_status === 'processed' ||
+        paper.processing_status === 'enriched' ||
+        paper.processing_status === 'failed',
+      isActive: paper.processing_stage === 'enriching',
+      hasError: paper.processing_status === 'failed' && paper.processing_stage === 'enriching'
     },
     {
-      id: 'llm',
-      title: 'LLM metadata chuyên biệt',
-      description: 'Trích xuất metadata nâng cao kèm evidence khi pipeline giai đoạn sau được bật.',
-      isCompleted: paper.hasLLMExtraction,
-      isActive: false,
-      hasError: false
+      id: 'llm_extracting',
+      title: 'Trích xuất LLM',
+      description: 'Trích xuất metadata nâng cao bằng LLM.',
+      isCompleted: 
+        paper.processing_status === 'completed' ||
+        paper.processing_stage === 'llm_extracted'  ,  
+      isActive: paper.processing_stage === 'llm_extracting',
+      hasError: paper.processing_status === 'failed' && paper.processing_stage === 'llm_extracting'
     }
-  ];
+  ], [paper.processing_stage, paper.processing_status]); // chỉ depend vào các field thật sự cần
 
   useEffect(() => {
-    // Determine current processing step
-    if (paper.status === 'parse_queued' || paper.status === 'canonicalized' || paper.status === 'pending') {
-      setIsProcessing(true);
-      if (paper.parseStatus !== 'done' && paper.parseStatus !== 'success') {
-        setCurrentStep(1);
-      } else if (!paper.canonicalDocumentId) {
-        setCurrentStep(2);
-      } else if (!paper.hasLLMExtraction) {
-        setCurrentStep(3);
-      }
-    } else {
+    if (!paper) return;
+
+    if (paper.processing_status === 'failed') {
       setIsProcessing(false);
+      const failedIndex = steps.findIndex(s => s.hasError);
+      if (failedIndex !== -1) setCurrentStep(failedIndex);
+      return;
     }
-  }, [paper]);
 
-  // useEffect(() => {
-  //   if (!isProcessing) return;
+    if (paper.processing_status === 'completed') {
+      setIsProcessing(false);
+      setCurrentStep(steps.length); // tất cả hoàn thành
+      return;
+    }
 
-  //   const interval = setInterval(() => {
-  //     setCurrentStep((prev) => {
-  //       const nextStep = prev + 1;
-  //       if (nextStep >= steps.length) {
-  //         setIsProcessing(false);
-  //         return prev;
-  //       }
-  //       return nextStep;
-  //     });
-  //   }, 3000); // Simulate processing time
-
-  //   return () => clearInterval(interval);
-  // }, [isProcessing, steps.length]);
+    // Đang xử lý
+    setIsProcessing(true);
+    const activeIndex = steps.findIndex(step => step.isActive);
+    if (activeIndex !== -1) {
+      setCurrentStep(activeIndex);
+    } else {
+      // fallback: tìm step cuối cùng đã hoàn thành
+      const lastCompleted = steps.findLastIndex(step => step.isCompleted);
+      setCurrentStep(lastCompleted >= 0 ? lastCompleted + 1 : 0);
+    }
+  }, [paper, steps]); // giờ steps đã ổn định
 
   return (
     <div className="detail-section">
@@ -89,29 +99,15 @@ export function ProcessingTimeline({ paper }) {
                 <div className="timeline-step__dot">
                   {isCompleted && !hasError && (
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                      <path
-                        d="M2.5 6L4.5 8L9.5 3"
-                        stroke="white"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
+                      <path d="M2.5 6L4.5 8L9.5 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                   )}
                   {hasError && (
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                      <path
-                        d="M3 3L9 9M9 3L3 9"
-                        stroke="white"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
+                      <path d="M3 3L9 9M9 3L3 9" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                   )}
-                  {isActive && !isCompleted && !hasError && (
-                    <div className="timeline-step__spinner" />
-                  )}
+                  {isActive && !isCompleted && !hasError && <div className="timeline-step__spinner" />}
                 </div>
                 {index < steps.length - 1 && (
                   <div className={`timeline-step__line timeline-step__line--horizontal ${isCompleted ? 'timeline-step__line--completed' : ''}`} />
@@ -120,19 +116,9 @@ export function ProcessingTimeline({ paper }) {
               <div className="timeline-step__content">
                 <div className="timeline-step__title">{step.title}</div>
                 <div className="timeline-step__description">{step.description}</div>
-                {isActive && !isCompleted && !hasError && (
-                  <div className="timeline-step__status">Đang xử lý...</div>
-                )}
-                {hasError && (
-                  <div className="timeline-step__status timeline-step__status--error">
-                    {paper.parseError || 'Xử lý thất bại'}
-                  </div>
-                )}
-                {isCompleted && !hasError && (
-                  <div className="timeline-step__status timeline-step__status--completed">
-                    Hoàn thành
-                  </div>
-                )}
+                {isActive && !isCompleted && !hasError && <div className="timeline-step__status">Đang xử lý...</div>}
+                {hasError && <div className="timeline-step__status timeline-step__status--error">{paper.processing_error || 'Xử lý thất bại'}</div>}
+                {isCompleted && !hasError && <div className="timeline-step__status timeline-step__status--completed">Hoàn thành</div>}
               </div>
             </div>
           );

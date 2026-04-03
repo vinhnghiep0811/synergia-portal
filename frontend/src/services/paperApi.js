@@ -130,6 +130,36 @@ export function getPaperFileViewUrl(paperId) {
 }
 
 export async function getPapersByCanonicalId(canonicalId) {
-  const res = await apiRequest(`/canonical-documents/${canonicalId}/papers`);
+  const res = await apiClient.get(`/canonical-documents/${canonicalId}/papers`);
   return res;
+}
+
+/**
+ * Lấy danh sách extraction runs theo canonical document id
+ * @param {string} canonicalId
+ * @returns {Promise<Array>}
+ */
+export async function getExtractionRunsByCanonicalId(canonicalId) {
+  try {
+    const response = await apiClient.get(`/api/extraction-runs/canonical/${canonicalId}`);
+    return response.data;
+  } catch (error) {
+    const message = await parseApiError(error);
+    throw new Error(message);
+  }
+}
+
+/**
+ * Lấy chi tiết extraction run theo id
+ * @param {string} runId
+ * @returns {Promise<Object>}
+ */
+export async function getExtractionRunDetail(runId) {
+  try {
+    const response = await apiClient.get(`/api/extraction-runs/${runId}`);
+    return response.data;
+  } catch (error) {
+    const message = await parseApiError(error);
+    throw new Error(message);
+  }
 }
