@@ -397,58 +397,63 @@ class LLMExtractionService:
             "evidence": evidence,
         }
 
-    def _normalize_list_field(self, raw: Any) -> dict[str, Any]:
+    def _normalize_list_field(self, raw: Any) -> list[dict[str, Any]]:
         if raw is None:
-            return {"items": [], "evidence": []}
+            return []
+
+        normalized_items: list[dict[str, Any]] = []
 
         if isinstance(raw, list):
-            # case 1: ["a", "b"]
+            # case 1: ["a", "b"] -> invalid for current schema because no per-item evidence
             if all(isinstance(x, str) for x in raw):
-                items = [x.strip() for x in raw if isinstance(x, str) and x.strip()]
-                return {"items": items, "evidence": []}
+                return []
 
             # case 2: [{"value": "...", "evidence": [...]}, ...]
-            items: list[str] = []
-            merged_evidence: list[dict[str, Any]] = []
-
             for x in raw:
                 if not isinstance(x, dict):
                     continue
 
                 value = x.get("value")
-                if isinstance(value, str) and value.strip():
-                    items.append(value.strip())
+                if not isinstance(value, str) or not value.strip():
+                    continue
 
-                merged_evidence.extend(self._normalize_evidence(x.get("evidence")))
+                evidence = self._normalize_evidence(x.get("evidence"))
+                if not evidence:
+                    continue
 
-            if items and not merged_evidence:
-                items = []
+                normalized_items.append({
+                    "value": value.strip(),
+                    "evidence": evidence,
+                })
 
-            return {
-                "items": items,
-                "evidence": merged_evidence,
-            }
+            return normalized_items
 
         if not isinstance(raw, dict):
-            return {"items": [], "evidence": []}
+            return []
 
+        # backward-compatible old format:
+        # {"items": ["a", "b"], "evidence": [...]}
         raw_items = raw.get("items")
         if raw_items is None:
             raw_items = raw.get("value")
 
         if not isinstance(raw_items, list):
-            raw_items = []
+            return []
 
-        items = [x.strip() for x in raw_items if isinstance(x, str) and x.strip()]
         evidence = self._normalize_evidence(raw.get("evidence"))
+        if not evidence:
+            return []
 
-        if items and not evidence:
-            items = []
+        for x in raw_items:
+            if not isinstance(x, str) or not x.strip():
+                continue
 
-        return {
-            "items": items,
-            "evidence": evidence,
-        }
+            normalized_items.append({
+                "value": x.strip(),
+                "evidence": evidence,
+            })
+
+        return normalized_items
 
     def _normalize_evaluation_setup(
         self,
@@ -537,18 +542,45 @@ class LLMExtractionService:
     
     def _fill_missing_pages(
         self,
-        field_obj: dict[str, Any],
+        field_obj: Any,
         pages: list[dict],
-    ) -> dict[str, Any]:
-        evidences = field_obj.get("evidence") or []
+    ) -> Any:
+        if not field_obj:
+            return field_obj
 
-        for ev in evidences:
-            if ev.get("page") is None:
-                matched_page = self._match_snippet_to_page(
-                    ev.get("snippet", ""),
-                    pages,
-                )
-                if matched_page is not None:
-                    ev["page"] = matched_page
+        if isinstance(field_obj, list):
+            normalized_items: list[dict[str, Any]] = []
+
+            for item in field_obj:
+                if not isinstance(item, dict):
+                    continue
+
+                evidences = item.get("evidence") or []
+                for ev in evidences:
+                    if ev.get("page") is None:
+                        matched_page = self._match_snippet_to_page(
+                            ev.get("snippet", ""),
+                            pages,
+                        )
+                        if matched_page is not None:
+                            ev["page"] = matched_page
+
+                normalized_items.append(item)
+
+            return normalized_items
+
+        if isinstance(field_obj, dict):
+            evidences = field_obj.get("evidence") or []
+
+            for ev in evidences:
+                if ev.get("page") is None:
+                    matched_page = self._match_snippet_to_page(
+                        ev.get("snippet", ""),
+                        pages,
+                    )
+                    if matched_page is not None:
+                        ev["page"] = matched_page
+
+            return field_obj
 
         return field_obj

@@ -14,6 +14,24 @@ from app.schemas.extraction import (
 
 router = APIRouter(prefix="/extraction-runs", tags=["extraction-runs"])
 
+def _to_extraction_run_response(extraction: ExtractionRun) -> ExtractionRunResponse:
+    return ExtractionRunResponse(
+        id=extraction.id,
+        canonical_document_id=extraction.canonical_document_id,
+        model_name=extraction.model_name,
+        prompt_version=extraction.prompt_version,
+        status=extraction.status,
+        problem_statement=extraction.problem_statement,
+        main_method=extraction.main_method,
+        contributions=extraction.contributions or [],
+        limitations=extraction.limitations or [],
+        evaluation_setup=extraction.evaluation_setup,
+        raw_llm_response=extraction.raw_llm_response,
+        token_input=extraction.token_input,
+        token_output=extraction.token_output,
+        created_at=extraction.created_at,
+        updated_at=extraction.updated_at,
+    )
 
 @router.get(
     "/by-paper/{paper_id}",
@@ -82,7 +100,7 @@ def get_latest_extraction_by_paper(
             detail="Extraction run not found.",
         )
 
-    return extraction
+    return _to_extraction_run_response(extraction)
 
 
 @router.get(
@@ -159,4 +177,4 @@ def get_extraction_run(
             detail="Extraction run not found.",
         )
 
-    return extraction
+    return _to_extraction_run_response(extraction)

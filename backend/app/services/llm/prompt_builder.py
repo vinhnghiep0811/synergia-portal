@@ -26,26 +26,30 @@ class LLMPromptBuilder:
                     }
                 ],
             },
-            "contributions": {
-                "value": ["string"],
-                "evidence": [
-                    {
-                        "snippet": "string",
-                        "page": "integer | null",
-                        "section": "string | null",
-                    }
-                ],
-            },
-            "limitations": {
-                "value": ["string"],
-                "evidence": [
-                    {
-                        "snippet": "string",
-                        "page": "integer | null",
-                        "section": "string | null",
-                    }
-                ],
-            },
+            "contributions": [
+                {
+                    "value": "string",
+                    "evidence": [
+                        {
+                            "snippet": "string",
+                            "page": "integer | null",
+                            "section": "string | null"
+                        }
+                    ]
+                }
+            ],
+            "limitations": [
+                {
+                    "value": "string",
+                    "evidence": [
+                        {
+                            "snippet": "string",
+                            "page": "integer | null",
+                            "section": "string | null"
+                        }
+                    ]
+                }
+            ],
             "evaluation_setup": {
                 "value": {
                     "datasets": ["string"],
@@ -104,10 +108,10 @@ Field-specific limits:
 - method.evidence: at most 1 item
 
 - contributions.value: 0 to 3 short strings
-- contributions.evidence: at most 1 item total
+- contributions.evidence: each contribution must have exactly 1 evidence item
 
 - limitations.value: 0 to 2 short strings
-- limitations.evidence: at most 1 item total
+- limitations.evidence: each limitation must have exactly 1 evidence item
 
 - evaluation_setup.value.datasets: at most 3 dataset names
 - evaluation_setup.value.metrics: at most 4 metric names
@@ -126,11 +130,17 @@ Evidence rules (STRICT):
 - do NOT include long sentences or paragraphs
 - do NOT include multiple sentences in snippet
 - if value is null or empty, evidence must be []
+- For contributions and limitations:
+  each item MUST have its own evidence
+  do NOT share evidence across multiple items
 
 Consistency rules:
 - if a scalar value is null, its evidence must be []
 - if a list value is empty, its evidence must be []
 - if all evaluation_setup lists are empty, evaluation_setup.evidence must be []
+- each contribution item must have its own evidence array
+- each limitation item must have its own evidence array
+- if an item has no strong evidence, DO NOT include that item
 
 Field interpretation rules:
 - problem: the research problem, gap, or task the paper aims to solve
