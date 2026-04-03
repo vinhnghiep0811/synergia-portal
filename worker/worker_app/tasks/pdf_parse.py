@@ -49,7 +49,7 @@ def pdf_parse(paper_id: str) -> None:
         # --------------------------------
         # 1. set status parsing
         # --------------------------------
-        paper.processing_status = "pending"
+        paper.processing_status = "processing"
         paper.processing_stage = "parsing"
         paper.processing_error = None
         db.commit()
@@ -155,7 +155,7 @@ def pdf_parse(paper_id: str) -> None:
         # --------------------------------
         # 9. mark parse done
         # --------------------------------
-        paper.processing_status = "pending"
+        paper.processing_status = "processing"
         paper.processing_stage = "parsed"
         paper.processing_error = None
         db.commit()

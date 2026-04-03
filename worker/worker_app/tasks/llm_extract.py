@@ -43,7 +43,7 @@ def llm_extract(canonical_document_id: str) -> None:
         # 1. mark extracting
         for paper in papers:
             if paper.processing_status != "failed":
-                paper.processing_status = "pending"
+                paper.processing_status = "processing"
                 paper.processing_stage = "llm_extracting"
                 paper.processing_error = None
         db.commit()
@@ -55,7 +55,7 @@ def llm_extract(canonical_document_id: str) -> None:
         # 3. update papers after success/cache hit
         for paper in papers:
             if paper.processing_status != "failed":
-                paper.processing_status = "processed"
+                paper.processing_status = "completed"
                 paper.processing_stage = "llm_extracted"
                 paper.processing_error = None
         db.commit()
