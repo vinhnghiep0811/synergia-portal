@@ -21,18 +21,54 @@ class GeminiLLMProvider(BaseLLMProvider):
         self.model = GEMINI_MODEL
         self.temperature = GEMINI_TEMPERATURE
         self.max_output_tokens = GEMINI_MAX_OUTPUT_TOKENS
-
+        
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is missing.")
 
     def extract_metadata(self, prompt: str) -> Dict[str, Any]:
         raw_response = self._call_gemini(prompt)
-        raw_text = self._extract_text_from_response(raw_response)
-        result_json = self._safe_parse_json(raw_text)
 
         usage = raw_response.get("usageMetadata") or {}
         candidates = raw_response.get("candidates") or []
         finish_reason = candidates[0].get("finishReason") if candidates else None
+
+        raw_text = self._extract_text_from_response(raw_response)
+        with open("/tmp/gemini_raw_output.txt", "w", encoding="utf-8") as f:
+            f.write(raw_text)
+        logger.info(
+            "[GEMINI OUTPUT PREVIEW] chars=%s preview=%s",
+            len(raw_text),
+            raw_text[:1000]
+        )
+        logger.info(
+            "[GEMINI OUTPUT TAIL] last_1000_chars=\n%s",
+            raw_text[-1000:]
+        )
+        logger.warning(
+            "[GEMINI META] model=%s finish_reason=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s output_chars=%s",
+            self.model,
+            finish_reason,
+            usage.get("promptTokenCount"),
+            usage.get("candidatesTokenCount"),
+            usage.get("totalTokenCount"),
+            len(raw_text),
+        )
+
+        result_json = self._safe_parse_json(raw_text)
+
+        if finish_reason == "MAX_TOKENS":
+            logger.error(
+                "[GEMINI TRUNCATED] finish_reason=MAX_TOKENS | output_tail=\n%s",
+                raw_text[-1500:]
+            )
+            raise ValueError("Gemini output was truncated due to max output tokens")
+
+        if result_json is None:
+            logger.error(
+                "[GEMINI INVALID JSON] output_head=\n%s\n\noutput_tail=\n%s",
+                raw_text[:1000],
+                raw_text[-1000:]
+            )
 
         return {
             "result_json": result_json,
@@ -46,7 +82,6 @@ class GeminiLLMProvider(BaseLLMProvider):
             "model": self.model,
             "finish_reason": finish_reason,
         }
-
     def _call_gemini(self, prompt: str) -> Dict[str, Any]:
         GeminiLLMProvider._call_count += 1
 
@@ -78,6 +113,9 @@ class GeminiLLMProvider(BaseLLMProvider):
                 "temperature": self.temperature,
                 "maxOutputTokens": self.max_output_tokens,
                 "responseMimeType": "application/json",
+                "thinkingConfig": {
+                    "thinkingBudget": 0
+                },
             },
         }
 

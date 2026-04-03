@@ -1,7 +1,7 @@
 import hashlib
 import logging
 import re
-from typing import Optional, Tuple
+from typing import Optional, Tuple, TypedDict, List
 
 import pdfplumber
 
@@ -9,6 +9,9 @@ logger = logging.getLogger(__name__)
 
 DOI_REGEX = re.compile(r"(?<![\d.])10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", re.IGNORECASE)
 
+class PageText(TypedDict):
+    page: int
+    text: str
 
 def strip_nul_chars(text: Optional[str]) -> str:
     if not text:
@@ -387,18 +390,31 @@ def extract_pdf_text_and_preview(
 def extract_pdf_text_for_llm(
     file_path: str,
     preview_chars: int = 2000,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, List[PageText]]:
     """
     Dùng cho LLM pipeline:
     - cố gắng lấy full text của toàn bộ PDF
     - preview chỉ để hiển thị nhanh / debug
     """
-    full_text = extract_pdf_full_text(
-        file_path=file_path,
-        max_pages=None,
-    )
+    pages: List[PageText] = []
+    full_parts: list[str] = []
+
+    with pdfplumber.open(file_path) as pdf:
+        for idx, page in enumerate(pdf.pages, start=1):
+            text = page.extract_text() or ""
+            text = text.strip()
+
+            pages.append({
+                "page": idx,
+                "text": text,
+            })
+
+            if text:
+                full_parts.append(f"[Page {idx}]\n{text}")
+
+    full_text = "\n\n".join(full_parts)
     preview = build_text_preview(full_text, preview_chars=preview_chars)
-    return full_text, preview
+    return full_text, preview, pages
 
 
 def normalize_doi(raw_doi: str) -> str:
