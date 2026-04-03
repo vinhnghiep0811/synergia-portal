@@ -49,7 +49,7 @@ def semantic_scholar_enrich(canonical_document_id: str) -> None:
         # --------------------------------
         for paper in papers:
             if paper.processing_status != "failed":
-                paper.processing_status = "pending"
+                paper.processing_status = "processing"
                 paper.processing_stage = "enriching"
                 paper.processing_error = None
         db.commit()
@@ -66,7 +66,7 @@ def semantic_scholar_enrich(canonical_document_id: str) -> None:
         if result in {"enriched", "unmatched", "skipped_already_enriched"}:
             for paper in papers:
                 if paper.processing_status != "failed":
-                    paper.processing_status = "pending"
+                    paper.processing_status = "processing"
                     paper.processing_stage = "enriched"
                     paper.processing_error = None
             db.commit()
@@ -80,7 +80,7 @@ def semantic_scholar_enrich(canonical_document_id: str) -> None:
         elif result == "rate_limited":
             for paper in papers:
                 if paper.processing_status != "failed":
-                    paper.processing_status = "pending"
+                    paper.processing_status = "processing"
                     paper.processing_stage = "enriched"
                     paper.processing_error = None
             db.commit()
