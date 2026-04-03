@@ -1,11 +1,11 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.extraction_result import (
     ScalarFieldWithEvidence,
-    ListFieldWithEvidence,
+    ListItemWithEvidence,
     EvaluationSetupField,
 )
 
@@ -33,8 +33,8 @@ class ExtractionRunResponse(BaseModel):
 
     problem_statement: ScalarFieldWithEvidence | None = None
     main_method: ScalarFieldWithEvidence | None = None
-    contributions: ListFieldWithEvidence | None = None
-    limitations: ListFieldWithEvidence | None = None
+    contributions: list[ListItemWithEvidence] = Field(default_factory=list)
+    limitations: list[ListItemWithEvidence] = Field(default_factory=list)
     evaluation_setup: EvaluationSetupField | None = None
 
     raw_llm_response: str | None = None
@@ -45,3 +45,8 @@ class ExtractionRunResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("contributions", "limitations", mode="before")
+    @classmethod
+    def none_to_empty_list(cls, v):
+        return v or []

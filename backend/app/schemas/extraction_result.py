@@ -1,5 +1,4 @@
 from typing import List, Optional
-
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -20,14 +19,14 @@ class ScalarFieldWithEvidence(BaseModel):
         return self
 
 
-class ListFieldWithEvidence(BaseModel):
-    items: List[str] = Field(default_factory=list)
+class ListItemWithEvidence(BaseModel):
+    value: str
     evidence: List[EvidenceItem] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_evidence_for_items(self):
-        if len(self.items) > 0 and len(self.evidence) == 0:
-            raise ValueError("Non-empty items must include at least one evidence item.")
+    def validate_evidence_for_value(self):
+        if self.value.strip() != "" and len(self.evidence) == 0:
+            raise ValueError("Non-empty list item must include at least one evidence item.")
         return self
 
 
@@ -59,6 +58,6 @@ class EvaluationSetupField(BaseModel):
 class ExtractionResultSchema(BaseModel):
     problem: ScalarFieldWithEvidence = Field(default_factory=ScalarFieldWithEvidence)
     method: ScalarFieldWithEvidence = Field(default_factory=ScalarFieldWithEvidence)
-    contributions: ListFieldWithEvidence = Field(default_factory=ListFieldWithEvidence)
-    limitations: ListFieldWithEvidence = Field(default_factory=ListFieldWithEvidence)
+    contributions: List[ListItemWithEvidence] = Field(default_factory=list)
+    limitations: List[ListItemWithEvidence] = Field(default_factory=list)
     evaluation_setup: EvaluationSetupField = Field(default_factory=EvaluationSetupField)
