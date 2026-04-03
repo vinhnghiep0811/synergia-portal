@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getCanonicalDocumentDetail } from "../services/paperApi.js";
+import { getCanonicalDocumentDetail, getExtractionRunsByCanonicalId } from "../services/paperApi.js";
 import { AppHeader } from "../components/AppHeader.jsx";
 
 export function CanonicalDocumentDetailPage() {
   const { canonicalId } = useParams();
   const navigate = useNavigate();
   const [document, setDocument] = useState(null);
+  const [extractionRuns, setExtractionRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -15,8 +16,12 @@ export function CanonicalDocumentDetailPage() {
       try {
         setLoading(true);
         setError("");
-        const data = await getCanonicalDocumentDetail(canonicalId);
-        setDocument(data);
+        const [docData, extractionData] = await Promise.all([
+          getCanonicalDocumentDetail(canonicalId),
+          getExtractionRunsByCanonicalId(canonicalId)
+        ]);
+        setDocument(docData);
+        setExtractionRuns(extractionData);
       } catch (error) {
         setError(error.message || "Không thể tải thông tin canonical document");
         setDocument(null);
@@ -336,6 +341,72 @@ export function CanonicalDocumentDetailPage() {
                     <dd>{formatDate(document.updated_at)}</dd>
                   </div>
                 </dl>
+              </div>
+
+              {/* Extraction Runs */}
+              <div className="detail-section">
+                <h3 className="detail-section__title">Extraction Runs</h3>
+                {extractionRuns.length > 0 ? (
+                  <div className="extraction-runs-table">
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ backgroundColor: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
+                          <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>ID</th>
+                          <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Model</th>
+                          <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Chi tiết</th>
+                          <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Status</th>
+                          {/* <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Tokens</th> */}
+                          <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Ngày tạo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {extractionRuns.map((run) => (
+                          <tr key={run.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                            <td style={{ padding: "0.75rem", fontFamily: "monospace", fontSize: "0.8rem" }}>
+                              {run.id}
+                            </td>
+                            <td style={{ padding: "0.75rem" }}>
+                              {run.model_name}
+                            </td>
+                            <td style={{ padding: "0.75rem" }}>
+                              <button
+                                className="btn btn--link"
+                                style={{ fontSize: "0.8rem", padding: "0.25rem 0.5rem" }}
+                                onClick={() => navigate(`/extraction-runs/${run.id}`)}
+                              >
+                                Chi tiết
+                              </button>
+                            </td>
+                            <td style={{ padding: "0.75rem" }}>
+                              <span
+                                style={{
+                                  backgroundColor: run.status === 'completed' ? '#22c55e' : '#f59e0b',
+                                  color: 'white',
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  textTransform: 'uppercase'
+                                }}
+                              >
+                                {run.status}
+                              </span>
+                            </td>
+                            {/* <td style={{ padding: "0.75rem", fontFamily: "monospace", fontSize: "0.8rem" }}>
+                              {run.token_input} → {run.token_output}
+                            </td> */}
+                            <td style={{ padding: "0.75rem", fontSize: "0.8rem" }}>
+                              {formatDate(run.created_at)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div style={{ padding: "1rem", textAlign: "center", color: "#6b7280" }}>
+                    Không có extraction runs nào cho canonical document này.
+                  </div>
+                )}
               </div>
             </div>
           </section>

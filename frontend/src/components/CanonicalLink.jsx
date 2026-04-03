@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { getCanonicalDocumentByPaper } from "../services/paperApi.js";
-
+import { useNavigate } from "react-router-dom";
 export function CanonicalLink({ paperId }) {
   const [canonicalDoc, setCanonicalDoc] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-
+  const navigate = useNavigate();
   useEffect(() => {
     async function loadCanonicalDoc() {
       if (!paperId) return;
@@ -48,7 +48,7 @@ export function CanonicalLink({ paperId }) {
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        window.location.href = `/canonical/${canonicalDoc.id}`;
+        navigate(`/canonical/${canonicalDoc.id}`);
       }}
       style={{
         fontSize: "0.8rem",

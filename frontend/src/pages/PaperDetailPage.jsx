@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { PaperDetail } from "../components/PaperDetail.jsx";
 import {
   getCanonicalDocumentByPaper,
@@ -14,9 +14,7 @@ function bytesToMB(bytes) {
 
 function mapCanonicalAuthors(authors) {
   if (!Array.isArray(authors)) return [];
-  return authors
-    .map((author) => author?.name)
-    .filter(Boolean);
+  return authors.map((author) => author?.name).filter(Boolean);
 }
 
 function mapPaperDetail(detail, canonical) {
@@ -25,18 +23,19 @@ function mapPaperDetail(detail, canonical) {
 
   const semanticScholarStatus = !detail.canonical_document_id
     ? "not_linked"
-    : enrichmentStatus || "pending";
+    : enrichmentStatus || detail.publication_status || "pending";
 
   return {
     id: detail.id,
     originalFilename: detail.original_filename,
     filename: detail.original_filename,
-    title:
-      canonical?.title ||
-      canonical?.title_candidate ||
-      detail.detected_title ||
-      detail.original_filename,
-    status: detail.status,
+    title: canonical?.title || canonical?.title_candidate || detail.detected_title || detail.original_filename,
+    status: detail.processing_status || detail.status,                    // ← giữ nguyên
+    processing_status: detail.processing_status,
+    processing_stage: detail.processing_stage,
+    processing_error: detail.processing_error,
+    publication_status: detail.publication_status,
+
     mimeType: detail.mime_type,
     fileSizeBytes: detail.file_size_bytes,
     sizeMB: bytesToMB(detail.file_size_bytes),
@@ -48,18 +47,17 @@ function mapPaperDetail(detail, canonical) {
     storagePath: detail.storage_path,
     fileHashSha256: detail.file_hash_sha256,
     uploadSource: detail.upload_source,
-    parseStatus: detail.parse_status,
-    parseError: detail.parse_error,
     extractedTextPreview: detail.extracted_text_preview,
+    detectedTitle: detail.detected_title,
     detectedDoi: detail.detected_doi,
     detectedFingerprint: detail.detected_fingerprint,
-    detectedTitle: detail.detected_title,
+
     semanticScholarStatus,
     matchStatus,
-    canonicalEnrichmentStatus: enrichmentStatus,
     semanticSource: canonical?.metadata_source || null,
     ssMatchConfidence: canonical?.ss_match_confidence || null,
     ssPaperId: canonical?.ss_paper_id || null,
+
     canonicalTitle: canonical?.title || null,
     canonicalTitleCandidate: canonical?.title_candidate || null,
     canonicalAbstract: canonical?.abstract || null,
@@ -67,19 +65,13 @@ function mapPaperDetail(detail, canonical) {
     canonicalPublicationYear: canonical?.publication_year || null,
     canonicalAuthors: mapCanonicalAuthors(canonical?.authors_json),
 
-    // fallback for existing consumers
-    authors: mapCanonicalAuthors(canonical?.authors_json),
-    year: canonical?.publication_year || null,
-    venue: canonical?.venue || null,
-    canonicalKey:
-      canonical?.canonical_key ||
-      detail.detected_doi ||
-      detail.detected_fingerprint ||
-      detail.canonical_document_id ||
-      "",
-    hasDeterministicParse: detail.parse_status === "done",
-    hasCanonicalMetadata: enrichmentStatus === "enriched",
-    hasLLMExtraction: false,
+    parseStatus: detail.processing_stage === "parsing"
+      ? "processing"
+      : detail.processing_stage && detail.processing_stage !== "parsing"
+      ? "done"
+      : null,
+    parseError: detail.processing_error,
+    hasLLMExtraction: detail.processing_stage === "llm_extracting" && detail.processing_status !== "failed",
   };
 }
 
@@ -89,87 +81,89 @@ export function PaperDetailPage() {
   const [error, setError] = useState("");
   const { paperId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const loadPaperDetail = async () => {
-    if (!paperId) {
-      setPaper(null);
-      return;
-    }
+  const loadPaperDetail = async (showLoading = false) => {
+    if (!paperId) return;
 
+    console.log(`%c🔄 loadPaperDetail called (location.key = ${location.key})`, 'color:#22c55e;font-weight:bold');
+
+    if (showLoading) setLoading(true);
     try {
       setError("");
       const detail = await getPaperDetail(paperId);
       const canonical = await getCanonicalDocumentByPaper(paperId);
-      setPaper(mapPaperDetail(detail, canonical));
-    } catch (error) {
-      setError(error.message || "Không thể tải chi tiết paper");
+      const mapped = mapPaperDetail(detail, canonical);
+      
+      console.log("%c📦 FRESH paper data:", 'color:#f59e0b;font-weight:bold', {
+        processing_status: mapped.processing_status,
+        processing_stage: mapped.processing_stage,
+        semanticScholarStatus: mapped.semanticScholarStatus,
+        status: mapped.status,                    // ← log thêm để debug
+      });
+      
+      setPaper(mapped);
+    } catch (err) {
+      console.error("❌ Load paper error:", err);
+      setError(err.message || "Không thể tải chi tiết paper");
       setPaper(null);
+    } finally {
+      if (showLoading) setLoading(false);
     }
   };
 
+  // ==================== FETCH MỖI LẦN VÀO TRANG (bao gồm BACK) ====================
   useEffect(() => {
     let isMounted = true;
+    setLoading(true);
 
-    async function initialLoad() {
-      if (!paperId) {
-        setPaper(null);
-        return;
+    const fetchData = async () => {
+      await loadPaperDetail();
+      if (isMounted) setLoading(false);
+    };
+
+    fetchData();
+
+    const handlePageShow = (e) => {
+      if (e.persisted) {
+        console.log('%c📌 RESTORED FROM BFCACHE → refetch', 'color:#f59e0b;font-weight:bold');
+        setPaper(null);           // ← clear stale data
+        loadPaperDetail(true);
       }
-
-      try {
-        setLoading(true);
-        setError("");
-
-        const detail = await getPaperDetail(paperId);
-        const canonical = await getCanonicalDocumentByPaper(paperId);
-
-        if (!isMounted) return;
-
-        setPaper(mapPaperDetail(detail, canonical));
-      } catch (error) {
-        if (!isMounted) return;
-        setError(error.message || "Không thể tải chi tiết paper");
-        setPaper(null);
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    }
-
-    initialLoad();
+    };
+    window.addEventListener('pageshow', handlePageShow);
 
     return () => {
       isMounted = false;
+      window.removeEventListener('pageshow', handlePageShow);
     };
-  }, [paperId]);
+  }, [paperId, location.key]);
 
+  // ==================== POLLING – ĐÃ SỬA ĐIỀU KIỆN ====================
   useEffect(() => {
     if (!paperId || !paper) return;
 
-    // Only poll while parse pipeline is still running
-    const isParseProcessing =
-      paper.status === "parse_queued" ||
-      paper.status === "pending" ||
-      paper.status === "parsing" ||
-      paper.parseStatus === "queued" ||
-      paper.parseStatus === "processing";
+    // ✅ Điều kiện polling mới: poll cho đến khi thực sự hoàn thành
+    const isFinalStatus = 
+      paper.processing_status === "completed" ||
+      paper.processing_status === "processed" ||
+      paper.processing_status === "failed" ||
+      paper.processing_status === "duplicate_detected";
 
-    const isEnrichProcessing =
-      paper.canonicalDocumentId &&
-      (paper.semanticScholarStatus === "pending" ||
-        paper.semanticScholarStatus === "enriching");
+    if (isFinalStatus) {
+      console.log('%c✅ Paper đã hoàn tất, dừng polling', 'color:#16a34a');
+      return;
+    }
 
-    if (!isParseProcessing && !isEnrichProcessing) return;
-
-    const interval = setInterval(loadPaperDetail, 5000); // Poll every 5 seconds
+    console.log('%c⏳ Bắt đầu polling mỗi 3s (status đang xử lý)', 'color:#8b5cf6');
+    const interval = setInterval(() => loadPaperDetail(), 3000);
 
     return () => clearInterval(interval);
-  }, [paperId, paper]);
+  }, [paperId, paper?.processing_status, location.key]);   // depend vào processing_status
 
   return (
     <div className="app-shell">
-      <AppHeader 
+      <AppHeader
         title="Chi tiết tài liệu"
         subtitle="Xem thông tin chi tiết của tài liệu đã chọn."
         showUploadButton={true}
@@ -187,11 +181,11 @@ export function PaperDetailPage() {
       <main className="app-main app-main--papers">
         <div className="app-main__full">
           {loading ? (
-            <div className="card" style={{ padding: "1rem" }}>
+            <div className="card" style={{ padding: "2rem", textAlign: "center" }}>
               Đang tải chi tiết tài liệu...
             </div>
           ) : error ? (
-            <div className="card" style={{ padding: "1rem", color: "#dc2626" }}>
+            <div className="card" style={{ padding: "2rem", color: "#dc2626" }}>
               {error}
             </div>
           ) : (

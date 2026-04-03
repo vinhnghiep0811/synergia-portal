@@ -6,6 +6,7 @@ import { PaperDashboard } from "./pages/PaperDashboard.jsx";
 import { PaperDetailPage } from "./pages/PaperDetailPage.jsx";
 import { CanonicalDocumentsPage } from "./pages/CanonicalDocumentsPage.jsx";
 import { CanonicalDocumentDetailPage } from "./pages/CanonicalDocumentDetailPage.jsx";
+import { ExtractionRunDetailPage } from "./pages/ExtractionRunDetailPage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage.jsx";
 import { ProtectedRoute } from "./components/ProtectedRoute.jsx";
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="/papers/:paperId" element={<PaperDetailPage />} />
         <Route path="/canonical" element={<CanonicalDocumentsPage />} />
         <Route path="/canonical/:canonicalId" element={<CanonicalDocumentDetailPage />} />
+        <Route path="/extraction-runs/:runId" element={<ExtractionRunDetailPage />} />
       </Route>
     </Routes>
   );

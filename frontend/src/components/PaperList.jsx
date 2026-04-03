@@ -27,10 +27,10 @@ export function PaperList({ papers, selectedId }) {
   // Debug: Log papers data
   console.log("PaperList received papers:", papers.map(p => ({
     id: p.id,
-    status: p.status,
-    detectedTitle: p.detectedTitle,
-    detectedDoi: p.detectedDoi,
-    title: p.title,
+    
+    processing_status: p.processing_status,
+    publication_status: p.publication_status,
+    processing_stage: p.processing_stage,
     originalFilename: p.originalFilename
   })));
 
@@ -43,12 +43,10 @@ export function PaperList({ papers, selectedId }) {
     return papers.filter((p) => {
       // First filter by active tab
       const isInPendingTab = activeTab === "pending" && (
-        p.status === "parse_queued" ||
-        p.status === "canonicalized" ||
-        p.status === "pending"
+        p.processing_status === "pending"
       );
       const isInProcessedTab = activeTab === "processed" && (
-        p.status === "processed" || p.status === "duplicate_detected"
+        p.processing_status === "processed" || p.processing_status === "completed" || p.processing_status === "failed"
       );
       
       if (!isInPendingTab && !isInProcessedTab) return false;
@@ -103,9 +101,9 @@ export function PaperList({ papers, selectedId }) {
 
   const paginatedPending = useMemo(() => {
     const pending = sortedFiltered.filter(p => 
-      p.status === "parse_queued" ||
-      p.status === "canonicalized" ||
-      p.status === "pending"
+      p.processing_status === "pending" ||
+      p.processing_status === "parse_queued" ||
+      p.processing_status === "canonicalized"
     );
     const startIndex = (pendingPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
@@ -114,7 +112,10 @@ export function PaperList({ papers, selectedId }) {
 
   const paginatedProcessed = useMemo(() => {
     const processed = sortedFiltered.filter(p => 
-      p.status === "processed" || p.status === "duplicate_detected"
+      p.processing_status === "processed" || 
+      p.processing_status === "completed" || 
+      p.processing_status === "failed" ||
+      p.processing_status === "duplicate_detected"
     );
     const startIndex = (processedPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
@@ -123,16 +124,19 @@ export function PaperList({ papers, selectedId }) {
 
   const totalPendingPages = useMemo(() => {
     const pending = sortedFiltered.filter(p => 
-      p.status === "parse_queued" ||
-      p.status === "canonicalized" ||
-      p.status === "pending"
+      p.processing_status === "pending" ||
+      p.processing_status === "parse_queued" ||
+      p.processing_status === "canonicalized"
     );
     return Math.ceil(pending.length / itemsPerPage);
   }, [sortedFiltered]);
 
   const totalProcessedPages = useMemo(() => {
     const processed = sortedFiltered.filter(p => 
-      p.status === "processed" || p.status === "duplicate_detected"
+      p.processing_status === "processed" || 
+      p.processing_status === "completed" || 
+      p.processing_status === "failed" ||
+      p.processing_status === "duplicate_detected"
     );
     return Math.ceil(processed.length / itemsPerPage);
   }, [sortedFiltered]);
@@ -254,13 +258,13 @@ export function PaperList({ papers, selectedId }) {
                 }}
               >
                 Đang chờ xử lý ({(pendingPage - 1) * itemsPerPage + 1}-{Math.min(pendingPage * itemsPerPage, sortedFiltered.filter(p => 
-                  p.status === "parse_queued" ||
-                  p.status === "canonicalized" ||
-                  p.status === "pending"
+                  p.processing_status === "pending" ||
+                  p.processing_status === "parse_queued" ||
+                  p.processing_status === "canonicalized"
                 ).length)} / {sortedFiltered.filter(p => 
-                  p.status === "parse_queued" ||
-                  p.status === "canonicalized" ||
-                  p.status === "pending"
+                  p.processing_status === "pending" ||
+                  p.processing_status === "parse_queued" ||
+                  p.processing_status === "canonicalized"
                 ).length})
               </h3>
             </div>
@@ -320,8 +324,8 @@ export function PaperList({ papers, selectedId }) {
                     <td>
                       <div className="simple-list-id">{paper.id}</div>
                     </td>
-                    <td className="paper-title-cell" style={{ maxWidth: "200px", wordWrap: "break-word", whiteSpace: "normal" }}>
-                      <div className="paper-title-main">
+                    <td className="paper-title-cell" style={{ maxWidth: "250px", wordWrap: "break-word", whiteSpace: "normal", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      <div className="paper-title-main" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {paper.originalFilename || paper.filename || "Unknown file"}
                       </div>
                     </td>
@@ -406,6 +410,48 @@ export function PaperList({ papers, selectedId }) {
         </div>
       )}
 
+      {/* Empty state for pending tab */}
+      {activeTab === "pending" && paginatedPending.length === 0 && (
+        <div style={{ 
+          padding: "3rem", 
+          textAlign: "center", 
+          backgroundColor: "#f9fafb",
+          borderRadius: "8px",
+          border: "1px solid #e5e7eb",
+          marginBottom: "2rem"
+        }}>
+          <div style={{
+            width: "48px",
+            height: "48px",
+            backgroundColor: "#fbbf24",
+            borderRadius: "50%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            margin: "0 auto 1rem",
+            fontSize: "1.5rem",
+            color: "white"
+          }}>
+            📄
+          </div>
+          <h3 style={{
+            fontSize: "1.1rem",
+            fontWeight: "600",
+            color: "#374151",
+            margin: "0 0 0.5rem"
+          }}>
+            Không có tài liệu nào đang xử lý
+          </h3>
+          <p style={{
+            fontSize: "0.9rem",
+            color: "#6b7280",
+            margin: 0
+          }}>
+            Tất cả tài liệu đã được xử lý xong. Hãy tải lên tài liệu mới để bắt đầu.
+          </p>
+        </div>
+      )}
+
       {activeTab === "processed" && paginatedProcessed.length > 0 && (
         <div>
           <div
@@ -440,9 +486,15 @@ export function PaperList({ papers, selectedId }) {
                 }}
               >
                 Đã xử lý ({(processedPage - 1) * itemsPerPage + 1}-{Math.min(processedPage * itemsPerPage, sortedFiltered.filter(p => 
-                  p.status === "processed" || p.status === "duplicate_detected"
+                  p.processing_status === "processed" || 
+                  p.processing_status === "completed" || 
+                  p.processing_status === "failed" ||
+                  p.processing_status === "duplicate_detected"
                 ).length)} / {sortedFiltered.filter(p => 
-                  p.status === "processed" || p.status === "duplicate_detected"
+                  p.processing_status === "processed" || 
+                  p.processing_status === "completed" || 
+                  p.processing_status === "failed" ||
+                  p.processing_status === "duplicate_detected"
                 ).length})
               </h3>
             </div>
@@ -502,14 +554,14 @@ export function PaperList({ papers, selectedId }) {
                     <td>
                       <div className="simple-list-id">{paper.id}</div>
                     </td>
-                    <td className="paper-title-cell">
-                      <div className="paper-title-main">
+                    <td className="paper-title-cell" style={{ maxWidth: "300px", wordWrap: "break-word", whiteSpace: "normal", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      <div className="paper-title-main" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {paper.detectedTitle || paper.title || paper.originalFilename || paper.filename || "Không có tiêu đề"}
                       </div>
                       {paper.venue && <div className="paper-title-sub">{paper.venue}</div>}
                     </td>
                     <td>
-                      <PaperStatusBadge status={paper.status} />
+                      <PaperStatusBadge status={paper.processing_status} />
                     </td>
                     <td>{paper.year || "-"}</td>
                     <td>
@@ -591,15 +643,49 @@ export function PaperList({ papers, selectedId }) {
         </div>
       )}
 
-      {(activeTab === "pending" && paginatedPending.length === 0) || 
-       (activeTab === "processed" && paginatedProcessed.length === 0) && (
-        <div style={{ textAlign: "center", padding: "2rem", color: "#6b7280" }}>
-          {activeTab === "pending" 
-            ? "Không có tài liệu nào đang xử lý." 
-            : "Không có tài liệu nào đã xử lý."
-          }
+      {/* Empty state for processed tab */}
+      {activeTab === "processed" && paginatedProcessed.length === 0 && (
+        <div style={{ 
+          padding: "3rem", 
+          textAlign: "center", 
+          backgroundColor: "#f0fdf4",
+          borderRadius: "8px",
+          border: "1px solid #bbf7d0",
+          marginBottom: "2rem"
+        }}>
+          <div style={{
+            width: "48px",
+            height: "48px",
+            backgroundColor: "#22c55e",
+            borderRadius: "50%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            margin: "0 auto 1rem",
+            fontSize: "1.5rem",
+            color: "white"
+          }}>
+            ✅
+          </div>
+          <h3 style={{
+            fontSize: "1.1rem",
+            fontWeight: "600",
+            color: "#166534",
+            margin: "0 0 0.5rem"
+          }}>
+            Không có tài liệu nào đã xử lý
+          </h3>
+          <p style={{
+            fontSize: "0.9rem",
+            color: "#15803d",
+            margin: 0
+          }}>
+            Chưa có tài liệu nào được xử lý hoàn tất. Hãy tải lên tài liệu để bắt đầu xử lý.
+          </p>
         </div>
       )}
+
+      {/* Remove old combined empty state - now handled separately */}
     </section>
   );
 }
