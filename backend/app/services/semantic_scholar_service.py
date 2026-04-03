@@ -5,6 +5,7 @@ import threading
 import time
 from difflib import SequenceMatcher
 from typing import Any
+
 import httpx
 from sqlalchemy.orm import Session
 
@@ -72,26 +73,33 @@ class SemanticScholarService:
             return "enriched"
 
         if is_rate_limited:
-            canonical.enrichment_status = "rate_limited"
-            canonical.match_status = "rate_limited"
-            canonical.metadata_source = "semantic_scholar"
-            self.db.add(canonical)
-            self.db.commit()
-            self.db.refresh(canonical)
-            logger.info(
-                "[SS enrich] Rate limited after %s attempts. Please retry after 5 minutes: %s",
-                SS_MAX_ATTEMPTS,
-                canonical.id,
-            )
+            self._mark_rate_limited(canonical)
             return "rate_limited"
 
+        self._mark_unmatched(canonical)
+        return "unmatched"
+
+    def _mark_rate_limited(self, canonical: CanonicalDocument) -> None:
+        canonical.enrichment_status = "rate_limited"
+        canonical.match_status = "rate_limited"
+        canonical.metadata_source = "semantic_scholar"
+        self.db.add(canonical)
+        self.db.commit()
+        self.db.refresh(canonical)
+        logger.info(
+            "[SS enrich] Rate limited after %s attempts. Please retry after 5 minutes: %s",
+            SS_MAX_ATTEMPTS,
+            canonical.id,
+        )
+
+    def _mark_unmatched(self, canonical: CanonicalDocument) -> None:
         canonical.enrichment_status = "unmatched"
         canonical.match_status = "unmatched"
+        canonical.metadata_source = "semantic_scholar"
         self.db.add(canonical)
         self.db.commit()
         self.db.refresh(canonical)
         logger.info("[SS enrich] Unmatched: %s", canonical.id)
-        return "unmatched"
 
     def _sync_title_to_papers(self, canonical: CanonicalDocument, ss_title: str | None) -> None:
         if not ss_title:
@@ -158,6 +166,7 @@ class SemanticScholarService:
 
     def _normalize_title(self, title: str) -> str:
         import re
+
         title = re.sub(r"([a-z])([A-Z])", r"\1 \2", title)
         title = title.lower().strip()
         title = re.sub(r"[^a-z0-9\s]", "", title)
@@ -378,7 +387,9 @@ class SemanticScholarService:
             for a in paper_data.get("authors", [])
         ]
         canonical.ss_paper_id = paper_data.get("paperId")
-        canonical.ss_match_confidence = 1.0 if match_type == "matched_by_doi" else paper_data.get("_match_score", 0.0)
+        canonical.ss_match_confidence = (
+            1.0 if match_type == "matched_by_doi" else paper_data.get("_match_score", 0.0)
+        )
         canonical.metadata_source = "semantic_scholar"
         canonical.enrichment_status = "enriched"
         canonical.match_status = match_type

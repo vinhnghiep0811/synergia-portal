@@ -12,7 +12,11 @@ class PaperUploadResponse(BaseModel):
     mime_type: str
     file_size_bytes: int
     file_hash_sha256: str
-    status: str
+
+    processing_status: str
+    processing_stage: Optional[str] = None
+    publication_status: str
+
     upload_source: str
     created_at: datetime
 
@@ -22,7 +26,11 @@ class PaperUploadResponse(BaseModel):
 class PaperListItemResponse(BaseModel):
     id: UUID
     original_filename: str
-    status: str
+
+    processing_status: str
+    processing_stage: Optional[str] = None
+    publication_status: str
+
     mime_type: str
     file_size_bytes: int
     created_at: datetime
@@ -43,10 +51,11 @@ class PaperDetailResponse(BaseModel):
     file_hash_sha256: str
 
     upload_source: str
-    status: str
 
-    parse_status: Optional[str] = None
-    parse_error: Optional[str] = None
+    processing_status: str
+    processing_stage: Optional[str] = None
+    publication_status: str
+    processing_error: Optional[str] = None
 
     extracted_text_preview: Optional[str] = None
     detected_doi: Optional[str] = None
@@ -60,12 +69,16 @@ class PaperDetailResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class PaperInCanonicalResponse(BaseModel):
     id: UUID
     canonical_document_id: Optional[UUID] = None
     original_filename: str
-    status: str
-    parse_status: Optional[str] = None
+
+    processing_status: str
+    processing_stage: Optional[str] = None
+    publication_status: str
+
     detected_title: Optional[str] = None
     detected_doi: Optional[str] = None
     is_duplicate: bool
