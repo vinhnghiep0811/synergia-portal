@@ -79,6 +79,7 @@ export function PaperDetailPage() {
   const [paper, setPaper] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const { paperId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -92,7 +93,9 @@ export function PaperDetailPage() {
     try {
       setError("");
       const detail = await getPaperDetail(paperId);
-      const canonical = await getCanonicalDocumentByPaper(paperId);
+      const canonical = detail?.canonical_document_id
+        ? await getCanonicalDocumentByPaper(paperId)
+        : null;
       const mapped = mapPaperDetail(detail, canonical);
       
       console.log("%c📦 FRESH paper data:", 'color:#f59e0b;font-weight:bold', {
@@ -113,6 +116,19 @@ export function PaperDetailPage() {
   };
 
   // ==================== FETCH MỖI LẦN VÀO TRANG (bao gồm BACK) ====================
+  useEffect(() => {
+    if (!location.state?.message) return;
+
+    setSuccessMessage(location.state.message);
+    window.history.replaceState({}, document.title);
+
+    const timeout = setTimeout(() => {
+      setSuccessMessage("");
+    }, 4000);
+
+    return () => clearTimeout(timeout);
+  }, [location.state]);
+
   useEffect(() => {
     let isMounted = true;
     setLoading(true);
@@ -161,6 +177,11 @@ export function PaperDetailPage() {
     return () => clearInterval(interval);
   }, [paperId, paper?.processing_status, location.key]);   // depend vào processing_status
 
+  const canConfirmPublish =
+    !!paper &&
+    !!paper.canonicalDocumentId &&
+    (paper.processing_status === "completed" || paper.processing_status === "processed");
+
   return (
     <div className="app-shell">
       <AppHeader
@@ -168,18 +189,43 @@ export function PaperDetailPage() {
         subtitle="Xem thông tin chi tiết của tài liệu đã chọn."
         showUploadButton={true}
         extraAction={
-          <button
-            className="btn btn--secondary"
-            onClick={() => navigate("/papers")}
-            style={{ marginRight: "1rem" }}
-          >
-            ← Quay lại danh sách
-          </button>
+          <>
+            {canConfirmPublish && (
+              <button
+                className="btn btn--primary"
+                onClick={() => navigate(`/papers/${paperId}/publish/confirm`)}
+                style={{ marginRight: "1rem" }}
+              >
+                Confirm Publish
+              </button>
+            )}
+            <button
+              className="btn btn--secondary"
+              onClick={() => navigate("/papers")}
+              style={{ marginRight: "1rem" }}
+            >
+              ← Quay lại danh sách
+            </button>
+          </>
         }
       />
 
       <main className="app-main app-main--papers">
         <div className="app-main__full">
+          {successMessage && (
+            <div
+              className="card"
+              style={{
+                backgroundColor: "#ecfdf5",
+                color: "#047857",
+                border: "1px solid #a7f3d0",
+                padding: "1rem",
+              }}
+            >
+              {successMessage}
+            </div>
+          )}
+
           {loading ? (
             <div className="card" style={{ padding: "2rem", textAlign: "center" }}>
               Đang tải chi tiết tài liệu...

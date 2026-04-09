@@ -1010,6 +1010,106 @@
   animation: spin 1s linear infinite;
 }
 
+.publish-confirm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.publish-meta-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.publish-meta-summary__item {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.publish-meta-summary__label {
+  font-size: 0.74rem;
+  color: #64748b;
+}
+
+.publish-meta-summary__value {
+  font-size: 0.82rem;
+  color: #111827;
+  word-break: break-word;
+}
+
+.publish-callout {
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  font-size: 0.86rem;
+}
+
+.publish-callout--info {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.publish-callout--success {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.publish-callout--error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.publish-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.publish-form-section {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 0.9rem;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.publish-form-section__title {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #1f2937;
+}
+
+.publish-inline-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.publish-textarea {
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.publish-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
@@ -1034,6 +1134,18 @@
   }
 
   .detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .publish-meta-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .publish-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .publish-inline-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }

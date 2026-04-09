@@ -4,15 +4,38 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile, status, HTTPExc
 from sqlalchemy.orm import Session
 from fastapi.responses import StreamingResponse
 from app.core.database import get_db
+from app.core.security import get_current_user
+from app.models.user import User
 from app.schemas.paper import (
     PaperDetailResponse,
     PaperListItemResponse,
     PaperUploadResponse,
 )
+from app.schemas.publish import (
+    PublishMetadataPreviewResponse,
+    PublishMetadataUpdateRequest,
+    PublishVersionCreateResponse,
+)
 from app.services.paper_service import PaperService
+from app.services.publish_service import PublishService
 from app.services.storage_service import StorageService
 
 router = APIRouter(prefix="/papers", tags=["papers"])
+
+
+def _raise_publish_http_error(error: ValueError) -> None:
+    detail = str(error)
+
+    if detail == "Paper not found.":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+
+    if (
+        "has not been linked" in detail
+        or "No extraction result available" in detail
+    ):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
 
 @router.post("/upload", response_model=PaperUploadResponse,
@@ -234,6 +257,59 @@ def get_paper_detail(
 ):
     service = PaperService(db)
     return service.get_paper_detail(paper_id)
+
+
+@router.get(
+    "/{paper_id}/publish-metadata",
+    response_model=PublishMetadataPreviewResponse,
+    summary="Lay metadata review truoc publish",
+)
+def get_publish_metadata_preview(
+    paper_id: UUID,
+    db: Session = Depends(get_db),
+):
+    service = PublishService(db)
+
+    try:
+        return service.get_publish_preview(paper_id)
+    except ValueError as error:
+        _raise_publish_http_error(error)
+
+
+@router.patch(
+    "/{paper_id}/publish-metadata",
+    response_model=PublishMetadataPreviewResponse,
+    summary="Luu metadata da chinh sua cho publish",
+)
+def update_publish_metadata_draft(
+    paper_id: UUID,
+    payload: PublishMetadataUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    service = PublishService(db)
+
+    try:
+        return service.update_publish_draft(paper_id, payload)
+    except ValueError as error:
+        _raise_publish_http_error(error)
+
+
+@router.post(
+    "/{paper_id}/publish",
+    response_model=PublishVersionCreateResponse,
+    summary="Publish paper va tao snapshot version",
+)
+def publish_paper(
+    paper_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = PublishService(db)
+
+    try:
+        return service.publish(paper_id, published_by=current_user.email)
+    except ValueError as error:
+        _raise_publish_http_error(error)
 
 @router.get("/{paper_id}/file-url",
     summary="Lấy URL truy cập file PDF",

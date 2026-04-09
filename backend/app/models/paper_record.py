@@ -1,5 +1,5 @@
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 import uuid
 
@@ -66,6 +66,19 @@ class PaperRecord(Base):
     detected_doi = Column(String(255), nullable=True)
     detected_fingerprint = Column(String(255), nullable=True)
     detected_title = Column(Text, nullable=True)
+
+    # Draft metadata used by the confirm-publish flow.
+    publish_title_draft = Column(Text, nullable=True)
+    publish_abstract_draft = Column(Text, nullable=True)
+    publish_venue_draft = Column(Text, nullable=True)
+    publish_year_draft = Column(Integer, nullable=True)
+    publish_authors_draft = Column(JSONB, nullable=True)
+
+    publish_problem_statement_draft = Column(Text, nullable=True)
+    publish_main_method_draft = Column(Text, nullable=True)
+    publish_contributions_draft = Column(JSONB, nullable=True)
+    publish_limitations_draft = Column(JSONB, nullable=True)
+    publish_evaluation_setup_draft = Column(JSONB, nullable=True)
 
     is_duplicate = Column(
         Boolean,
