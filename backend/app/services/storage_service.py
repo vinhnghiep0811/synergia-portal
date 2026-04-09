@@ -2,40 +2,46 @@ from io import BytesIO
 from datetime import timedelta
 from minio import Minio
 from minio.error import S3Error
-from urllib.parse import urlsplit, urlunsplit
 
 from app.core.config import (
-    MINIO_ACCESS_KEY,
-    MINIO_BUCKET,
-    MINIO_ENDPOINT,
-    MINIO_SECRET_KEY,
-    MINIO_SECURE,
-    MINIO_PUBLIC_ENDPOINT,
-    MINIO_PUBLIC_SECURE,
+    S3_ACCESS_KEY,
+    S3_BUCKET,
+    S3_ENDPOINT,
+    S3_SECRET_KEY,
+    S3_SECURE,
+    S3_PUBLIC_ENDPOINT,
+    S3_PUBLIC_SECURE,
 )
 
 
 class StorageService:
     def __init__(self):
         self.internal_client = Minio(
-            endpoint=MINIO_ENDPOINT,
-            access_key=MINIO_ACCESS_KEY,
-            secret_key=MINIO_SECRET_KEY,
-            secure=MINIO_SECURE,
+            endpoint=S3_ENDPOINT,
+            access_key=S3_ACCESS_KEY,
+            secret_key=S3_SECRET_KEY,
+            secure=S3_SECURE,
         )
 
         self.public_client = Minio(
-            endpoint=MINIO_PUBLIC_ENDPOINT,
-            access_key=MINIO_ACCESS_KEY,
-            secret_key=MINIO_SECRET_KEY,
-            secure=MINIO_PUBLIC_SECURE,
+            endpoint=S3_PUBLIC_ENDPOINT,
+            access_key=S3_ACCESS_KEY,
+            secret_key=S3_SECRET_KEY,
+            secure=S3_PUBLIC_SECURE,
         )
-        self.bucket_name = MINIO_BUCKET
+        self.bucket_name = S3_BUCKET
 
     def ensure_bucket_exists(self) -> None:
-        found = self.internal_client.bucket_exists(self.bucket_name)
-        if not found:
+        if self.internal_client.bucket_exists(self.bucket_name):
+            return
+
+        try:
             self.internal_client.make_bucket(self.bucket_name)
+        except S3Error:
+            # Có thể request khác vừa tạo bucket xong
+            if self.internal_client.bucket_exists(self.bucket_name):
+                return
+            raise
 
     def upload_pdf_bytes(
         self,
