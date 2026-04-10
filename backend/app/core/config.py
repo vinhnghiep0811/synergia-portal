@@ -59,16 +59,16 @@ DATABASE_URL = (
 STORAGE_PATH = get_env("STORAGE_PATH", "./storage")
 
 # =========================
-# STORAGE - MinIO
+# STORAGE - S3 compatible (RustFS)
 # =========================
-MINIO_ENDPOINT = get_env("MINIO_ENDPOINT", "minio:9000")
-MINIO_ACCESS_KEY = get_env("MINIO_ACCESS_KEY", "minioadmin")
-MINIO_SECRET_KEY = get_env("MINIO_SECRET_KEY", "minioadmin")
-MINIO_BUCKET = get_env("MINIO_BUCKET", "papers")
-MINIO_SECURE = get_env_bool("MINIO_SECURE", False)
+S3_ENDPOINT = get_env("S3_ENDPOINT", "rustfs:9000")
+S3_ACCESS_KEY = get_env("S3_ACCESS_KEY", "rustfsadmin")
+S3_SECRET_KEY = get_env("S3_SECRET_KEY", "rustfsadmin")
+S3_BUCKET = get_env("S3_BUCKET", "papers")
+S3_SECURE = get_env_bool("S3_SECURE", False)
 
-MINIO_PUBLIC_ENDPOINT = get_env("MINIO_PUBLIC_ENDPOINT", "localhost:9000")
-MINIO_PUBLIC_SECURE = get_env_bool("MINIO_PUBLIC_SECURE", False)
+S3_PUBLIC_ENDPOINT = get_env("S3_PUBLIC_ENDPOINT", "localhost:9000")
+S3_PUBLIC_SECURE = get_env_bool("S3_PUBLIC_SECURE", False)
 
 # =========================
 # Upload constraints
@@ -86,6 +86,12 @@ GOOGLE_REDIRECT_URI = get_env(
     "http://localhost:8000/api/auth/google/callback",
 )
 ALLOWED_EMAIL_DOMAIN = get_env("ALLOWED_EMAIL_DOMAIN", "hcmut.edu.vn")
+
+ADMIN_EMAILS = [
+    email.strip().lower()
+    for email in get_env("ADMIN_EMAILS", "").split(",")
+    if email.strip()
+]
 
 # Frontend callback URL (override in production via env)
 FRONTEND_AUTH_CALLBACK_URL = get_env("FRONTEND_AUTH_CALLBACK_URL", "http://localhost:5173/auth/callback")
