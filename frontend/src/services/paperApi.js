@@ -163,3 +163,64 @@ export async function getExtractionRunDetail(runId) {
     throw new Error(message);
   }
 }
+
+/**
+ * Retry failed LLM extraction for a paper.
+ * @param {string} paperId
+ * @returns {Promise<Object>}
+ */
+export async function retryLLMExtractionByPaper(paperId) {
+    try {
+        const response = await apiClient.post(`/api/extraction-runs/by-paper/${paperId}/retry`);
+        return response.data;
+    } catch (error) {
+        const message = await parseApiError(error);
+        throw new Error(message);
+    }
+}
+
+/**
+ * Lấy metadata tổng hợp cho màn hình confirm publish.
+ * @param {string} paperId
+ * @returns {Promise<Object>}
+ */
+export async function getPublishMetadataPreview(paperId) {
+    try {
+        const response = await apiClient.get(`/api/papers/${paperId}/publish-metadata`);
+        return response.data;
+    } catch (error) {
+        const message = await parseApiError(error);
+        throw new Error(message);
+    }
+}
+
+/**
+ * Lưu metadata đã chỉnh sửa vào draft trên paper record.
+ * @param {string} paperId
+ * @param {Object} payload
+ * @returns {Promise<Object>}
+ */
+export async function updatePublishMetadataDraft(paperId, payload) {
+    try {
+        const response = await apiClient.patch(`/api/papers/${paperId}/publish-metadata`, payload);
+        return response.data;
+    } catch (error) {
+        const message = await parseApiError(error);
+        throw new Error(message);
+    }
+}
+
+/**
+ * Publish paper và tạo publish version snapshot.
+ * @param {string} paperId
+ * @returns {Promise<Object>}
+ */
+export async function publishPaper(paperId) {
+    try {
+        const response = await apiClient.post(`/api/papers/${paperId}/publish`);
+        return response.data;
+    } catch (error) {
+        const message = await parseApiError(error);
+        throw new Error(message);
+    }
+}
