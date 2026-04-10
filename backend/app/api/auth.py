@@ -144,9 +144,13 @@ async def refresh_access_token(
 @router.get("/me")
 async def me(current_user: User = Depends(get_current_user)):
     return {
-        "id": str(current_user.id), "email": current_user.email,
-        "full_name": current_user.full_name, "avatar_url": current_user.avatar_url,
-        "created_at": current_user.created_at, "last_login_at": current_user.last_login_at
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "avatar_url": current_user.avatar_url,
+        "role": current_user.role,
+        "created_at": current_user.created_at,
+        "last_login_at": current_user.last_login_at,
     }
 
 @router.post("/logout")

@@ -87,6 +87,12 @@ GOOGLE_REDIRECT_URI = get_env(
 )
 ALLOWED_EMAIL_DOMAIN = get_env("ALLOWED_EMAIL_DOMAIN", "hcmut.edu.vn")
 
+ADMIN_EMAILS = [
+    email.strip().lower()
+    for email in get_env("ADMIN_EMAILS", "").split(",")
+    if email.strip()
+]
+
 # Frontend callback URL (override in production via env)
 FRONTEND_AUTH_CALLBACK_URL = get_env("FRONTEND_AUTH_CALLBACK_URL", "http://localhost:5173/auth/callback")
 

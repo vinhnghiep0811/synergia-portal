@@ -8,12 +8,12 @@ from urllib.parse import urlencode
 from fastapi import HTTPException, status
 
 from app.repositories.user_repository import UserRepository
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.core.config import (
     JWT_SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRE_MINUTES,
     REFRESH_TOKEN_SECRET_KEY, REFRESH_TOKEN_EXPIRE_DAYS,
     GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, ALLOWED_EMAIL_DOMAIN,
-    GOOGLE_TOKEN_URL, GOOGLE_REDIRECT_URI, GOOGLE_USERINFO_URL, GOOGLE_AUTH_URL
+    GOOGLE_TOKEN_URL, GOOGLE_REDIRECT_URI, GOOGLE_USERINFO_URL, GOOGLE_AUTH_URL, ADMIN_EMAILS
 )
 
 class AuthService:
@@ -27,16 +27,26 @@ class AuthService:
                 detail="Google OAuth2 is not configured."
             )
 
+    def is_admin_email(self, email: str) -> bool:
+        normalized_email = email.strip().lower()
+        return normalized_email in {e.strip().lower() for e in ADMIN_EMAILS}
+
     def is_allowed_domain(self, email: str) -> bool:
         domain = (ALLOWED_EMAIL_DOMAIN or "").strip().lower()
         if not domain: return True
         return email.strip().lower().endswith(f"@{domain}")
 
     def create_access_token(self, user: User) -> str:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=int(JWT_EXPIRE_MINUTES))
+        now = datetime.now(timezone.utc)
+        expire = now + timedelta(minutes=int(JWT_EXPIRE_MINUTES))
         payload = {
-            "sub": str(user.id), "email": user.email, 
-            "name": user.full_name, "exp": expire, "iat": datetime.now(timezone.utc)
+            "sub": str(user.id),
+            "email": user.email,
+            "name": user.full_name,
+            "role": user.role,
+            "type": "access",
+            "exp": expire,
+            "iat": now,
         }
         return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
