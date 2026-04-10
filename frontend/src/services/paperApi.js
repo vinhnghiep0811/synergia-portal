@@ -165,6 +165,21 @@ export async function getExtractionRunDetail(runId) {
 }
 
 /**
+ * Retry failed LLM extraction for a paper.
+ * @param {string} paperId
+ * @returns {Promise<Object>}
+ */
+export async function retryLLMExtractionByPaper(paperId) {
+    try {
+        const response = await apiClient.post(`/api/extraction-runs/by-paper/${paperId}/retry`);
+        return response.data;
+    } catch (error) {
+        const message = await parseApiError(error);
+        throw new Error(message);
+    }
+}
+
+/**
  * Lấy metadata tổng hợp cho màn hình confirm publish.
  * @param {string} paperId
  * @returns {Promise<Object>}

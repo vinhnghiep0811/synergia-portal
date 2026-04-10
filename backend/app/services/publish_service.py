@@ -17,6 +17,7 @@ from app.schemas.publish import (
     PublishMetadataUpdateRequest,
     PublishVersionCreateResponse,
 )
+from app.services.telegram_service import TelegramService
 
 
 class PublishService:
@@ -132,6 +133,20 @@ class PublishService:
         self.db.commit()
         self.db.refresh(publish_version)
         self.db.refresh(paper)
+
+        canonical = self._get_canonical_for_paper(paper)
+        telegram_service = TelegramService()
+        telegram_sent = telegram_service.send_publish_notification(
+            publish_version=publish_version,
+            canonical=canonical,
+            paper=paper,
+        )
+
+        if telegram_sent:
+            publish_version.telegram_notified = True
+            self.db.add(publish_version)
+            self.db.commit()
+            self.db.refresh(publish_version)
 
         return PublishVersionCreateResponse(
             paper_id=paper.id,

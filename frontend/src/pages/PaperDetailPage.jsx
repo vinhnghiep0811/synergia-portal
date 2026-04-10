@@ -4,6 +4,7 @@ import { PaperDetail } from "../components/PaperDetail.jsx";
 import {
   getCanonicalDocumentByPaper,
   getPaperDetail,
+  retryLLMExtractionByPaper,
 } from "../services/paperApi.js";
 import { AppHeader } from "../components/AppHeader.jsx";
 
@@ -78,6 +79,7 @@ function mapPaperDetail(detail, canonical) {
 export function PaperDetailPage() {
   const [paper, setPaper] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [retryingLLM, setRetryingLLM] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const { paperId } = useParams();
@@ -177,10 +179,32 @@ export function PaperDetailPage() {
     return () => clearInterval(interval);
   }, [paperId, paper?.processing_status, location.key]);   // depend vào processing_status
 
+  async function handleRetryLLM() {
+    if (!paperId) return;
+
+    try {
+      setRetryingLLM(true);
+      setError("");
+      await retryLLMExtractionByPaper(paperId);
+      setSuccessMessage("Đã đưa job retry LLM vào queue. Hệ thống sẽ xử lý lại trong giây lát.");
+      await loadPaperDetail();
+    } catch (err) {
+      setError(err.message || "Không thể retry LLM extraction");
+    } finally {
+      setRetryingLLM(false);
+    }
+  }
+
   const canConfirmPublish =
     !!paper &&
     !!paper.canonicalDocumentId &&
     (paper.processing_status === "completed" || paper.processing_status === "processed");
+
+  const canRetryLLM =
+    !!paper &&
+    !!paper.canonicalDocumentId &&
+    paper.processing_status === "failed" &&
+    paper.processing_stage === "llm_extracting";
 
   return (
     <div className="app-shell">
@@ -190,6 +214,16 @@ export function PaperDetailPage() {
         showUploadButton={true}
         extraAction={
           <>
+            {canRetryLLM && (
+              <button
+                className="btn btn--secondary"
+                onClick={handleRetryLLM}
+                disabled={retryingLLM}
+                style={{ marginRight: "1rem" }}
+              >
+                {retryingLLM ? "Đang retry LLM..." : "Retry LLM"}
+              </button>
+            )}
             {canConfirmPublish && (
               <button
                 className="btn btn--primary"

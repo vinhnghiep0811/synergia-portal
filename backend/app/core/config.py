@@ -125,3 +125,9 @@ GEMINI_TEMPERATURE = float(get_env("GEMINI_TEMPERATURE", "0"))
 GEMINI_MAX_OUTPUT_TOKENS = get_env_int("GEMINI_MAX_OUTPUT_TOKENS", 4096)
 
 LLM_TIMEOUT_SECONDS = get_env_int("LLM_TIMEOUT_SECONDS", 60)
+
+# =========================
+# Telegram
+# =========================
+TELEGRAM_BOT_TOKEN = get_env("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = get_env("TELEGRAM_CHAT_ID", "")

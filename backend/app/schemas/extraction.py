@@ -50,3 +50,10 @@ class ExtractionRunResponse(BaseModel):
     @classmethod
     def none_to_empty_list(cls, v):
         return v or []
+
+
+class ExtractionRetryResponse(BaseModel):
+    message: str
+    paper_id: UUID
+    canonical_document_id: UUID
+    queued_job_id: str
