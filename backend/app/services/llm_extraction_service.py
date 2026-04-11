@@ -29,6 +29,734 @@ class LLMExtractionService:
         self.input_builder = LLMInputBuilder()
         self.prompt_builder = LLMPromptBuilder()
 
+    def _has_expected_extraction_schema(self, raw_result: Any) -> bool:
+        if not isinstance(raw_result, dict):
+            return False
+
+        required_keys = {
+            "problem",
+            "method",
+            "contributions",
+            "limitations",
+            "evaluation_setup",
+        }
+
+        return required_keys.issubset(set(raw_result.keys()))
+
+    def _schema_keys_for_log(self, raw_result: Any) -> str:
+        if isinstance(raw_result, dict):
+            return ",".join(sorted(raw_result.keys()))
+        return type(raw_result).__name__
+
+    def _normalize_free_text(self, value: Any, max_chars: int = 220) -> str | None:
+        if not isinstance(value, str):
+            return None
+
+        text = re.sub(r"\s+", " ", value).strip()
+        if not text:
+            return None
+
+        if self._is_placeholder_text(text):
+            return None
+
+        if len(text) > max_chars:
+            cut = text[:max_chars]
+            last_stop = max(cut.rfind("."), cut.rfind(";"), cut.rfind(","), cut.rfind(" "))
+            if last_stop > 80:
+                text = cut[:last_stop].strip()
+            else:
+                text = cut.strip()
+
+        return text or None
+
+    def _to_string_list(self, value: Any, max_items: int = 3) -> list[str]:
+        candidates: list[str] = []
+
+        if isinstance(value, list):
+            for item in value:
+                normalized = self._normalize_free_text(item, max_chars=180)
+                if normalized:
+                    candidates.append(normalized)
+
+        elif isinstance(value, dict):
+            for k, v in value.items():
+                left = self._normalize_free_text(k, max_chars=120)
+                right = self._normalize_free_text(v, max_chars=120) if isinstance(v, str) else None
+                if left and right:
+                    candidates.append(f"{left}: {right}")
+                elif left:
+                    candidates.append(left)
+
+        else:
+            normalized = self._normalize_free_text(value, max_chars=180)
+            if normalized:
+                candidates.append(normalized)
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for item in candidates:
+            key = item.lower()
+            if key in seen:
+                continue
+            deduped.append(item)
+            seen.add(key)
+            if len(deduped) >= max_items:
+                break
+
+        return deduped
+
+    def _dedupe_list_items(
+        self,
+        items: list[dict[str, Any]],
+        max_items: int,
+    ) -> list[dict[str, Any]]:
+        deduped: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            value = item.get("value")
+            if not isinstance(value, str):
+                continue
+
+            key = re.sub(r"\s+", " ", value).strip().lower()
+            if not key or key in seen:
+                continue
+
+            deduped.append(item)
+            seen.add(key)
+
+            if len(deduped) >= max_items:
+                break
+
+        return deduped
+
+    def _extract_metrics_from_text(self, text: str) -> list[str]:
+        if not text:
+            return []
+
+        keywords = [
+            ("bleu", "BLEU"),
+            ("rouge", "ROUGE"),
+            ("f1", "F1"),
+            ("accuracy", "accuracy"),
+            ("precision", "precision"),
+            ("recall", "recall"),
+            ("map", "mAP"),
+            ("mrr", "MRR"),
+        ]
+
+        normalized = text.lower()
+        metrics: list[str] = []
+        for needle, label in keywords:
+            if re.search(rf"\\b{re.escape(needle)}\\b", normalized):
+                metrics.append(label)
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for item in metrics:
+            key = item.lower()
+            if key in seen:
+                continue
+            deduped.append(item)
+            seen.add(key)
+            if len(deduped) >= 4:
+                break
+
+        return deduped
+
+    def _has_meaningful_expected_payload(self, raw_result: dict[str, Any]) -> bool:
+        problem = (((raw_result.get("problem") or {}).get("value")) if isinstance(raw_result.get("problem"), dict) else None)
+        method = (((raw_result.get("method") or {}).get("value")) if isinstance(raw_result.get("method"), dict) else None)
+        contributions = raw_result.get("contributions") or []
+        limitations = raw_result.get("limitations") or []
+        evaluation = ((raw_result.get("evaluation_setup") or {}).get("value") if isinstance(raw_result.get("evaluation_setup"), dict) else None) or {}
+
+        if isinstance(problem, str) and problem.strip():
+            return True
+        if isinstance(method, str) and method.strip():
+            return True
+        if isinstance(contributions, list) and len(contributions) > 0:
+            return True
+        if isinstance(limitations, list) and len(limitations) > 0:
+            return True
+
+        if isinstance(evaluation, dict):
+            datasets = evaluation.get("datasets") or []
+            metrics = evaluation.get("metrics") or []
+            benchmarks = evaluation.get("benchmarks") or []
+            return bool(datasets or metrics or benchmarks)
+
+        return False
+
+    def _coerce_unexpected_schema_to_expected(self, raw_result: Any) -> dict[str, Any] | None:
+        if not isinstance(raw_result, dict):
+            return None
+
+        main = raw_result.get("main") if isinstance(raw_result.get("main"), dict) else {}
+
+        abstract = self._normalize_free_text(raw_result.get("abstract"), max_chars=260)
+        introduction = self._normalize_free_text(raw_result.get("introduction"), max_chars=260)
+        discussion = self._normalize_free_text(raw_result.get("discussion"), max_chars=260)
+
+        methods = self._to_string_list(main.get("methods"), max_items=3)
+        result_items = self._to_string_list(main.get("results"), max_items=3)
+
+        problem_value = abstract or introduction
+        method_value = methods[0] if methods else self._normalize_free_text(main.get("method"), max_chars=220)
+
+        contributions_values: list[str] = []
+        for item in methods + result_items:
+            if item not in contributions_values:
+                contributions_values.append(item)
+            if len(contributions_values) >= 3:
+                break
+
+        limitations_values: list[str] = []
+        if discussion and re.search(r"limitation|future|constraint|assumption|weakness|challenge", discussion, re.IGNORECASE):
+            limitations_values.append(discussion)
+
+        datasets: list[str] = []
+        results_obj = main.get("results")
+        if isinstance(results_obj, dict):
+            for key in results_obj.keys():
+                dataset = self._normalize_free_text(key, max_chars=80)
+                if dataset and dataset not in datasets:
+                    datasets.append(dataset)
+                if len(datasets) >= 3:
+                    break
+
+        merged_text = " ".join([x for x in [abstract, introduction, discussion] if isinstance(x, str) and x])
+        metrics = self._extract_metrics_from_text(merged_text)
+
+        coerced = {
+            "problem": {
+                "value": problem_value,
+                "evidence": [],
+            },
+            "method": {
+                "value": method_value,
+                "evidence": [],
+            },
+            "contributions": [
+                {
+                    "value": x,
+                    "evidence": [],
+                }
+                for x in contributions_values
+            ],
+            "limitations": [
+                {
+                    "value": x,
+                    "evidence": [],
+                }
+                for x in limitations_values
+            ],
+            "evaluation_setup": {
+                "value": {
+                    "datasets": datasets,
+                    "metrics": metrics,
+                    "benchmarks": [],
+                },
+                "evidence": [],
+            },
+        }
+
+        if not self._has_meaningful_expected_payload(coerced):
+            return None
+
+        return coerced
+
+    def _extract_tag_block(self, input_text: str, tag: str) -> str:
+        if not isinstance(input_text, str) or not input_text.strip():
+            return ""
+
+        pattern = rf"\[{re.escape(tag)}\]\n(.*?)(?=\n\[[A-Z_]+\]\n|\Z)"
+        match = re.search(pattern, input_text, flags=re.DOTALL)
+        if not match:
+            return ""
+
+        return re.sub(r"\s+", " ", match.group(1)).strip()
+
+    def _split_sentences(self, text: str) -> list[str]:
+        if not isinstance(text, str) or not text.strip():
+            return []
+
+        parts = re.split(r"(?<=[.!?])\s+", text)
+        sentences: list[str] = []
+        for part in parts:
+            normalized = self._normalize_free_text(part, max_chars=220)
+            if normalized:
+                sentences.append(normalized)
+
+        return sentences
+
+    def _pick_sentence_by_keywords(self, sentences: list[str], keywords: list[str]) -> str | None:
+        for sentence in sentences:
+            lowered = sentence.lower()
+            if any(keyword in lowered for keyword in keywords):
+                return sentence
+        return None
+
+    def _extract_datasets_from_text(self, text: str) -> list[str]:
+        if not isinstance(text, str) or not text.strip():
+            return []
+
+        candidates: list[str] = []
+
+        for match in re.findall(r"\b[A-Z]{2,}\s?\d{4}\b", text):
+            dataset = self._normalize_free_text(match, max_chars=60)
+            if dataset:
+                candidates.append(dataset)
+
+        known_dataset_tokens = [
+            "ImageNet",
+            "COCO",
+            "SQuAD",
+            "GLUE",
+            "MNLI",
+            "CIFAR-10",
+            "CIFAR-100",
+            "LibriSpeech",
+            "WikiText",
+            "WMT",
+        ]
+
+        lowered = text.lower()
+        for token in known_dataset_tokens:
+            if token.lower() in lowered:
+                candidates.append(token)
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for item in candidates:
+            key = item.lower()
+            if key in seen:
+                continue
+            deduped.append(item)
+            seen.add(key)
+            if len(deduped) >= 3:
+                break
+
+        return deduped
+
+    def _coerce_from_input_text(self, input_text: str) -> dict[str, Any] | None:
+        abstract = self._extract_tag_block(input_text, "ABSTRACT")
+        paper_text = self._extract_tag_block(input_text, "PAPER_TEXT")
+
+        source_text = "\n".join([part for part in [abstract, paper_text] if part])
+        if not source_text:
+            return None
+
+        abstract_sentences = self._split_sentences(abstract)
+        paper_sentences = self._split_sentences(paper_text)
+        all_sentences = abstract_sentences + paper_sentences
+        if not all_sentences:
+            return None
+
+        problem_value = self._pick_sentence_by_keywords(
+            all_sentences,
+            ["problem", "task", "challenge", "goal", "aim"],
+        ) or all_sentences[0]
+
+        method_value = self._pick_sentence_by_keywords(
+            all_sentences,
+            [
+                "propose",
+                "present",
+                "introduce",
+                "develop",
+                "method",
+                "model",
+                "approach",
+                "framework",
+                "architecture",
+            ],
+        )
+        if method_value is None and len(all_sentences) > 1:
+            method_value = all_sentences[1]
+
+        contribution_keywords = [
+            "propose",
+            "present",
+            "introduce",
+            "contribution",
+            "we show",
+            "demonstrate",
+            "achieve",
+            "improve",
+            "outperform",
+            "state-of-the-art",
+            "sota",
+            "novel",
+        ]
+
+        contribution_candidates: list[str] = []
+        for sentence in all_sentences:
+            lowered = sentence.lower()
+            if any(k in lowered for k in contribution_keywords):
+                contribution_candidates.append(sentence)
+            if len(contribution_candidates) >= 3:
+                break
+
+        limitation_keywords = [
+            "limitation",
+            "limitations",
+            "future work",
+            "constraint",
+            "assumption",
+            "weakness",
+            "trade-off",
+            "sensitive to",
+            "depends on",
+            "dependency",
+            "fails on",
+            "struggles with",
+            "cannot",
+            "does not",
+            "expensive",
+            "costly",
+            "memory",
+            "compute",
+            "latency",
+            "scalability",
+        ]
+
+        contrast_markers = ["however", "but", "yet", "although", "nevertheless"]
+
+        limitation_candidates: list[str] = []
+        for sentence in all_sentences:
+            lowered = sentence.lower()
+            has_limit_keyword = any(k in lowered for k in limitation_keywords)
+            has_contrast_signal = any(k in lowered for k in contrast_markers)
+            has_constraint_signal = any(
+                k in lowered
+                for k in [
+                    "require",
+                    "requires",
+                    "resource",
+                    "data",
+                    "domain",
+                    "robust",
+                    "generalize",
+                    "noisy",
+                ]
+            )
+
+            if has_limit_keyword or (has_contrast_signal and has_constraint_signal):
+                limitation_candidates.append(sentence)
+            if len(limitation_candidates) >= 2:
+                break
+
+        datasets = self._extract_datasets_from_text(source_text)
+        metrics = self._extract_metrics_from_text(source_text)
+
+        coerced = {
+            "problem": {
+                "value": problem_value,
+                "evidence": [],
+            },
+            "method": {
+                "value": method_value,
+                "evidence": [],
+            },
+            "contributions": [
+                {
+                    "value": item,
+                    "evidence": [],
+                }
+                for item in contribution_candidates
+            ],
+            "limitations": [
+                {
+                    "value": item,
+                    "evidence": [],
+                }
+                for item in limitation_candidates
+            ],
+            "evaluation_setup": {
+                "value": {
+                    "datasets": datasets,
+                    "metrics": metrics,
+                    "benchmarks": [],
+                },
+                "evidence": [],
+            },
+        }
+
+        if not self._has_meaningful_expected_payload(coerced):
+            return None
+
+        return coerced
+
+    def _enrich_missing_fields_from_input_text(
+        self,
+        normalized: dict[str, Any],
+        input_text: str,
+        pages: list[dict],
+    ) -> dict[str, Any]:
+        if not isinstance(input_text, str) or not input_text.strip():
+            return normalized
+
+        fallback = self._coerce_from_input_text(input_text)
+        if not isinstance(fallback, dict):
+            return normalized
+
+        filled_keys: list[str] = []
+
+        problem_field = normalized.get("problem")
+        fallback_problem = self._normalize_scalar_field(fallback.get("problem"))
+        if (
+            isinstance(problem_field, dict)
+            and not problem_field.get("value")
+            and fallback_problem.get("value")
+        ):
+            normalized["problem"] = fallback_problem
+            filled_keys.append("problem")
+
+        method_field = normalized.get("method")
+        fallback_method = self._normalize_scalar_field(fallback.get("method"))
+        if (
+            isinstance(method_field, dict)
+            and not method_field.get("value")
+            and fallback_method.get("value")
+        ):
+            normalized["method"] = fallback_method
+            filled_keys.append("method")
+
+        contributions = normalized.get("contributions")
+        if not isinstance(contributions, list):
+            contributions = []
+        if len(contributions) == 0:
+            fallback_contributions = self._normalize_list_field(
+                fallback.get("contributions"),
+                max_items=3,
+            )
+            if fallback_contributions:
+                normalized["contributions"] = fallback_contributions
+                filled_keys.append("contributions")
+
+        limitations = normalized.get("limitations")
+        if not isinstance(limitations, list):
+            limitations = []
+        if len(limitations) == 0:
+            fallback_limitations = self._normalize_list_field(
+                fallback.get("limitations"),
+                max_items=2,
+            )
+            if fallback_limitations:
+                normalized["limitations"] = fallback_limitations
+                filled_keys.append("limitations")
+
+        evaluation_setup = normalized.get("evaluation_setup")
+        fallback_eval = self._normalize_evaluation_setup(fallback.get("evaluation_setup"), pages)
+        if (
+            isinstance(evaluation_setup, dict)
+            and isinstance(fallback_eval, dict)
+            and isinstance(evaluation_setup.get("value"), dict)
+        ):
+            current_value = evaluation_setup.get("value") or {}
+            fallback_value = fallback_eval.get("value") or {}
+
+            has_current_eval = bool(
+                (current_value.get("datasets") or [])
+                or (current_value.get("metrics") or [])
+                or (current_value.get("benchmarks") or [])
+            )
+            has_fallback_eval = bool(
+                (fallback_value.get("datasets") or [])
+                or (fallback_value.get("metrics") or [])
+                or (fallback_value.get("benchmarks") or [])
+            )
+
+            if not has_current_eval and has_fallback_eval:
+                normalized["evaluation_setup"] = fallback_eval
+                filled_keys.append("evaluation_setup")
+
+        if filled_keys:
+            logger.info(
+                "[LLM NORMALIZE] Enriched missing fields from input_text: %s",
+                ",".join(filled_keys),
+            )
+
+        return normalized
+
+    def _extract_with_schema_retry_once(
+        self,
+        prompt: str,
+        fallback_prompt: str | None,
+        input_text: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        try:
+            provider_result = self.provider.extract_metadata(
+                prompt,
+                fallback_prompt=fallback_prompt,
+            )
+        except Exception as e:
+            logger.exception(
+                "[LLM SERVICE] Provider call failed on primary extraction. error=%s",
+                str(e),
+            )
+
+            degraded_provider_result = {
+                "provider": "fallback",
+                "model": getattr(self.provider, "ollama_model", None)
+                or getattr(self.provider, "model", None)
+                or "unknown",
+                "raw_text": None,
+                "usage": {},
+            }
+
+            coerced_from_input = self._coerce_from_input_text(input_text)
+            if coerced_from_input is not None:
+                logger.warning(
+                    "[LLM SERVICE] Primary provider call failed; using deterministic fallback from input text.",
+                )
+                return degraded_provider_result, coerced_from_input
+
+            logger.warning(
+                "[LLM SERVICE] Primary provider call failed and no deterministic fallback available; using empty payload.",
+            )
+            return degraded_provider_result, {}
+
+        raw_result = provider_result.get("result_json")
+
+        if raw_result is None:
+            raw_text = provider_result.get("raw_text")
+            logger.error(
+                "[LLM SERVICE] Invalid JSON from provider. raw_text=%s",
+                raw_text[:2000] if raw_text else None,
+            )
+            coerced_from_input = self._coerce_from_input_text(input_text)
+            if coerced_from_input is not None:
+                logger.warning(
+                    "[LLM SERVICE] Invalid JSON from provider; using deterministic fallback from input text.",
+                )
+                return provider_result, coerced_from_input
+
+            logger.warning(
+                "[LLM SERVICE] Invalid JSON from provider and no deterministic fallback available; using empty payload.",
+            )
+            return provider_result, {}
+
+        if self._has_expected_extraction_schema(raw_result):
+            return provider_result, raw_result
+
+        logger.warning(
+            "[LLM SCHEMA] Unexpected schema from provider=%s model=%s keys=%s. Retrying once with schema-repair prompt.",
+            provider_result.get("provider"),
+            provider_result.get("model"),
+            self._schema_keys_for_log(raw_result),
+        )
+
+        repair_prompt_gemini = self.prompt_builder.build_schema_repair_prompt_gemini(
+            raw_result,
+            input_text=input_text,
+        )
+        repair_prompt_gemma = self.prompt_builder.build_schema_repair_prompt_gemma(
+            raw_result,
+            input_text=input_text,
+        )
+        try:
+            repaired_provider_result = self.provider.extract_metadata(
+                repair_prompt_gemini,
+                fallback_prompt=repair_prompt_gemma,
+            )
+        except Exception as e:
+            logger.exception(
+                "[LLM SCHEMA] Schema-repair provider call failed. error=%s",
+                str(e),
+            )
+
+            coerced_initial = self._coerce_unexpected_schema_to_expected(raw_result)
+            if coerced_initial is not None:
+                logger.warning(
+                    "[LLM SCHEMA] Schema-repair provider failed; using local schema coercion from first response.",
+                )
+                return provider_result, coerced_initial
+
+            coerced_from_input = self._coerce_from_input_text(input_text)
+            if coerced_from_input is not None:
+                logger.warning(
+                    "[LLM SCHEMA] Schema-repair provider failed; using deterministic fallback from input text.",
+                )
+                return provider_result, coerced_from_input
+
+            logger.warning(
+                "[LLM SCHEMA] Schema-repair provider failed and no fallback available; using empty payload.",
+            )
+            return provider_result, {}
+
+        repaired_raw_result = repaired_provider_result.get("result_json")
+
+        if repaired_raw_result is None:
+            raw_text = repaired_provider_result.get("raw_text")
+            logger.error(
+                "[LLM SCHEMA] Schema-repair retry returned invalid JSON. raw_text=%s",
+                raw_text[:2000] if raw_text else None,
+            )
+            coerced_initial = self._coerce_unexpected_schema_to_expected(raw_result)
+            if coerced_initial is not None:
+                logger.warning(
+                    "[LLM SCHEMA] Schema-repair retry JSON invalid; using local schema coercion from first response.",
+                )
+                return provider_result, coerced_initial
+
+            coerced_from_input = self._coerce_from_input_text(input_text)
+            if coerced_from_input is not None:
+                logger.warning(
+                    "[LLM SCHEMA] Schema-repair retry JSON invalid; using deterministic fallback from input text.",
+                )
+                return repaired_provider_result, coerced_from_input
+
+            logger.warning(
+                "[LLM SCHEMA] Schema-repair retry JSON invalid and no fallback available; using empty payload.",
+            )
+            return repaired_provider_result, {}
+
+        if not self._has_expected_extraction_schema(repaired_raw_result):
+            coerced = self._coerce_unexpected_schema_to_expected(repaired_raw_result)
+            if coerced is not None:
+                logger.warning(
+                    "[LLM SCHEMA] Schema-repair retry still non-standard; using local schema coercion.",
+                )
+                return repaired_provider_result, coerced
+
+            coerced_initial = self._coerce_unexpected_schema_to_expected(raw_result)
+            if coerced_initial is not None:
+                logger.warning(
+                    "[LLM SCHEMA] Retry non-standard; using local schema coercion from first response.",
+                )
+                return provider_result, coerced_initial
+
+            coerced_from_input = self._coerce_from_input_text(input_text)
+            if coerced_from_input is not None:
+                logger.warning(
+                    "[LLM SCHEMA] Retry non-standard; using deterministic fallback from input text.",
+                )
+                return repaired_provider_result, coerced_from_input
+
+            logger.error(
+                "[LLM SCHEMA] Schema-repair retry failed. provider=%s model=%s keys=%s",
+                repaired_provider_result.get("provider"),
+                repaired_provider_result.get("model"),
+                self._schema_keys_for_log(repaired_raw_result),
+            )
+            logger.warning(
+                "[LLM SCHEMA] Retry exhausted with non-standard schema; using empty payload to avoid hard failure.",
+            )
+            return repaired_provider_result, {}
+
+        logger.info(
+            "[LLM SCHEMA] Schema-repair retry succeeded. provider=%s model=%s",
+            repaired_provider_result.get("provider"),
+            repaired_provider_result.get("model"),
+        )
+
+        return repaired_provider_result, repaired_raw_result
+
     def _detect_paper_type(self, text: str) -> str:
         t = text.lower()
 
@@ -196,20 +924,20 @@ class LLMExtractionService:
                 parsed_text=None,
                 full_text=full_text,
             )
-            prompt = self.prompt_builder.build_extraction_prompt(input_text)
-            provider_result = self.provider.extract_metadata(prompt)
-
-            raw_result = provider_result.get("result_json")
-            if raw_result is None:
-                raw_text = provider_result.get("raw_text")
-                logger.error(
-                    "[LLM SERVICE] Invalid JSON from provider. raw_text=%s",
-                    raw_text[:2000] if raw_text else None,
-                )
-                raise ValueError("LLM returned invalid JSON format")
+            prompt_gemini = self.prompt_builder.build_extraction_prompt_gemini(input_text)
+            prompt_gemma = self.prompt_builder.build_extraction_prompt_gemma(input_text)
+            provider_result, raw_result = self._extract_with_schema_retry_once(
+                prompt=prompt_gemini,
+                fallback_prompt=prompt_gemma,
+                input_text=input_text,
+            )
             raw_result = self._apply_semantic_correction(raw_result, full_text)
 
-            result_json = self._normalize_result(raw_result, pages)
+            result_json = self._normalize_result(
+                raw_result,
+                pages,
+                input_text=input_text,
+            )
 
             run.provider = provider_result.get("provider")
             run.model_name = provider_result.get("model")
@@ -316,6 +1044,41 @@ class LLMExtractionService:
 
         return None, []
 
+    def _is_placeholder_text(self, value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+
+        normalized = re.sub(r"\s+", " ", value).strip().lower()
+        if not normalized:
+            return False
+
+        placeholders = {
+            "string",
+            "string | null",
+            "integer",
+            "integer | null",
+            "number",
+            "number | null",
+            "boolean",
+            "boolean | null",
+            "null",
+            "none",
+            "n/a",
+            "na",
+            "unknown",
+            "placeholder",
+            "tbd",
+            "to be determined",
+        }
+
+        if normalized in placeholders:
+            return True
+
+        if normalized.startswith("<") and normalized.endswith(">"):
+            return True
+
+        return False
+
     def _normalize_evidence(self, value: Any) -> list[dict[str, Any]]:
         if not isinstance(value, list):
             return []
@@ -330,6 +1093,8 @@ class LLMExtractionService:
                 continue
 
             snippet = snippet.strip()
+            if self._is_placeholder_text(snippet):
+                continue
 
             # loại table numeric
             if sum(c.isdigit() for c in snippet) > len(snippet) * 0.4:
@@ -372,12 +1137,46 @@ class LLMExtractionService:
 
         return normalized
 
+    def _build_fallback_evidence_from_text(
+        self,
+        text: str,
+        pages: list[dict],
+    ) -> list[dict[str, Any]]:
+        if not isinstance(text, str):
+            return []
+
+        snippet = re.sub(r"\s+", " ", text).strip()
+        if not snippet or self._is_placeholder_text(snippet):
+            return []
+
+        if len(snippet) > 180:
+            cut = snippet[:180]
+            last_stop = max(cut.rfind("."), cut.rfind(";"), cut.rfind(","), cut.rfind(" "))
+            if last_stop > 80:
+                snippet = cut[:last_stop].strip()
+            else:
+                snippet = cut.strip()
+
+        if not snippet:
+            return []
+
+        return [
+            {
+                "snippet": snippet,
+                "page": self._match_snippet_to_page(snippet, pages),
+                "section": None,
+            }
+        ]
+
     def _normalize_scalar_field(self, raw: Any) -> dict[str, Any]:
         if raw is None:
             return {"value": None, "evidence": []}
 
         if isinstance(raw, str):
-            return {"value": raw.strip() or None, "evidence": []}
+            value = raw.strip() or None
+            if value and self._is_placeholder_text(value):
+                value = None
+            return {"value": value, "evidence": []}
 
         if not isinstance(raw, dict):
             return {"value": None, "evidence": []}
@@ -387,29 +1186,41 @@ class LLMExtractionService:
             value = None
         else:
             value = value.strip() or None
+            if value and self._is_placeholder_text(value):
+                value = None
 
         evidence = self._normalize_evidence(raw.get("evidence"))
-        if value and not evidence:
-            value = None
 
         return {
             "value": value,
             "evidence": evidence,
         }
 
-    def _normalize_list_field(self, raw: Any) -> list[dict[str, Any]]:
+    def _normalize_list_field(
+        self,
+        raw: Any,
+        max_items: int = 3,
+    ) -> list[dict[str, Any]]:
         if raw is None:
             return []
 
         normalized_items: list[dict[str, Any]] = []
 
         if isinstance(raw, list):
-            # case 1: ["a", "b"] -> invalid for current schema because no per-item evidence
-            if all(isinstance(x, str) for x in raw):
-                return []
-
-            # case 2: [{"value": "...", "evidence": [...]}, ...]
             for x in raw:
+                if isinstance(x, str):
+                    value = x.strip()
+                    if not value or self._is_placeholder_text(value):
+                        continue
+
+                    normalized_items.append(
+                        {
+                            "value": value,
+                            "evidence": [],
+                        }
+                    )
+                    continue
+
                 if not isinstance(x, dict):
                     continue
 
@@ -417,16 +1228,16 @@ class LLMExtractionService:
                 if not isinstance(value, str) or not value.strip():
                     continue
 
-                evidence = self._normalize_evidence(x.get("evidence"))
-                if not evidence:
+                if self._is_placeholder_text(value):
                     continue
 
+                evidence = self._normalize_evidence(x.get("evidence"))
                 normalized_items.append({
                     "value": value.strip(),
                     "evidence": evidence,
                 })
 
-            return normalized_items
+            return self._dedupe_list_items(normalized_items, max_items=max_items)
 
         if not isinstance(raw, dict):
             return []
@@ -441,11 +1252,11 @@ class LLMExtractionService:
             return []
 
         evidence = self._normalize_evidence(raw.get("evidence"))
-        if not evidence:
-            return []
-
         for x in raw_items:
             if not isinstance(x, str) or not x.strip():
+                continue
+
+            if self._is_placeholder_text(x):
                 continue
 
             normalized_items.append({
@@ -453,7 +1264,7 @@ class LLMExtractionService:
                 "evidence": evidence,
             })
 
-        return normalized_items
+        return self._dedupe_list_items(normalized_items, max_items=max_items)
 
     def _normalize_evaluation_setup(
         self,
@@ -476,9 +1287,21 @@ class LLMExtractionService:
         if not isinstance(value, dict):
             value = {}
 
-        datasets = [x.strip() for x in value.get("datasets", []) if isinstance(x, str) and x.strip()]
-        metrics = [x.strip() for x in value.get("metrics", []) if isinstance(x, str) and x.strip()]
-        benchmarks = [x.strip() for x in value.get("benchmarks", []) if isinstance(x, str) and x.strip()]
+        datasets = [
+            x.strip()
+            for x in value.get("datasets", [])
+            if isinstance(x, str) and x.strip() and not self._is_placeholder_text(x)
+        ]
+        metrics = [
+            x.strip()
+            for x in value.get("metrics", [])
+            if isinstance(x, str) and x.strip() and not self._is_placeholder_text(x)
+        ]
+        benchmarks = [
+            x.strip()
+            for x in value.get("benchmarks", [])
+            if isinstance(x, str) and x.strip() and not self._is_placeholder_text(x)
+        ]
 
         evidence = self._normalize_evidence(raw.get("evidence"))
 
@@ -505,16 +1328,69 @@ class LLMExtractionService:
             "evidence": evidence,
         }
 
-    def _normalize_result(self, raw: dict[str, Any] | None, pages: list[dict]) -> dict[str, Any]:
+    def _ensure_evidence_from_values(
+        self,
+        normalized: dict[str, Any],
+        pages: list[dict],
+    ) -> dict[str, Any]:
+        for scalar_key in ["problem", "method"]:
+            field = normalized.get(scalar_key) or {}
+            value = field.get("value") if isinstance(field, dict) else None
+            evidence = field.get("evidence") if isinstance(field, dict) else []
+            if isinstance(value, str) and value.strip() and (not isinstance(evidence, list) or len(evidence) == 0):
+                field["evidence"] = self._build_fallback_evidence_from_text(value, pages)
+
+        for list_key in ["contributions", "limitations"]:
+            items = normalized.get(list_key)
+            if not isinstance(items, list):
+                continue
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+
+                value = item.get("value")
+                evidence = item.get("evidence")
+                if isinstance(value, str) and value.strip() and (not isinstance(evidence, list) or len(evidence) == 0):
+                    item["evidence"] = self._build_fallback_evidence_from_text(value, pages)
+
+        evaluation_setup = normalized.get("evaluation_setup")
+        if isinstance(evaluation_setup, dict):
+            evidence = evaluation_setup.get("evidence")
+            value = evaluation_setup.get("value")
+
+            if (not isinstance(evidence, list) or len(evidence) == 0) and isinstance(value, dict):
+                tokens: list[str] = []
+                for key in ["datasets", "metrics", "benchmarks"]:
+                    arr = value.get(key)
+                    if isinstance(arr, list):
+                        tokens.extend([x for x in arr if isinstance(x, str) and x.strip()])
+
+                if tokens:
+                    evaluation_setup["evidence"] = self._build_fallback_evidence_from_text(
+                        "; ".join(tokens),
+                        pages,
+                    )
+
+        return normalized
+
+    def _normalize_result(
+        self,
+        raw: dict[str, Any] | None,
+        pages: list[dict],
+        input_text: str = "",
+    ) -> dict[str, Any]:
         raw = raw or {}
 
         normalized = {
             "problem": self._normalize_scalar_field(raw.get("problem")),
             "method": self._normalize_scalar_field(raw.get("method")),
-            "contributions": self._normalize_list_field(raw.get("contributions")),
-            "limitations": self._normalize_list_field(raw.get("limitations")),
+            "contributions": self._normalize_list_field(raw.get("contributions"), max_items=3),
+            "limitations": self._normalize_list_field(raw.get("limitations"), max_items=2),
             "evaluation_setup": self._normalize_evaluation_setup(raw.get("evaluation_setup"), pages),
         }
+        normalized = self._enrich_missing_fields_from_input_text(normalized, input_text, pages)
+        normalized = self._ensure_evidence_from_values(normalized, pages)
         normalized["problem"] = self._fill_missing_pages(normalized["problem"], pages)
         normalized["method"] = self._fill_missing_pages(normalized["method"], pages)
         normalized["contributions"] = self._fill_missing_pages(normalized["contributions"], pages)

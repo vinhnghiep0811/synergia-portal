@@ -80,6 +80,21 @@ export function CanonicalDocumentDetailPage() {
     }
   }
 
+  function formatLLMProvider(provider, modelName) {
+    const normalizedProvider = (provider || "").toLowerCase();
+    const normalizedModel = (modelName || "").toLowerCase();
+
+    if (normalizedProvider === "gemini") return "Gemini";
+    if (normalizedProvider === "ollama" && normalizedModel.includes("gemma")) {
+      return "Gemma (Ollama)";
+    }
+    if (normalizedProvider === "ollama") return "Ollama";
+    if (normalizedModel.includes("gemini")) return "Gemini";
+    if (normalizedModel.includes("gemma")) return "Gemma";
+    if (provider) return provider;
+    return "-";
+  }
+
   if (loading) {
     return (
       <div className="app-shell">
@@ -352,6 +367,7 @@ export function CanonicalDocumentDetailPage() {
                       <thead>
                         <tr style={{ backgroundColor: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
                           <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>ID</th>
+                          <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Provider</th>
                           <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Model</th>
                           <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Chi tiết</th>
                           <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Status</th>
@@ -366,7 +382,22 @@ export function CanonicalDocumentDetailPage() {
                               {run.id}
                             </td>
                             <td style={{ padding: "0.75rem" }}>
-                              {run.model_name}
+                              <span
+                                style={{
+                                  backgroundColor: "#e2e8f0",
+                                  color: "#0f172a",
+                                  padding: "0.2rem 0.5rem",
+                                  borderRadius: "999px",
+                                  fontSize: "0.75rem",
+                                  fontWeight: "600",
+                                  whiteSpace: "nowrap"
+                                }}
+                              >
+                                {formatLLMProvider(run.provider, run.model_name)}
+                              </span>
+                            </td>
+                            <td style={{ padding: "0.75rem" }}>
+                              {run.model_name || "-"}
                             </td>
                             <td style={{ padding: "0.75rem" }}>
                               <button

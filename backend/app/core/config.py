@@ -123,11 +123,23 @@ GEMINI_MODEL = get_env("GEMINI_MODEL", "gemini-2.5-pro")
 
 GEMINI_TEMPERATURE = float(get_env("GEMINI_TEMPERATURE", "0"))
 GEMINI_MAX_OUTPUT_TOKENS = get_env_int("GEMINI_MAX_OUTPUT_TOKENS", 4096)
+GEMINI_AUTO_RETRY_MAX_ATTEMPTS = max(1, get_env_int("GEMINI_AUTO_RETRY_MAX_ATTEMPTS", 5))
+GEMINI_AUTO_RETRY_DELAY_SECONDS = max(0.0, float(get_env("GEMINI_AUTO_RETRY_DELAY_SECONDS", "1")))
+GEMINI_FALLBACK_TO_OLLAMA = get_env_bool("GEMINI_FALLBACK_TO_OLLAMA", True)
+
+OLLAMA_BASE_URL = get_env("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL = get_env("OLLAMA_MODEL", "gemma:2b")
+OLLAMA_TIMEOUT_SECONDS = max(1, get_env_int("OLLAMA_TIMEOUT_SECONDS", 120))
+OLLAMA_TEMPERATURE = float(get_env("OLLAMA_TEMPERATURE", "0.0"))
+OLLAMA_NUM_PREDICT = max(128, get_env_int("OLLAMA_NUM_PREDICT", 1024))
+OLLAMA_NUM_CTX = max(2048, get_env_int("OLLAMA_NUM_CTX", 8192))
+OLLAMA_TOP_P = float(get_env("OLLAMA_TOP_P", "0.9"))
+OLLAMA_REPEAT_PENALTY = float(get_env("OLLAMA_REPEAT_PENALTY", "1.1"))
 
 LLM_TIMEOUT_SECONDS = get_env_int("LLM_TIMEOUT_SECONDS", 60)
 
 # =========================
-# Telegram
+# Telegram 
 # =========================
 TELEGRAM_BOT_TOKEN = get_env("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = get_env("TELEGRAM_CHAT_ID", "")

@@ -165,6 +165,26 @@ export async function getExtractionRunDetail(runId) {
 }
 
 /**
+ * Lay extraction run moi nhat theo paper id.
+ * Tra ve null neu paper chua co extraction run.
+ * @param {string} paperId
+ * @returns {Promise<Object | null>}
+ */
+export async function getLatestExtractionRunByPaperId(paperId) {
+    try {
+        const response = await apiClient.get(`/api/extraction-runs/by-paper/${paperId}`);
+        return response.data;
+    } catch (error) {
+        if (error?.response?.status === 404) {
+            return null;
+        }
+
+        const message = await parseApiError(error);
+        throw new Error(message);
+    }
+}
+
+/**
  * Retry failed LLM extraction for a paper.
  * @param {string} paperId
  * @returns {Promise<Object>}

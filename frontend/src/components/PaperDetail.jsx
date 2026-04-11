@@ -42,6 +42,21 @@ function formatSemanticSource(source) {
   return source;
 }
 
+function formatLLMProvider(provider, modelName) {
+  const normalizedProvider = (provider || "").toLowerCase();
+  const normalizedModel = (modelName || "").toLowerCase();
+
+  if (normalizedProvider === "gemini") return "Gemini";
+  if (normalizedProvider === "ollama" && normalizedModel.includes("gemma")) {
+    return "Gemma (Ollama)";
+  }
+  if (normalizedProvider === "ollama") return "Ollama";
+  if (normalizedModel.includes("gemini")) return "Gemini";
+  if (normalizedModel.includes("gemma")) return "Gemma";
+  if (provider) return provider;
+  return "-";
+}
+
 export function PaperDetail({ paper }) {
   if (!paper) {
     return (
@@ -167,6 +182,26 @@ export function PaperDetail({ paper }) {
             <div className="detail-list__item">
               <dt>Canonical document ID</dt>
               <dd>{paper.canonicalDocumentId || "-"}</dd>
+            </div>
+            <div className="detail-list__item">
+              <dt>LLM provider</dt>
+              <dd>{formatLLMProvider(paper.llmProvider, paper.llmModel)}</dd>
+            </div>
+            <div className="detail-list__item">
+              <dt>LLM model</dt>
+              <dd>{paper.llmModel || "-"}</dd>
+            </div>
+            <div className="detail-list__item">
+              <dt>LLM run status</dt>
+              <dd>{paper.llmRunStatus || "-"}</dd>
+            </div>
+            <div className="detail-list__item">
+              <dt>Prompt version</dt>
+              <dd>{paper.llmPromptVersion || "-"}</dd>
+            </div>
+            <div className="detail-list__item">
+              <dt>Extraction run ID</dt>
+              <dd>{paper.llmExtractionRunId || "-"}</dd>
             </div>
           </dl>
         </div>
