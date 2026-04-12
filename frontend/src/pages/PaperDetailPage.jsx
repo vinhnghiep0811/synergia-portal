@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { PaperDetail } from "../components/PaperDetail.jsx";
 import {
   getCanonicalDocumentByPaper,
+  getLatestExtractionRunByPaperId,
   getPaperDetail,
   retryLLMExtractionByPaper,
 } from "../services/paperApi.js";
@@ -18,7 +19,7 @@ function mapCanonicalAuthors(authors) {
   return authors.map((author) => author?.name).filter(Boolean);
 }
 
-function mapPaperDetail(detail, canonical) {
+function mapPaperDetail(detail, canonical, extractionRun) {
   const matchStatus = canonical?.match_status || null;
   const enrichmentStatus = canonical?.enrichment_status || null;
 
@@ -66,6 +67,12 @@ function mapPaperDetail(detail, canonical) {
     canonicalPublicationYear: canonical?.publication_year || null,
     canonicalAuthors: mapCanonicalAuthors(canonical?.authors_json),
 
+    llmExtractionRunId: extractionRun?.id || null,
+    llmProvider: extractionRun?.provider || null,
+    llmModel: extractionRun?.model_name || null,
+    llmPromptVersion: extractionRun?.prompt_version || null,
+    llmRunStatus: extractionRun?.status || null,
+
     parseStatus: detail.processing_stage === "parsing"
       ? "processing"
       : detail.processing_stage && detail.processing_stage !== "parsing"
@@ -95,16 +102,23 @@ export function PaperDetailPage() {
     try {
       setError("");
       const detail = await getPaperDetail(paperId);
-      const canonical = detail?.canonical_document_id
-        ? await getCanonicalDocumentByPaper(paperId)
-        : null;
-      const mapped = mapPaperDetail(detail, canonical);
+
+      const [canonical, extractionRun] = detail?.canonical_document_id
+        ? await Promise.all([
+            getCanonicalDocumentByPaper(paperId),
+            getLatestExtractionRunByPaperId(paperId),
+          ])
+        : [null, null];
+
+      const mapped = mapPaperDetail(detail, canonical, extractionRun);
       
       console.log("%c📦 FRESH paper data:", 'color:#f59e0b;font-weight:bold', {
         processing_status: mapped.processing_status,
         processing_stage: mapped.processing_stage,
         semanticScholarStatus: mapped.semanticScholarStatus,
         status: mapped.status,                    // ← log thêm để debug
+        llmProvider: mapped.llmProvider,
+        llmModel: mapped.llmModel,
       });
       
       setPaper(mapped);

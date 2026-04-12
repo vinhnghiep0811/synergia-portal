@@ -20,6 +20,7 @@ def _to_extraction_run_response(extraction: ExtractionRun) -> ExtractionRunRespo
     return ExtractionRunResponse(
         id=extraction.id,
         canonical_document_id=extraction.canonical_document_id,
+        provider=extraction.provider,
         model_name=extraction.model_name,
         prompt_version=extraction.prompt_version,
         status=extraction.status,

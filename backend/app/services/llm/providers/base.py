@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 class BaseLLMProvider(ABC):
     @abstractmethod
-    def extract_metadata(self, prompt: str) -> Dict[str, Any]:
+    def extract_metadata(self, prompt: str, fallback_prompt: str | None = None) -> Dict[str, Any]:
         """
         Return standardized provider output shape:
         {

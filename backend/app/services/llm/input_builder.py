@@ -79,17 +79,19 @@ class LLMInputBuilder:
         parts.append(
             "### CRITICAL EXTRACTION RULES ###\n"
             "1. Return ONLY a valid JSON object. No conversational text.\n"
-            "2. Each 'value' must be a single concise sentence (max 20 words).\n"
-            "3. LIMITATIONS: Extract max 3 items. Each snippet MUST be < 150 characters.\n"
-            "4. EVIDENCE: Each snippet MUST be < 150 characters. Use '...' to shorten long quotes.\n"
-            "5. Use only provided content. If not found, use null or []."
+            "2. Keep each 'value' concise (usually <= 35 words), but keep core meaning complete.\n"
+            "3. CONTRIBUTIONS: Prefer 2-3 atomic items when claims are clearly present.\n"
+            "4. LIMITATIONS: Prefer 1-2 items when constraints/future-work signals exist.\n"
+            "5. EVIDENCE: Keep snippet short (<= 180 chars). Use '...' to shorten long quotes.\n"
+            "6. Use only provided content. If not found, use null or []."
         )
 
         parts.append(
             "You are given extracted content from an academic paper. "
             "Use only the provided content. "
             "Do not guess missing information. "
-            "If evidence is missing, fields must remain null, empty, or unknown."
+            "If evidence is hard to localize, still keep conservative values grounded in text. "
+            "Avoid leaving contributions/limitations empty when clear signals exist in abstract/introduction/conclusion."
         )
 
 

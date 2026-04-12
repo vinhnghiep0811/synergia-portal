@@ -45,6 +45,21 @@ export function ExtractionRunDetailPage() {
     });
   }
 
+  function formatLLMProvider(provider, modelName) {
+    const normalizedProvider = (provider || "").toLowerCase();
+    const normalizedModel = (modelName || "").toLowerCase();
+
+    if (normalizedProvider === "gemini") return "Gemini";
+    if (normalizedProvider === "ollama" && normalizedModel.includes("gemma")) {
+      return "Gemma (Ollama)";
+    }
+    if (normalizedProvider === "ollama") return "Ollama";
+    if (normalizedModel.includes("gemini")) return "Gemini";
+    if (normalizedModel.includes("gemma")) return "Gemma";
+    if (provider) return provider;
+    return "-";
+  }
+
   // ==================== RENDER HELPERS ====================
   function renderEvidence(evidence) {
     if (!Array.isArray(evidence) || evidence.length === 0) return null;
@@ -202,6 +217,7 @@ export function ExtractionRunDetailPage() {
                       </span>
                     </dd>
                   </div>
+                  <div className="detail-list__item"><dt>Provider</dt><dd>{formatLLMProvider(run.provider, run.model_name)}</dd></div>
                   <div className="detail-list__item"><dt>Model</dt><dd>{run.model_name || "-"}</dd></div>
                   <div className="detail-list__item"><dt>Prompt Version</dt><dd>{run.prompt_version || "-"}</dd></div>
                 </dl>
