@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 
 sys.path.append("/backend")
-
+from app.services.activity_log_service import ActivityLogService
 from app.core.database import SessionLocal
 from app.models.paper_record import PaperRecord
 from app.models.canonical_document import CanonicalDocument
@@ -26,7 +26,7 @@ def parse_storage_path(storage_path: str) -> str:
 
 def pdf_parse(paper_id: str) -> None:
     db = SessionLocal()
-
+    activity_service = ActivityLogService(db)
     try:
         paper_uuid = UUID(paper_id)
     except ValueError:
@@ -52,6 +52,12 @@ def pdf_parse(paper_id: str) -> None:
         paper.processing_status = "processing"
         paper.processing_stage = "parsing"
         paper.processing_error = None
+
+        activity_service.log_parse_started(
+            paper_id=paper.id,
+            filename=paper.original_filename,
+        )
+
         db.commit()
 
         # --------------------------------
@@ -148,6 +154,14 @@ def pdf_parse(paper_id: str) -> None:
         if first_paper and first_paper.id != paper.id:
             paper.is_duplicate = True
             paper.duplicate_of_paper_id = first_paper.id
+
+            activity_service.log_duplicate_detected(
+                paper_id=paper.id,
+                canonical_document_id=canonical.id,
+                canonical_key=canonical.canonical_key,
+                canonical_type=canonical.canonical_type,
+                duplicate_of_paper_id=first_paper.id,
+            )
         else:
             paper.is_duplicate = False
             paper.duplicate_of_paper_id = None  
@@ -158,6 +172,17 @@ def pdf_parse(paper_id: str) -> None:
         paper.processing_status = "processing"
         paper.processing_stage = "parsed"
         paper.processing_error = None
+
+        activity_service.log_parse_completed(
+            paper_id=paper.id,
+            canonical_document_id=canonical.id,
+            filename=paper.original_filename,
+            doi=doi,
+            title=title,
+            canonical_key=canonical.canonical_key,
+            canonical_type=canonical.canonical_type,
+        )
+
         db.commit()
 
         # --------------------------------
@@ -191,6 +216,13 @@ def pdf_parse(paper_id: str) -> None:
                 paper.processing_status = "failed"
                 paper.processing_stage = "parsing"
                 paper.processing_error = str(e)
+
+                activity_service.log_parse_failed(
+                    paper_id=paper.id,
+                    filename=paper.original_filename,
+                    error_message=str(e),
+                )
+
                 db.commit()
         except Exception:
             db.rollback()

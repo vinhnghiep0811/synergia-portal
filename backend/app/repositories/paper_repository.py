@@ -2,7 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
-from typing import List
+# from typing import List
 from app.models.paper_record import PaperRecord
 
 
@@ -12,8 +12,8 @@ class PaperRepository:
 
     def create(self, paper: PaperRecord) -> PaperRecord:
         self.db.add(paper)
-        self.db.commit()
-        self.db.refresh(paper)
+        # self.db.commit()
+        # self.db.refresh(paper)
         return paper
 
     def get_by_id(self, paper_id: UUID) -> Optional[PaperRecord]:

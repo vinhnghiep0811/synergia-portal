@@ -1,5 +1,5 @@
 from fastapi import APIRouter, status
-from app.api.admin import router as admin_router
+from app.api.admin.router import router as admin_router
 from app.api.papers import router as papers_router
 from app.api.canonical_documents import router as canonical_documents_router 
 from app.api.extraction_runs import router as extraction_run_router
