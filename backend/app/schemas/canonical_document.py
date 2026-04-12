@@ -54,3 +54,28 @@ class CanonicalDocumentListItemResponse(BaseModel):
     paper_count: int
 
     model_config = ConfigDict(from_attributes=True)
+
+class CanonicalDocumentEmbeddedResponse(BaseModel):
+    id: UUID
+    canonical_key: str
+    canonical_type: str
+    doi: Optional[str] = None
+    title: Optional[str] = None
+    title_candidate: Optional[str] = None
+    publication_year: Optional[int] = None
+    venue: Optional[str] = None
+    enrichment_status: str
+    match_status: Optional[str] = None
+    metadata_source: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class PaginationMetaResponse(BaseModel):
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+class CanonicalDocumentListPaginatedResponse(BaseModel):
+    items: list[CanonicalDocumentListItemResponse]
+    pagination: PaginationMetaResponse

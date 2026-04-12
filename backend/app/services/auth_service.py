@@ -84,7 +84,7 @@ class AuthService:
             return userinfo_resp.json()
 
     def sync_user(self, info: dict) -> User:
-        email = (info.get("email") or "").strip()
+        email = (info.get("email") or "").strip().lower()
         if not email or not self.is_allowed_domain(email):
             raise HTTPException(status_code=403, detail="Email domain not allowed.")
 
@@ -92,23 +92,34 @@ class AuthService:
         user = self.user_repo.get_by_google_sub(google_sub) or self.user_repo.get_by_email(email)
 
         now = datetime.now(timezone.utc)
+
         if not user:
+            role = UserRole.ADMIN.value if self.is_admin_email(email) else UserRole.USER.value
+
             user = User(
-                email=email, full_name=info.get("name"), 
-                avatar_url=info.get("picture"), google_sub=google_sub,
-                is_active=True, last_login_at=now
+                email=email,
+                full_name=info.get("name"),
+                avatar_url=info.get("picture"),
+                google_sub=google_sub,
+                is_active=True,
+                role=role,
+                last_login_at=now,
             )
             return self.user_repo.create(user)
-        
+
         if not user.is_active:
             raise HTTPException(status_code=403, detail="User is deactivated.")
-            
+
         user.full_name = info.get("name")
         user.avatar_url = info.get("picture")
         user.last_login_at = now
+
+        if google_sub and not user.google_sub:
+            user.google_sub = google_sub
+
         self.user_repo.update()
         return user
-    
+
     def generate_google_login_data(self) -> tuple[str, str]:
         state = secrets.token_urlsafe(32)
         return state, self.build_google_login_url(state)

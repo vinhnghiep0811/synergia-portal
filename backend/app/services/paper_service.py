@@ -1,6 +1,6 @@
 import hashlib
 import os
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
@@ -10,6 +10,7 @@ from app.models.paper_record import PaperRecord
 from app.repositories.paper_repository import PaperRepository
 from app.services.queue_service import QueueService
 from app.services.storage_service import StorageService
+from app.services.activity_log_service import ActivityLogService
 
 
 class PaperService:
@@ -18,11 +19,13 @@ class PaperService:
         self.repo = PaperRepository(db)
         self.storage = StorageService()
         self.queue_service = QueueService()
+        self.activity_service = ActivityLogService(db)
 
     async def upload_pdf(
         self,
         file: UploadFile,
         uploader_id: str | None = None,
+        actor_user_id: UUID | None = None,
     ) -> PaperRecord:
         if not file.filename:
             raise HTTPException(
@@ -84,28 +87,72 @@ class PaperService:
             duplicate_of_paper_id=None,
         )
 
-        paper = self.repo.create(paper)
+        try:
+            self.repo.create(paper)
+            self.db.flush()
+            self.activity_service.log_paper_uploaded(
+                paper_id=paper.id,
+                filename=paper.original_filename,
+                file_size_bytes=paper.file_size_bytes,
+                mime_type=paper.mime_type,
+                upload_source=paper.upload_source,
+                actor_user_id=actor_user_id,
+            )
 
+            self.db.commit()
+            self.db.refresh(paper)
+
+        except Exception:
+            self.db.rollback()
+            raise
+
+        # Transaction 2: enqueue parse + update queued state
         try:
             self.queue_service.enqueue_pdf_parse(str(paper.id))
+
             paper.processing_status = "pending"
             paper.processing_stage = "queued"
             paper.processing_error = None
+
+            self.activity_service.log_parse_queued(
+                paper_id=paper.id,
+                filename=paper.original_filename,
+            )
+
             self.db.commit()
             self.db.refresh(paper)
+
         except Exception as e:
-            paper.processing_status = "failed"
-            paper.processing_stage = "uploaded"
-            paper.processing_error = f"Failed to enqueue parse job: {str(e)}"
-            self.db.commit()
-            self.db.refresh(paper)
+            self.db.rollback()
+
+            paper = self.repo.get_by_id(paper.id)
+            if not paper:
+                raise
+
+            try:
+                paper.processing_status = "failed"
+                paper.processing_stage = "uploaded"
+                paper.processing_error = f"Failed to enqueue parse job: {str(e)}"
+
+                self.activity_service.log_parse_queue_failed(
+                    paper_id=paper.id,
+                    filename=paper.original_filename,
+                    error_message=str(e),
+                )
+
+                self.db.commit()
+                self.db.refresh(paper)
+
+            except Exception:
+                self.db.rollback()
+                raise
 
         return paper
 
     def list_papers(self, skip: int = 0, limit: int = 20):
         return self.repo.list_papers(skip=skip, limit=limit)
 
-    def get_paper_detail(self, paper_id):
+    def get_paper_detail(self, paper_id: UUID):
         paper = self.repo.get_by_id(paper_id)
         if not paper:
             raise HTTPException(

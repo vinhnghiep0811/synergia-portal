@@ -99,9 +99,14 @@ API dùng để upload một file PDF bài báo lên hệ thống.
 async def upload_paper(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     service = PaperService(db)
-    paper = await service.upload_pdf(file=file)
+    paper = await service.upload_pdf(
+        file=file,
+        uploader_id=current_user.email,   # giữ theo kiểu hiện tại của PaperRecord
+        actor_user_id=current_user.id,    # dùng cho activity log
+    )
     return paper
 
 

@@ -168,6 +168,8 @@ class LLMExtractionService:
         cached_run = self.repo.get_latest_completed_by_canonical_document_id(canonical.id)
         if cached_run:
             logger.info("[LLM SERVICE] Cache hit for canonical_document_id=%s", canonical.id)
+            setattr(cached_run, "cache_hit", True)
+
             return cached_run
 
         logger.info("[LLM SERVICE] Cache miss for canonical_document_id=%s", canonical.id)
@@ -228,6 +230,8 @@ class LLMExtractionService:
             )
 
             self.repo.set_latest_for_canonical_document(canonical, run)
+            setattr(run, "cache_hit", False)
+
             return run
 
         except Exception as e:

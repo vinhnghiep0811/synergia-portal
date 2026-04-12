@@ -5,13 +5,14 @@ from app.core.database import SessionLocal
 from app.models.canonical_document import CanonicalDocument
 from app.models.paper_record import PaperRecord
 from app.services.llm_extraction_service import LLMExtractionService
+from app.services.activity_log_service import ActivityLogService
 
 logger = logging.getLogger(__name__)
 
 
 def llm_extract(canonical_document_id: str) -> None:
     db = SessionLocal()
-
+    activity_service = ActivityLogService(db)
     try:
         cid = UUID(canonical_document_id)
     except ValueError:
@@ -50,6 +51,13 @@ def llm_extract(canonical_document_id: str) -> None:
                 paper.processing_status = "processing"
                 paper.processing_stage = "llm_extracting"
                 paper.processing_error = None
+
+        activity_service.log_llm_extraction_started(
+            canonical_document_id=canonical.id,
+            canonical_key=canonical.canonical_key,
+            canonical_type=canonical.canonical_type,
+        )
+
         db.commit()
 
         # 2. run service
@@ -66,6 +74,20 @@ def llm_extract(canonical_document_id: str) -> None:
                 paper.processing_status = "completed"
                 paper.processing_stage = "llm_extracted"
                 paper.processing_error = None
+
+        is_cache_hit = getattr(result, "cache_hit", False)
+
+        if is_cache_hit:
+            activity_service.log_llm_extraction_cache_hit(
+                canonical_document_id=canonical.id,
+                extraction_run_id=result.id,
+            )
+        else:
+            activity_service.log_llm_extraction_completed(
+                canonical_document_id=canonical.id,
+                extraction_run_id=result.id,
+            )
+
         db.commit()
 
         logger.info(
@@ -88,6 +110,11 @@ def llm_extract(canonical_document_id: str) -> None:
                 paper.processing_status = "failed"
                 paper.processing_stage = "llm_extracting"
                 paper.processing_error = f"LLM extraction failed: {str(e)}"
+
+            activity_service.log_llm_extraction_failed(
+                canonical_document_id=cid,
+                error_message=str(e),
+            )
 
             db.commit()
         except Exception:
