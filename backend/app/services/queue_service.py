@@ -11,7 +11,8 @@ class QueueService:
     def enqueue_docling(self, paper_id: str):
         return docling_queue.enqueue(
             "tasks.docling.extract_docling_text",
-            paper_id
+            paper_id,
+            job_timeout=600,
         )
 
     def enqueue_llm_extract(self, canonical_document_id: str):
