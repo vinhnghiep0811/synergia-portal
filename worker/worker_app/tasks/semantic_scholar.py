@@ -10,6 +10,8 @@ from app.models.canonical_document import CanonicalDocument
 from app.models.paper_record import PaperRecord
 from app.services.semantic_scholar_service import SemanticScholarService
 from app.services.activity_log_service import ActivityLogService
+from app.services.llm_enqueue_service import try_enqueue_llm_if_ready
+
 logger = logging.getLogger(__name__)
 
 
@@ -105,11 +107,12 @@ def semantic_scholar_enrich(canonical_document_id: str) -> None:
 
             db.commit()
 
-            parse_queue.enqueue(
-                "worker_app.tasks.llm_extract.llm_extract",
-                str(canonical.id),
+            enqueued = try_enqueue_llm_if_ready(str(canonical.id))
+            logger.info(
+                "[SS enrich] try_enqueue_llm_if_ready canonical_id=%s enqueued=%s",
+                canonical.id,
+                enqueued,
             )
-            logger.info("[SS enrich] Enqueued LLM extraction for canonical_id=%s", canonical.id)
 
         elif result == "rate_limited":
             for paper in papers:

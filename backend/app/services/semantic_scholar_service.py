@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.models.canonical_document import CanonicalDocument
 from app.models.paper_record import PaperRecord
 
+
 logger = logging.getLogger(__name__)
 
 SS_API_BASE = "https://api.semanticscholar.org/graph/v1"

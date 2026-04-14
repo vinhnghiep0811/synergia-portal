@@ -39,7 +39,60 @@ def llm_extract(canonical_document_id: str) -> None:
         if not papers:
             logger.warning("[LLM TASK] No PaperRecord mapped to canonical_id=%s", canonical.id)
 
+
+        docling_ready = any(
+            getattr(p, "docling_markdown_storage_path", None)
+            for p in papers
+        )
+        if not docling_ready:
+            logger.info(
+                "[LLM TASK] Skip canonical_document_id=%s because docling markdown not ready",
+                cid,
+            )
+            return
+
+        # Guard 2: semantic should be ready first
+        semantic_ready = any(
+            p.processing_stage in {"enriched", "llm_extracting", "llm_extracted"}
+            or p.processing_status == "completed"
+            for p in papers
+            if p.processing_status != "failed"
+        )
+        if not semantic_ready:
+            logger.info(
+                "[LLM TASK] Skip canonical_document_id=%s because semantic enrichment not ready",
+                cid,
+            )
+            return
+
+        # Guard 3: avoid duplicate run
+        already_running = any(
+            p.processing_status == "processing" and p.processing_stage == "llm_extracting"
+            for p in papers
+        )
+        if already_running:
+            logger.info(
+                "[LLM TASK] Skip canonical_document_id=%s because extraction is already running",
+                cid,
+            )
+            return
+
+        already_done = all(
+            p.processing_stage == "llm_extracted" or p.processing_status == "completed"
+            for p in papers
+            if p.processing_status != "failed"
+        )
+        if already_done:
+            logger.info(
+                "[LLM TASK] Skip canonical_document_id=%s because extraction already completed",
+                cid,
+            )
+            return
+
+
         logger.info("[LLM TASK] Start canonical_document_id=%s", cid)
+
+
 
         # 1. mark extracting
         for paper in papers:

@@ -116,6 +116,7 @@ REDIS_DB = get_env_int("REDIS_DB", 0)
 REDIS_URL = get_env("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
 
 RQ_PARSE_QUEUE = get_env("RQ_PARSE_QUEUE", "parse_queue")
+RQ_DOCLING_QUEUE = get_env("RQ_DOCLING_QUEUE", "docling")
 REFRESH_TOKEN_SECRET_KEY  = get_env("REFRESH_TOKEN_SECRET_KEY", "change-refresh-secret")
 REFRESH_TOKEN_EXPIRE_DAYS = get_env_int("REFRESH_TOKEN_EXPIRE_DAYS", 30)
 
