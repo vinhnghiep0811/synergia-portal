@@ -10,7 +10,7 @@ export function CanonicalDocumentsPage() {
   const [searchText, setSearchText] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [sortOrder, setSortOrder] = useState("newest"); // "newest" or "oldest"
-  const itemsPerPage = 10;
+  const itemsPerPage = 5;
   const navigate = useNavigate();
 
   const filteredDocuments = documents.filter(doc => 
@@ -124,8 +124,8 @@ export function CanonicalDocumentsPage() {
   return (
     <div className="app-shell">
       <AppHeader 
-        title="Canonical Documents"
-        subtitle="Quản lý và xem các tài liệu canonical đã được trích xuất."
+        title="Tài liệu chuẩn hóa"
+        subtitle="Quản lý và xem các tài liệu chuẩn hóa đã được trích xuất."
       />
 
       <main className="app-main app-main--papers">
@@ -133,9 +133,9 @@ export function CanonicalDocumentsPage() {
           <section className="card list-card">
             <header className="card__header card__header--with-actions">
               <div>
-                <h2 className="card__title">Danh sách Canonical Documents</h2>
+                <h2 className="card__title">Danh sách tài liệu chuẩn hóa</h2>
                 <p className="card__subtitle">
-                  Tổng số: {documents.length} tài liệu canonical
+                  Tổng số: {documents.length} tài liệu chuẩn hóa
                 </p>
               </div>
               <div className="list-filters">

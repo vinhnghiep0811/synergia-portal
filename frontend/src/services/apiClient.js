@@ -9,6 +9,24 @@ export const apiClient = axios.create({
 let isRefreshing = false;
 let failedQueue = [];
 
+// Add request interceptor to include auth token
+apiClient.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    // Only set Content-Type for JSON requests, let Axios handle FormData
+    if (!(config.data instanceof FormData)) {
+      config.headers['Content-Type'] = 'application/json';
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
 function processQueue(error) {
   failedQueue.forEach(({ resolve, reject }) => error ? reject(error) : resolve(null));
   failedQueue = [];
