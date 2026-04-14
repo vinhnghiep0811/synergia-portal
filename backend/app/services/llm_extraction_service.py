@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+import json
 import tempfile
 from typing import Any, Optional
 from uuid import UUID
@@ -997,13 +998,74 @@ class LLMExtractionService:
         )
 
     def _load_full_text_for_canonical(
-    self,
-    canonical: CanonicalDocument,
-) -> tuple[Optional[str], list[dict]]:
+        self,
+        canonical: CanonicalDocument,
+    ) -> tuple[Optional[str], list[dict]]:
+
         if not canonical.papers:
             return None, []
 
         storage = StorageService()
+
+        # 🔥 1. ưu tiên docling markdown
+        for paper in canonical.papers:
+            md_path = getattr(paper, "docling_markdown_storage_path", None)
+            if not md_path:
+                continue
+
+            try:
+                md_bytes = storage.download_by_storage_path(md_path)
+                markdown = md_bytes.decode("utf-8")
+
+                text_len = len((markdown or "").strip())
+
+                logger.info(
+                    "[LLM SERVICE] Loaded DOCILING markdown for canonical=%s paper_id=%s text_len=%s",
+                    canonical.id,
+                    getattr(paper, "id", None),
+                    text_len,
+                )
+
+                if text_len > 0:
+                    # ⚠️ docling chưa có page mapping → để empty hoặc simple mapping
+                    pages_path = getattr(paper, "page_text_json_storage_path", None)
+
+                    pages = []
+
+                    if pages_path:
+                        try:
+                            pages_bytes = storage.download_by_storage_path(pages_path)
+                            pages = json.loads(pages_bytes.decode("utf-8"))
+
+                            logger.info(
+                                "[LLM SERVICE] Loaded pages.json for canonical=%s paper_id=%s pages=%s",
+                                canonical.id,
+                                getattr(paper, "id", None),
+                                len(pages),
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "[LLM SERVICE] Failed to load pages.json canonical=%s paper_id=%s error=%s",
+                                canonical.id,
+                                getattr(paper, "id", None),
+                                str(e),
+                            )
+
+                    return markdown, pages
+
+            except Exception as e:
+                logger.warning(
+                    "[LLM SERVICE] Failed to load docling markdown for canonical=%s paper_id=%s error=%s",
+                    canonical.id,
+                    getattr(paper, "id", None),
+                    str(e),
+                )
+
+        # 🔽 2. fallback pdfplumber (giữ lại)
+        logger.warning(
+            "[LLM SERVICE] Falling back to pdfplumber for canonical=%s",
+            canonical.id,
+        )
 
         for paper in canonical.papers:
             if not paper.storage_path:
@@ -1019,23 +1081,16 @@ class LLMExtractionService:
                     tmp_path = tmp.name
 
                 full_text, _, pages = extract_pdf_text_for_llm(tmp_path)
-                text_len = len((full_text or "").strip())
 
-                logger.info(
-                    "[LLM SERVICE] Loaded text for canonical=%s paper_id=%s text_len=%s",
-                    canonical.id,
-                    getattr(paper, "id", None),
-                    text_len,
-                )
+                text_len = len((full_text or "").strip())
 
                 if text_len > 0:
                     return full_text, pages
 
             except Exception as e:
                 logger.warning(
-                    "[LLM SERVICE] Failed to load full text for canonical=%s paper_id=%s error=%s",
+                    "[LLM SERVICE] Failed fallback pdfplumber canonical=%s error=%s",
                     canonical.id,
-                    getattr(paper, "id", None),
                     str(e),
                 )
 

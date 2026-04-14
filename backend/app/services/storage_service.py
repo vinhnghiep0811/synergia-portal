@@ -43,11 +43,11 @@ class StorageService:
                 return
             raise
 
-    def upload_pdf_bytes(
+    def upload_file_bytes(
         self,
         object_name: str,
         content: bytes,
-        content_type: str = "application/pdf",
+        content_type: str,
     ) -> str:
         self.ensure_bucket_exists()
 
@@ -61,6 +61,18 @@ class StorageService:
         )
         return self.build_s3_uri(object_name)
 
+    def upload_pdf_bytes(
+        self,
+        object_name: str,
+        content: bytes,
+        content_type: str = "application/pdf",
+    ) -> str:
+        return self.upload_file_bytes(
+            object_name=object_name,
+            content=content,
+            content_type=content_type,
+        )
+    
     def download_object(self, object_name: str) -> bytes:
         response = self.internal_client.get_object(
             bucket_name=self.bucket_name,
