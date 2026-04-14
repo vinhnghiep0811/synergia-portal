@@ -138,7 +138,7 @@ export function ExtractionRunDetailPage() {
   if (loading) {
     return (
       <div className="app-shell">
-        <AppHeader title="Extraction Run Detail" subtitle="Chi tiết quá trình trích xuất bằng LLM" />
+        <AppHeader title="Chi tiết quá trình trích xuất" subtitle="Chi tiết quá trình trích xuất bằng LLM" />
         <main className="app-main app-main--papers">
           <div className="app-main__full">
             <div className="card" style={{ padding: "3rem", textAlign: "center" }}>
@@ -153,7 +153,7 @@ export function ExtractionRunDetailPage() {
   if (error || !run) {
     return (
       <div className="app-shell">
-        <AppHeader title="Extraction Run Detail" subtitle="Chi tiết quá trình trích xuất bằng LLM" />
+        <AppHeader title="Chi tiết quá trình trích xuất" subtitle="Chi tiết quá trình trích xuất bằng LLM" />
         <main className="app-main app-main--papers">
           <div className="app-main__full">
             <div className="card" style={{ padding: "2rem", textAlign: "center", color: "#dc2626" }}>
@@ -173,7 +173,7 @@ export function ExtractionRunDetailPage() {
   return (
     <div className="app-shell">
       <AppHeader 
-        title="Extraction Run Detail" 
+        title="Chi tiết quá trình trích xuất" 
         subtitle="Chi tiết quá trình trích xuất thông tin học thuật bằng LLM" 
       />
 

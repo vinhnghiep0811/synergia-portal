@@ -20,7 +20,7 @@ export function HomeDashboard() {
           >
             <header className="card__header">
               <div>
-                <h2 className="card__title">Canonical Documents</h2>
+                <h2 className="card__title">Danh sách tài liệu chuẩn hóa</h2>
                 <p className="card__subtitle">
                   Quản lý và xem các tài liệu canonical đã được trích xuất.
                 </p>

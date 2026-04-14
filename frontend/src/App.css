@@ -478,8 +478,28 @@
   background-color: #f59e0b;
 }
 
+.tab__indicator--processing {
+  background-color: #06b6d4;
+}
+
 .tab__indicator--processed {
   background-color: #22c55e;
+}
+
+.tab__indicator--overview {
+  background-color: #8b5cf6;
+}
+
+.tab__indicator--papers {
+  background-color: #3b82f6;
+}
+
+.tab__indicator--canonical {
+  background-color: #10b981;
+}
+
+.tab__indicator--activities {
+  background-color: #f59e0b;
 }
 
 .tab--active .tab__indicator--pending {
@@ -487,9 +507,34 @@
   box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.2);
 }
 
+.tab--active .tab__indicator--processing {
+  background-color: #06b6d4;
+  box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.2);
+}
+
 .tab--active .tab__indicator--processed {
   background-color: #22c55e;
   box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.2);
+}
+
+.tab--active .tab__indicator--overview {
+  background-color: #8b5cf6;
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.2);
+}
+
+.tab--active .tab__indicator--papers {
+  background-color: #3b82f6;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+}
+
+.tab--active .tab__indicator--canonical {
+  background-color: #10b981;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2);
+}
+
+.tab--active .tab__indicator--activities {
+  background-color: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.2);
 }
 
 .tab:hover {

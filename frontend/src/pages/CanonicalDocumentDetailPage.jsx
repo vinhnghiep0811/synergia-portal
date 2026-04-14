@@ -99,8 +99,8 @@ export function CanonicalDocumentDetailPage() {
     return (
       <div className="app-shell">
         <AppHeader 
-          title="Canonical Document Detail"
-          subtitle="Chi tiết tài liệu canonical"
+          title="Chi tiết tài liệu chuẩn hóa"
+          subtitle="Canonical document detail"
         />
 
         <main className="app-main app-main--papers">
@@ -118,8 +118,8 @@ export function CanonicalDocumentDetailPage() {
     return (
       <div className="app-shell">
         <AppHeader 
-          title="Canonical Document Detail"
-          subtitle="Chi tiết tài liệu canonical"
+          title="Chi tiết tài liệu chuẩn hóa"
+          subtitle="Canonical document detail"
         />
 
         <main className="app-main app-main--papers">
@@ -145,8 +145,8 @@ export function CanonicalDocumentDetailPage() {
     return (
       <div className="app-shell">
         <AppHeader 
-          title="Canonical Document Detail"
-          subtitle="Chi tiết tài liệu canonical"
+          title="Chi tiết tài liệu chuẩn hóa"
+          subtitle="Chi tiết tài liệu chuẩn hóa"
         />
 
         <main className="app-main app-main--papers">
@@ -171,8 +171,8 @@ export function CanonicalDocumentDetailPage() {
   return (
     <div className="app-shell">
       <AppHeader 
-        title="Canonical Document Detail"
-        subtitle="Chi tiết tài liệu canonical"
+        title="Chi tiết tài liệu chuẩn hóa"
+        subtitle="Canonical document detail"
       />
 
       <main className="app-main app-main--papers">
