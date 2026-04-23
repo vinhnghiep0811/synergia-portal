@@ -14,7 +14,7 @@ services:
     ports:
       - "${DB_PORT}:5432"
     volumes:
-      - postgres_dev_data:/var/lib/postgresql/data
+      - D:/docker-data/synergia/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 5s
@@ -27,6 +27,8 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
+    volumes:
+      - D:/docker-data/synergia/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -111,7 +113,7 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - rustfs_data:/data
+      - D:/docker-data/synergia/rustfs:/data
 
   docling_worker:
     build:
@@ -136,6 +138,6 @@ services:
       - ../../docling_worker:/app
     command: python -m worker
 
-volumes:
-  postgres_dev_data:
-  rustfs_data:
+# volumes:
+#   postgres_dev_data:
+#   rustfs_data:

@@ -48,7 +48,7 @@ export function ProcessingTimeline({ paper }) {
       isCompleted: 
         paper.processing_status === 'completed' ||
         paper.processing_stage === 'llm_extracted'  ,  
-      isActive: paper.processing_stage === 'llm_extracting',
+      isActive: paper.processing_stage === 'llm_extracting' || paper.processing_stage === 'enriched',
       hasError: paper.processing_status === 'failed' && paper.processing_stage === 'llm_extracting'
     }
   ], [paper.processing_stage, paper.processing_status]); // chỉ depend vào các field thật sự cần
