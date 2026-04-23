@@ -140,7 +140,7 @@ class DocumentStructureService:
             return False
 
         # references thường không dùng cho semantic retrieval thường
-        if section_type == "references":
+        if section_type in {"references", "appendix"}:
             return False
 
         return True
@@ -280,6 +280,12 @@ class DocumentStructureService:
                 if heading_level > 1:
                     parent_key = heading_stack.get(heading_level - 1)
 
+                if normalized_type == "other" and parent_key and parent_key in sections_by_key:
+                    parent_section = sections_by_key[parent_key]
+                    parent_type = (parent_section.get("section_type") or "").strip().lower()
+                    if parent_type == "appendix":
+                        normalized_type = "appendix"
+
                 current_title = cleaned_title
                 current_type = normalized_type
                 current_heading_number = heading_number
@@ -361,13 +367,18 @@ class DocumentStructureService:
         chunk_index = 0
 
         for section in sections:
+
+            section_type = (section.section_type or "").strip().lower()
+            if section_type in {"references", "appendix"}:
+                continue
+
             section_text = (section.content or "").strip()
 
             if self._should_skip_section_content(section, section_text):
                 continue
             dynamic_max_chars = self._get_section_chunk_size(section, default=max_chars)
 
-            parts = self._split_text(section_text, max_chars=max_chars)
+            parts = self._split_text(section_text, max_chars=dynamic_max_chars)
 
             for part in parts:
                 normalized = self._normalize_chunk_text(part)
@@ -404,14 +415,21 @@ class DocumentStructureService:
 
     def _is_reference_like_line(self, line: str) -> bool:
         stripped = (line or "").strip()
+        lower = stripped.lower()
+
         if not stripped:
-            return True  # giữ dòng trống để preserve spacing
+            return True
 
         if self._looks_like_reference_entry(stripped):
             return True
 
-        # continuation line của reference dài nhiều dòng
-        if len(stripped.split()) >= 3 and re.search(r"\b(19|20)\d{2}\b", stripped):
+        if "proc." in lower or "vol." in lower or "no." in lower or "pp." in lower:
+            return True
+
+        if lower.startswith("in ") and len(stripped.split()) >= 4:
+            return True
+
+        if re.search(r"\b(19|20)\d{2}\b", stripped) and len(stripped.split()) >= 3:
             return True
 
         return False
@@ -430,6 +448,9 @@ class DocumentStructureService:
             return False
 
         if self._looks_like_reference_entry(line):
+            return False
+
+        if line.endswith(":") and len(line.split()) <= 6:
             return False
 
         if line.startswith("#"):
@@ -456,7 +477,7 @@ class DocumentStructureService:
             return False
 
         words = line.split()
-        if len(words) < 1 or len(words) > 10:
+        if len(words) < 1 or len(words) > 12:
             return False
 
         if self._looks_like_sentence(line):
@@ -543,7 +564,28 @@ class DocumentStructureService:
     def _normalize_section_type(self, title: str) -> str:
         normalized = title.strip().lower()
         normalized = re.sub(r"\s+", " ", normalized).strip()
-        return self.SECTION_TYPE_MAP.get(normalized, "other")
+
+        if normalized in self.SECTION_TYPE_MAP:
+            return self.SECTION_TYPE_MAP[normalized]
+
+        if normalized == "appendix":
+            return "appendix"
+
+        if re.match(r"^[a-z]\s+appendix$", normalized):
+            return "appendix"
+
+        if normalized.startswith("appendix "):
+            return "appendix"
+
+        if re.match(r"^[a-z]\.\d+(\.\d+)*\s+", normalized):
+            return "appendix"
+        
+        if re.match(r"^[a-z]\s+[a-z].+", normalized):
+            words = normalized.split()
+            if len(words) >= 2 and len(words) <= 12:
+                return "appendix"
+
+        return "other"
 
     def _split_into_blocks(self, text: str) -> List[str]:
         lines = text.splitlines()
