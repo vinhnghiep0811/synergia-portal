@@ -17,6 +17,10 @@ from app.models.paper_record import PaperRecord
 from app.services.queue_service import QueueService
 from app.services.storage_service import StorageService
 
+from app.models.document_section import DocumentSection
+from app.models.document_chunk import DocumentChunk
+from app.services.document_structure_service import DocumentStructureService
+
 logger = logging.getLogger(__name__)
 
 DOCLING_ARTIFACTS_PATH = os.getenv("DOCLING_ARTIFACTS_PATH")
@@ -107,6 +111,43 @@ def extract_docling_text(paper_id: str) -> None:
         if hasattr(paper, "docling_markdown_storage_path"):
             paper.docling_markdown_storage_path = md_storage_path
 
+        sections_count = 0
+        chunks_count = 0
+
+        if paper.canonical_document_id:
+            structure_service = DocumentStructureService()
+
+            # Xóa dữ liệu cũ để rebuild
+            db.query(DocumentChunk).filter(
+                DocumentChunk.canonical_document_id == paper.canonical_document_id
+            ).delete(synchronize_session=False)
+
+            db.query(DocumentSection).filter(
+                DocumentSection.canonical_document_id == paper.canonical_document_id
+            ).delete(synchronize_session=False)
+
+            # Tạo sections từ markdown
+            sections = structure_service.parse_markdown_to_sections(
+                canonical_document_id=paper.canonical_document_id,
+                markdown=markdown,
+            )
+
+            if sections:
+                db.add_all(sections)
+                db.flush()  # cần để mỗi section có id trước khi build chunks
+
+                chunks = structure_service.build_chunks_from_sections(
+                    canonical_document_id=paper.canonical_document_id,
+                    sections=sections,
+                    max_chars=3000,
+                )
+
+                if chunks:
+                    db.add_all(chunks)
+
+                sections_count = len(sections)
+                chunks_count = len(chunks)
+
         db.commit()
 
         logger.info(
@@ -114,6 +155,8 @@ def extract_docling_text(paper_id: str) -> None:
             paper_uuid,
             len(markdown),
             md_storage_path,
+            sections_count,
+            chunks_count
         )
 
         # queue_service = QueueService()

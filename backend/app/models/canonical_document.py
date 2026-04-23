@@ -58,4 +58,18 @@ class CanonicalDocument(Base):
         foreign_keys=[latest_extraction_run_id],
         post_update=True,
     )
+
+    document_sections = relationship(
+        "DocumentSection",
+        back_populates="canonical_document",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    document_chunks = relationship(
+        "DocumentChunk",
+        back_populates="canonical_document",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
     
