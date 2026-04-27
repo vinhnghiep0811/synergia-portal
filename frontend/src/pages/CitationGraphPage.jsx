@@ -18,6 +18,33 @@ const EDGE_COLORS = {
   high: "#0ea5a4",
 };
 
+const INTENT_UI = {
+  use_method: {
+    label: "Use Method",
+    tone: "method",
+  },
+  compare: {
+    label: "Compare",
+    tone: "compare",
+  },
+  baseline: {
+    label: "Baseline",
+    tone: "baseline",
+  },
+  support: {
+    label: "Support",
+    tone: "support",
+  },
+  background: {
+    label: "Background",
+    tone: "background",
+  },
+  mention_only: {
+    label: "Mention Only",
+    tone: "mention",
+  },
+};
+
 function trimTitle(text, maxLength = 36) {
   if (!text) {
     return "Untitled";
@@ -50,6 +77,28 @@ function formatDateTime(value) {
   return date.toLocaleString("vi-VN", {
     hour12: false,
   });
+}
+
+function resolveIntentUi(intentLabel) {
+  const normalized = String(intentLabel || "").trim().toLowerCase();
+  if (!normalized) {
+    return {
+      label: "Unknown",
+      tone: "unknown",
+    };
+  }
+
+  const mapped = INTENT_UI[normalized];
+  if (mapped) {
+    return mapped;
+  }
+
+  return {
+    label: normalized
+      .replaceAll("_", " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase()),
+    tone: "unknown",
+  };
 }
 
 function buildLayout(nodes) {
@@ -258,7 +307,7 @@ export function CitationGraphPage() {
           setRescoreTracking(false);
           setRescoreTrackingMessage("");
           setRescoreMessage(
-            `Global rescore hoàn tất (job: ${rescoreTrackingJobId}). Bấm \"Làm mới mạng\" để xem dữ liệu mới.`
+            `Global rescore hoàn tất (job: ${rescoreTrackingJobId}). Bấm "Làm mới mạng" để xem dữ liệu mới.`
           );
           return;
         }
@@ -680,19 +729,34 @@ export function CitationGraphPage() {
                         <div className="citation-notice citation-notice--error">{mentionError}</div>
                       ) : mentions.length ? (
                         <div className="citation-mention-list">
-                          {mentions.map((mention) => (
-                            <div className="citation-mention" key={mention.id}>
-                              <div className="citation-mention__head">
-                                <span className="citation-mention__anchor">
-                                  {mention.anchor_text || "(no anchor)"}
-                                </span>
-                                <span className="citation-mention__score">
-                                  m={Number(mention.mention_score).toFixed(4)}
-                                </span>
+                          {mentions.map((mention) => {
+                            const intentUi = resolveIntentUi(mention.intent_label);
+                            return (
+                              <div className="citation-mention" key={mention.id}>
+                                <div className="citation-mention__head">
+                                  <span className="citation-mention__anchor">
+                                    {mention.anchor_text || "(no anchor)"}
+                                  </span>
+                                  <span className="citation-mention__score">
+                                    m={Number(mention.mention_score).toFixed(4)}
+                                  </span>
+                                </div>
+
+                                <div className="citation-mention__meta">
+                                  <span
+                                    className={`citation-intent-badge citation-intent-badge--${intentUi.tone}`}
+                                  >
+                                    Intent: {intentUi.label}
+                                  </span>
+                                  <span className="citation-mention__intent-score">
+                                    Intent Score: {Number(mention.intent_score).toFixed(4)}
+                                  </span>
+                                </div>
+
+                                <div className="citation-mention__snippet">{mention.context_snippet}</div>
                               </div>
-                              <div className="citation-mention__snippet">{mention.context_snippet}</div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <div className="citation-empty">Cạnh này chưa có evidence nội bộ.</div>
