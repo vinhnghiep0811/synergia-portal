@@ -143,6 +143,38 @@ def llm_extract(canonical_document_id: str) -> None:
 
         db.commit()
 
+        try:
+            from app.core.queue import parse_queue
+
+            parse_queue.enqueue(
+                "worker_app.tasks.citation_graph.score_citation_graph_for_canonical",
+                str(canonical.id),
+            )
+
+            for paper in papers:
+                can_update_status = (
+                    paper.processing_status != "failed"
+                    or paper.processing_stage in {"llm_extracting", "llm_extracted", "citation_scoring"}
+                )
+                if can_update_status:
+                    paper.processing_status = "processing"
+                    paper.processing_stage = "citation_scoring"
+                    paper.processing_error = None
+
+            db.commit()
+
+            logger.info(
+                "[LLM TASK] Enqueued citation graph scoring canonical_document_id=%s",
+                canonical.id,
+            )
+        except Exception as enqueue_error:
+            db.rollback()
+            logger.warning(
+                "[LLM TASK] Failed to enqueue citation graph scoring canonical_document_id=%s error=%s",
+                canonical.id,
+                str(enqueue_error),
+            )
+
         logger.info(
             "[LLM TASK] Completed canonical_document_id=%s extraction_run_id=%s",
             cid,

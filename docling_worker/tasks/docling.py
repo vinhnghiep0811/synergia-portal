@@ -151,7 +151,7 @@ def extract_docling_text(paper_id: str) -> None:
         db.commit()
 
         logger.info(
-            "[docling] Finished extraction for paper_id=%s, markdown_chars=%s, md_storage_path=%s",
+            "[docling] Finished extraction for paper_id=%s, markdown_chars=%s, md_storage_path=%s, sections=%s, chunks=%s",
             paper_uuid,
             len(markdown),
             md_storage_path,

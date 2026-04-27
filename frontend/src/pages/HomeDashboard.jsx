@@ -82,6 +82,25 @@ export function HomeDashboard() {
             </p>
           </section>
 
+          <section
+            className="card list-card home-card"
+            style={{ cursor: "pointer" }}
+            onClick={() => navigate("/citation-graph")}
+          >
+            <header className="card__header">
+              <div>
+                <h2 className="card__title">Citation Network</h2>
+                <p className="card__subtitle">
+                  Quan sát trực quan hướng trích dẫn giữa các tài liệu trong kho.
+                </p>
+              </div>
+            </header>
+            <p style={{ fontSize: "0.85rem", color: "#4b5563" }}>
+              Xem mạng lưới cạnh có mũi tên, mở chi tiết điểm số và evidence,
+              đồng thời kích hoạt global rescore.
+            </p>
+          </section>
+
           <section className="card activity-card">
             <header className="card__header">
               <div>

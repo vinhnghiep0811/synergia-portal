@@ -1,7 +1,7 @@
-import { useMemo, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { PaperList } from "../components/PaperList.jsx";
-import { getPapers } from "../services/paperApi.js";
+import { getPapers, getPaperDetail } from "../services/paperApi.js";
 import { AppHeader } from "../components/AppHeader.jsx";
 
 function bytesToMB(bytes) {
@@ -129,7 +129,15 @@ export function PaperDashboard() {
 
   return (
     <div className="app-shell">
-      <AppHeader title="Danh sách tài liệu" subtitle="Xem các paper đã upload và trạng thái xử lý." />
+      <AppHeader
+        title="Danh sách tài liệu"
+        subtitle="Xem các paper đã upload và trạng thái xử lý."
+        extraAction={
+          <button className="btn btn--secondary" onClick={() => navigate("/citation-graph")}>
+            Xem giao diện trích dẫn
+          </button>
+        }
+      />
 
       <main className="app-main app-main--papers">
         <div className="app-main__full">

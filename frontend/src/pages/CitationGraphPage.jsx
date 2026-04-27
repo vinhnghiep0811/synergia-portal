@@ -1,0 +1,712 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { AppHeader } from "../components/AppHeader.jsx";
+import {
+  enqueueGlobalCitationRescore,
+  getCitationRescoreJobStatus,
+  getCitationEdgeMentions,
+  getCitationNetwork,
+} from "../services/citationApi.js";
+import "./CitationGraphPage.css";
+
+const GRAPH_WIDTH = 1240;
+const GRAPH_HEIGHT = 640;
+
+const EDGE_COLORS = {
+  low: "#64748b",
+  medium: "#f59e0b",
+  high: "#0ea5a4",
+};
+
+function trimTitle(text, maxLength = 36) {
+  if (!text) {
+    return "Untitled";
+  }
+  const normalized = text.trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function toNumber(value) {
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) {
+    return 0;
+  }
+  return parsed;
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "n/a";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "n/a";
+  }
+
+  return date.toLocaleString("vi-VN", {
+    hour12: false,
+  });
+}
+
+function buildLayout(nodes) {
+  if (!nodes?.length) {
+    return {};
+  }
+
+  const cx = GRAPH_WIDTH / 2;
+  const cy = GRAPH_HEIGHT / 2;
+  const outerRadius = Math.min(GRAPH_WIDTH, GRAPH_HEIGHT) * 0.36;
+  const innerRadius = Math.min(GRAPH_WIDTH, GRAPH_HEIGHT) * 0.23;
+
+  const sorted = [...nodes].sort(
+    (left, right) =>
+      right.out_degree + right.in_degree - (left.out_degree + left.in_degree)
+  );
+
+  const innerCount =
+    sorted.length <= 10 ? sorted.length : Math.min(14, Math.ceil(sorted.length * 0.38));
+
+  const inner = sorted.slice(0, innerCount);
+  const outer = sorted.slice(innerCount);
+
+  const positions = {};
+
+  inner.forEach((node, index) => {
+    const angle = (2 * Math.PI * index) / Math.max(1, inner.length) - Math.PI / 2;
+    positions[node.canonical_document_id] = {
+      x: cx + innerRadius * Math.cos(angle),
+      y: cy + innerRadius * Math.sin(angle),
+    };
+  });
+
+  outer.forEach((node, index) => {
+    const angle = (2 * Math.PI * index) / Math.max(1, outer.length) - Math.PI / 2;
+    positions[node.canonical_document_id] = {
+      x: cx + outerRadius * Math.cos(angle),
+      y: cy + outerRadius * Math.sin(angle),
+    };
+  });
+
+  return positions;
+}
+
+function nodeRadius(node) {
+  const degree = node.in_degree + node.out_degree;
+  return Math.max(10, Math.min(19, 9 + degree * 1.4));
+}
+
+function edgePath(source, target, sourceRadius, targetRadius, curveOffset = 0) {
+  if (!source || !target) {
+    return "";
+  }
+
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  const distance = Math.hypot(dx, dy);
+
+  if (!distance) {
+    return "";
+  }
+
+  const ux = dx / distance;
+  const uy = dy / distance;
+
+  const startX = source.x + ux * sourceRadius;
+  const startY = source.y + uy * sourceRadius;
+  const endX = target.x - ux * targetRadius;
+  const endY = target.y - uy * targetRadius;
+
+  if (!curveOffset) {
+    return `M ${startX} ${startY} L ${endX} ${endY}`;
+  }
+
+  const mx = (startX + endX) / 2;
+  const my = (startY + endY) / 2;
+  const nx = -uy;
+  const ny = ux;
+
+  const cx = mx + nx * curveOffset;
+  const cy = my + ny * curveOffset;
+
+  return `M ${startX} ${startY} Q ${cx} ${cy} ${endX} ${endY}`;
+}
+
+export function CitationGraphPage() {
+  const navigate = useNavigate();
+
+  const [network, setNetwork] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const [minScore, setMinScore] = useState(0.0);
+  const [edgeLimit, setEdgeLimit] = useState(300);
+
+  const [selectedEdgeId, setSelectedEdgeId] = useState(null);
+  const [mentions, setMentions] = useState([]);
+  const [loadingMentions, setLoadingMentions] = useState(false);
+  const [mentionError, setMentionError] = useState("");
+
+  const [rescoreBusy, setRescoreBusy] = useState(false);
+  const [rescoreMessage, setRescoreMessage] = useState("");
+  const [rescoreError, setRescoreError] = useState("");
+  const [rescoreTracking, setRescoreTracking] = useState(false);
+  const [rescoreTrackingJobId, setRescoreTrackingJobId] = useState("");
+  const [rescoreTrackingMessage, setRescoreTrackingMessage] = useState("");
+  const [lastLoadedAt, setLastLoadedAt] = useState(null);
+
+  const loadNetwork = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      const data = await getCitationNetwork({
+        minScore,
+        limitEdges: edgeLimit,
+      });
+
+      setNetwork(data);
+      setSelectedEdgeId((previousEdgeId) =>
+        data.edges?.some((edge) => edge.edge_id === previousEdgeId)
+          ? previousEdgeId
+          : data.edges?.[0]?.edge_id ?? null
+      );
+      setLastLoadedAt(new Date().toISOString());
+    } catch (fetchError) {
+      setError(fetchError.message || "Không thể tải mạng trích dẫn.");
+      setNetwork(null);
+      setSelectedEdgeId(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [edgeLimit, minScore]);
+
+  useEffect(() => {
+    loadNetwork();
+  }, [loadNetwork]);
+
+  useEffect(() => {
+    if (!selectedEdgeId) {
+      setMentions([]);
+      setMentionError("");
+      return;
+    }
+
+    let cancelled = false;
+
+    const run = async () => {
+      try {
+        setLoadingMentions(true);
+        setMentionError("");
+        const response = await getCitationEdgeMentions(selectedEdgeId, 20);
+        if (!cancelled) {
+          setMentions(response.items || []);
+        }
+      } catch (fetchError) {
+        if (!cancelled) {
+          setMentionError(fetchError.message || "Không thể tải evidence cho cạnh này.");
+          setMentions([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingMentions(false);
+        }
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEdgeId]);
+
+  useEffect(() => {
+    if (!rescoreTracking || !rescoreTrackingJobId) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const trackRun = async () => {
+      try {
+        const jobStatus = await getCitationRescoreJobStatus(rescoreTrackingJobId);
+        if (cancelled || !jobStatus) {
+          return;
+        }
+
+        const normalizedStatus = String(jobStatus.status || "").toLowerCase();
+
+        if (["queued", "deferred", "scheduled"].includes(normalizedStatus)) {
+          setRescoreTrackingMessage(
+            `Đã enqueue job ${rescoreTrackingJobId}. Đang chờ worker nhận job...`
+          );
+          return;
+        }
+
+        if (["started", "running", "busy"].includes(normalizedStatus)) {
+          setRescoreTrackingMessage(
+            `Worker đang xử lý job ${rescoreTrackingJobId}. Vui lòng chờ hoàn tất.`
+          );
+          return;
+        }
+
+        if (["finished", "complete", "completed"].includes(normalizedStatus)) {
+          setRescoreTracking(false);
+          setRescoreTrackingMessage("");
+          setRescoreMessage(
+            `Global rescore hoàn tất (job: ${rescoreTrackingJobId}). Bấm \"Làm mới mạng\" để xem dữ liệu mới.`
+          );
+          return;
+        }
+
+        if (["failed", "stopped", "canceled", "cancelled"].includes(normalizedStatus)) {
+          setRescoreTracking(false);
+          setRescoreTrackingMessage("");
+          const detail = jobStatus.error_excerpt ? ` Chi tiết: ${jobStatus.error_excerpt}` : "";
+          setRescoreError(
+            `Global rescore thất bại (job: ${rescoreTrackingJobId}).${detail}`
+          );
+          return;
+        }
+
+        setRescoreTrackingMessage(
+          `Job ${rescoreTrackingJobId} đã được enqueue. Trạng thái hiện tại: ${jobStatus.status}.`
+        );
+      } catch {
+        if (!cancelled) {
+          setRescoreTrackingMessage(
+            `Đã enqueue job ${rescoreTrackingJobId}. Đang đợi worker cập nhật trạng thái...`
+          );
+        }
+      }
+    };
+
+    void trackRun();
+    const interval = setInterval(() => {
+      void trackRun();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [rescoreTracking, rescoreTrackingJobId]);
+
+  const selectedEdge = useMemo(
+    () => network?.edges?.find((edge) => edge.edge_id === selectedEdgeId) || null,
+    [network, selectedEdgeId]
+  );
+
+  const nodePosition = useMemo(() => buildLayout(network?.nodes || []), [network]);
+
+  const nodeById = useMemo(() => {
+    const map = new Map();
+    (network?.nodes || []).forEach((node) => {
+      map.set(node.canonical_document_id, node);
+    });
+    return map;
+  }, [network]);
+
+  const reversePairs = useMemo(() => {
+    const set = new Set();
+    (network?.edges || []).forEach((edge) => {
+      set.add(`${edge.source_canonical_id}::${edge.target_canonical_id}`);
+    });
+    return set;
+  }, [network]);
+
+  const handleRescore = async () => {
+    try {
+      setRescoreBusy(true);
+      setRescoreError("");
+      setRescoreMessage("");
+      setRescoreTrackingMessage("");
+
+      const response = await enqueueGlobalCitationRescore({});
+      setRescoreTracking(true);
+      setRescoreTrackingJobId(response.queued_job_id);
+      setRescoreTrackingMessage(
+        `Đã enqueue job ${response.queued_job_id}. Đang chờ worker bắt đầu xử lý...`
+      );
+      setRescoreMessage(
+        `Đã enqueue global rescore (job: ${response.queued_job_id}). Hệ thống đang theo dõi tiến trình và sẽ báo khi hoàn tất.`
+      );
+    } catch (runError) {
+      setRescoreError(runError.message || "Không thể enqueue global rescore.");
+    } finally {
+      setRescoreBusy(false);
+    }
+  };
+
+  return (
+    <div className="app-shell">
+      <AppHeader
+        title="Citation Network"
+        subtitle="Mạng trích dẫn giữa các canonical document với mũi tên thể hiện hướng source tới target."
+        showUploadButton={false}
+        extraAction={
+          <button className="btn btn--secondary" onClick={() => navigate("/papers")}>
+            Quay lại danh sách tài liệu
+          </button>
+        }
+      />
+
+      <main className="app-main app-main--papers">
+        <div className="app-main__full">
+          <section className="card">
+            <div className="card__header card__header--with-actions">
+              <div>
+                <h2 className="card__title">Bảng điều khiển mạng trích dẫn</h2>
+                <p className="card__subtitle">
+                  Chọn ngưỡng điểm, xem cạnh trích dẫn, và kích hoạt global rescore ngay tại đây.
+                </p>
+              </div>
+            </div>
+
+            <div className="citation-controls">
+              <label className="form-label">
+                Điểm cạnh tối thiểu
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={minScore}
+                  onChange={(event) => setMinScore(Math.max(0, Math.min(1, toNumber(event.target.value))))}
+                />
+              </label>
+
+              <label className="form-label">
+                Số cạnh tối đa
+                <select
+                  value={edgeLimit}
+                  onChange={(event) => setEdgeLimit(Number(event.target.value) || 300)}
+                >
+                  <option value={120}>120</option>
+                  <option value={200}>200</option>
+                  <option value={300}>300</option>
+                  <option value={500}>500</option>
+                  <option value={800}>800</option>
+                </select>
+              </label>
+
+              <div className="citation-controls__actions">
+                <button className="btn btn--secondary" onClick={() => loadNetwork()} disabled={loading}>
+                  {loading ? "Đang tải..." : "Làm mới mạng"}
+                </button>
+                <button
+                  className="btn btn--primary"
+                  onClick={handleRescore}
+                  disabled={rescoreBusy || rescoreTracking}
+                >
+                  {rescoreBusy
+                    ? "Đang enqueue..."
+                    : rescoreTracking
+                      ? "Đang chạy rescore..."
+                      : "Global Rescore"}
+                </button>
+              </div>
+            </div>
+
+            <div className="citation-legend" style={{ marginTop: "0.8rem" }}>
+              <span>Dữ liệu cập nhật lần cuối: {formatDateTime(lastLoadedAt)}</span>
+            </div>
+
+            {rescoreMessage && <div className="citation-notice">{rescoreMessage}</div>}
+            {rescoreTracking && rescoreTrackingMessage && (
+              <div className="citation-notice citation-notice--pending">{rescoreTrackingMessage}</div>
+            )}
+            {rescoreError && <div className="citation-notice citation-notice--error">{rescoreError}</div>}
+            {error && <div className="citation-notice citation-notice--error">{error}</div>}
+          </section>
+
+          <section className="citation-layout">
+            <article className="card">
+              <div className="card__header">
+                <div>
+                  <h3 className="card__title">Bản đồ trích dẫn</h3>
+                  <p className="card__subtitle">
+                    Click vào cạnh để xem điểm số và evidence chi tiết.
+                  </p>
+                </div>
+              </div>
+
+              {loading ? (
+                <div className="citation-empty">Đang tải dữ liệu mạng trích dẫn...</div>
+              ) : !network?.nodes?.length ? (
+                <div className="citation-empty">Chưa có tài liệu nào để hiển thị trên mạng trích dẫn.</div>
+              ) : (
+                <>
+                  <div className="citation-graph-wrap">
+                    <svg
+                      className="citation-graph-svg"
+                      viewBox={`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`}
+                      role="img"
+                      aria-label="Citation network graph"
+                    >
+                      <defs>
+                        <marker
+                          id="citation-arrow-low"
+                          markerWidth="10"
+                          markerHeight="10"
+                          refX="9"
+                          refY="5"
+                          orient="auto"
+                          markerUnits="strokeWidth"
+                        >
+                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+                        </marker>
+                        <marker
+                          id="citation-arrow-medium"
+                          markerWidth="10"
+                          markerHeight="10"
+                          refX="9"
+                          refY="5"
+                          orient="auto"
+                          markerUnits="strokeWidth"
+                        >
+                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b" />
+                        </marker>
+                        <marker
+                          id="citation-arrow-high"
+                          markerWidth="10"
+                          markerHeight="10"
+                          refX="9"
+                          refY="5"
+                          orient="auto"
+                          markerUnits="strokeWidth"
+                        >
+                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#0ea5a4" />
+                        </marker>
+                      </defs>
+
+                      {(network.edges || []).map((edge) => {
+                        const source = nodePosition[edge.source_canonical_id];
+                        const target = nodePosition[edge.target_canonical_id];
+
+                        if (!source || !target) {
+                          return null;
+                        }
+
+                        const sourceNode = nodeById.get(edge.source_canonical_id);
+                        const targetNode = nodeById.get(edge.target_canonical_id);
+                        const sourceRadius = nodeRadius(sourceNode);
+                        const targetRadius = nodeRadius(targetNode);
+
+                        const hasReverse = reversePairs.has(
+                          `${edge.target_canonical_id}::${edge.source_canonical_id}`
+                        );
+                        const curveOffset = hasReverse
+                          ? edge.source_canonical_id < edge.target_canonical_id
+                            ? 28
+                            : -28
+                          : 0;
+
+                        const path = edgePath(
+                          source,
+                          target,
+                          sourceRadius,
+                          targetRadius,
+                          curveOffset
+                        );
+
+                        if (!path) {
+                          return null;
+                        }
+
+                        const isSelected = edge.edge_id === selectedEdgeId;
+                        const score = Number(edge.citation_score ?? 0);
+
+                        return (
+                          <g key={edge.edge_id}>
+                            <path
+                              d={path}
+                              stroke="transparent"
+                              strokeWidth="14"
+                              fill="none"
+                              onClick={() => setSelectedEdgeId(edge.edge_id)}
+                            />
+                            <path
+                              d={path}
+                              className={`citation-edge citation-edge--${edge.score_band || "low"} ${
+                                isSelected ? "citation-edge--selected" : ""
+                              }`}
+                              strokeWidth={isSelected ? 3.2 : 1.2 + score * 2.2}
+                              markerEnd={`url(#citation-arrow-${edge.score_band || "low"})`}
+                              onClick={() => setSelectedEdgeId(edge.edge_id)}
+                            />
+                          </g>
+                        );
+                      })}
+
+                      {(network.nodes || []).map((node) => {
+                        const position = nodePosition[node.canonical_document_id];
+                        if (!position) {
+                          return null;
+                        }
+
+                        const radius = nodeRadius(node);
+                        const isActive =
+                          selectedEdge &&
+                          (selectedEdge.source_canonical_id === node.canonical_document_id ||
+                            selectedEdge.target_canonical_id === node.canonical_document_id);
+
+                        return (
+                          <g
+                            key={node.canonical_document_id}
+                            className={`citation-node ${isActive ? "citation-node--active" : ""}`}
+                            transform={`translate(${position.x}, ${position.y})`}
+                          >
+                            <circle r={radius} />
+                            <text x={radius + 4} y={4}>{trimTitle(node.title, 24)}</text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  </div>
+
+                  <div className="citation-legend">
+                    <span className="citation-legend__line">
+                      <span className="citation-legend__swatch" style={{ backgroundColor: EDGE_COLORS.low }} />
+                      Điểm thấp
+                    </span>
+                    <span className="citation-legend__line">
+                      <span className="citation-legend__swatch" style={{ backgroundColor: EDGE_COLORS.medium }} />
+                      Điểm trung bình
+                    </span>
+                    <span className="citation-legend__line">
+                      <span className="citation-legend__swatch" style={{ backgroundColor: EDGE_COLORS.high }} />
+                      Điểm cao
+                    </span>
+                    <span>Mũi tên thể hiện hướng source -&gt; target</span>
+                  </div>
+                </>
+              )}
+            </article>
+
+            <aside className="card">
+              <div className="card__header">
+                <div>
+                  <h3 className="card__title">Thông tin mạng</h3>
+                  <p className="card__subtitle">Run hiện tại và chi tiết cạnh được chọn.</p>
+                </div>
+              </div>
+
+              {network?.run ? (
+                <>
+                  <div className="citation-summary">
+                    <div className="citation-stat">
+                      <div className="citation-stat__label">Run ID</div>
+                      <div className="citation-stat__value">{network.run.id.slice(0, 8)}...</div>
+                    </div>
+                    <div className="citation-stat">
+                      <div className="citation-stat__label">Version</div>
+                      <div className="citation-stat__value">{network.run.algorithm_version}</div>
+                    </div>
+                    <div className="citation-stat">
+                      <div className="citation-stat__label">Số node</div>
+                      <div className="citation-stat__value">{network.total_nodes}</div>
+                    </div>
+                    <div className="citation-stat">
+                      <div className="citation-stat__label">Số cạnh</div>
+                      <div className="citation-stat__value">{network.total_edges}</div>
+                    </div>
+                    <div className="citation-stat">
+                      <div className="citation-stat__label">Mentions đã xử lý</div>
+                      <div className="citation-stat__value">{network.run.processed_mentions}</div>
+                    </div>
+                    <div className="citation-stat">
+                      <div className="citation-stat__label">Edges đã xử lý</div>
+                      <div className="citation-stat__value">{network.run.processed_edges}</div>
+                    </div>
+                  </div>
+
+                  <div className="citation-stat" style={{ marginTop: "0.6rem" }}>
+                    <div className="citation-stat__label">Run kết thúc lúc</div>
+                    <div className="citation-stat__value" style={{ fontSize: "0.84rem" }}>
+                      {formatDateTime(network.run.ended_at)}
+                    </div>
+                  </div>
+
+                  <div className="citation-edge-list-box">
+                    <div className="citation-edge-list-box__head">
+                      Danh sách cạnh ({(network.edges || []).length})
+                    </div>
+                    <div className="citation-edge-list" role="list" aria-label="Danh sách cạnh trích dẫn">
+                      {(network.edges || []).map((edge) => (
+                        <div
+                          key={edge.edge_id}
+                          className={`citation-edge-item ${
+                            edge.edge_id === selectedEdgeId ? "citation-edge-item--active" : ""
+                          }`}
+                          onClick={() => setSelectedEdgeId(edge.edge_id)}
+                        >
+                          <div className="citation-edge-item__title">
+                            {trimTitle(edge.source_title, 28)}{" -> "}{trimTitle(edge.target_title, 28)}
+                          </div>
+                          <div className="citation-edge-item__meta">
+                            score {Number(edge.citation_score).toFixed(4)} | mentions {edge.mention_count}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {selectedEdge && (
+                    <div style={{ marginTop: "0.8rem" }}>
+                      <h4 className="detail-section__title" style={{ marginBottom: "0.4rem" }}>
+                        Chi tiết cạnh đang chọn
+                      </h4>
+                      <div className="citation-stat" style={{ marginBottom: "0.5rem" }}>
+                        <div className="citation-stat__label">Nguồn -&gt; Đích</div>
+                        <div className="citation-stat__value" style={{ fontSize: "0.84rem" }}>
+                          {trimTitle(selectedEdge.source_title, 45)}{" -> "}{trimTitle(selectedEdge.target_title, 45)}
+                        </div>
+                      </div>
+                      <div className="citation-stat" style={{ marginBottom: "0.5rem" }}>
+                        <div className="citation-stat__label">Citation score</div>
+                        <div className="citation-stat__value">
+                          {Number(selectedEdge.citation_score).toFixed(4)} ({selectedEdge.score_band || "n/a"})
+                        </div>
+                      </div>
+
+                      {loadingMentions ? (
+                        <div className="citation-empty">Đang tải evidence...</div>
+                      ) : mentionError ? (
+                        <div className="citation-notice citation-notice--error">{mentionError}</div>
+                      ) : mentions.length ? (
+                        <div className="citation-mention-list">
+                          {mentions.map((mention) => (
+                            <div className="citation-mention" key={mention.id}>
+                              <div className="citation-mention__head">
+                                <span className="citation-mention__anchor">
+                                  {mention.anchor_text || "(no anchor)"}
+                                </span>
+                                <span className="citation-mention__score">
+                                  m={Number(mention.mention_score).toFixed(4)}
+                                </span>
+                              </div>
+                              <div className="citation-mention__snippet">{mention.context_snippet}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="citation-empty">Cạnh này chưa có evidence nội bộ.</div>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="citation-empty">Chưa có run hoàn tất để dựng citation network.</div>
+              )}
+            </aside>
+          </section>
+        </div>
+      </main>
+    </div>
+  );
+}
