@@ -5,6 +5,7 @@ export async function getCitationNetwork({
   runId = null,
   minScore = 0,
   limitEdges = 300,
+  includeAllDocuments = false,
 } = {}) {
   try {
     const params = {
@@ -14,6 +15,9 @@ export async function getCitationNetwork({
 
     if (runId) {
       params.run_id = runId;
+    }
+    if (typeof includeAllDocuments === "boolean") {
+      params.include_all_documents = includeAllDocuments;
     }
 
     const response = await apiClient.get("/api/citation-graph/network", { params });

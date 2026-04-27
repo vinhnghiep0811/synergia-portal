@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppHeader } from "../components/AppHeader.jsx";
 import {
@@ -11,6 +11,10 @@ import "./CitationGraphPage.css";
 
 const GRAPH_WIDTH = 1240;
 const GRAPH_HEIGHT = 640;
+const GRAPH_CENTER = { x: GRAPH_WIDTH / 2, y: GRAPH_HEIGHT / 2 };
+const ZOOM_MIN = 0.55;
+const ZOOM_MAX = 2.6;
+const ZOOM_STEP = 0.14;
 
 const EDGE_COLORS = {
   low: "#64748b",
@@ -62,6 +66,45 @@ function toNumber(value) {
     return 0;
   }
   return parsed;
+}
+
+function clampValue(value, minValue, maxValue) {
+  return Math.min(maxValue, Math.max(minValue, value));
+}
+
+function getPointerInViewBox(event, svgElement) {
+  if (!svgElement) {
+    return null;
+  }
+
+  const rect = svgElement.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    return null;
+  }
+
+  return {
+    x: ((event.clientX - rect.left) / rect.width) * GRAPH_WIDTH,
+    y: ((event.clientY - rect.top) / rect.height) * GRAPH_HEIGHT,
+  };
+}
+
+function applyZoom(view, nextZoom, anchor) {
+  const clamped = clampValue(nextZoom, ZOOM_MIN, ZOOM_MAX);
+  if (clamped === view.zoom) {
+    return view;
+  }
+
+  const worldX = (anchor.x - view.panX) / view.zoom;
+  const worldY = (anchor.y - view.panY) / view.zoom;
+  const panX = anchor.x - worldX * clamped;
+  const panY = anchor.y - worldY * clamped;
+
+  return {
+    ...view,
+    zoom: clamped,
+    panX,
+    panY,
+  };
 }
 
 function formatDateTime(value) {
@@ -206,6 +249,11 @@ export function CitationGraphPage() {
   const [rescoreTrackingJobId, setRescoreTrackingJobId] = useState("");
   const [rescoreTrackingMessage, setRescoreTrackingMessage] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState(null);
+  const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+
+  const svgRef = useRef(null);
+  const panRef = useRef({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 });
 
   const loadNetwork = useCallback(async () => {
     try {
@@ -215,6 +263,7 @@ export function CitationGraphPage() {
       const data = await getCitationNetwork({
         minScore,
         limitEdges: edgeLimit,
+        includeAllDocuments: true,
       });
 
       setNetwork(data);
@@ -350,6 +399,9 @@ export function CitationGraphPage() {
     [network, selectedEdgeId]
   );
 
+  const zoomPercent = Math.round(view.zoom * 100);
+  const viewTransform = `translate(${view.panX} ${view.panY}) scale(${view.zoom})`;
+
   const nodePosition = useMemo(() => buildLayout(network?.nodes || []), [network]);
 
   const nodeById = useMemo(() => {
@@ -389,6 +441,88 @@ export function CitationGraphPage() {
     } finally {
       setRescoreBusy(false);
     }
+  };
+
+  const handleWheel = useCallback((event) => {
+    if (!svgRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    const anchor = getPointerInViewBox(event, svgRef.current);
+    if (!anchor) {
+      return;
+    }
+
+    const direction = event.deltaY < 0 ? 1 : -1;
+    setView((prev) => applyZoom(prev, prev.zoom + direction * ZOOM_STEP, anchor));
+  }, []);
+
+  const handlePanStart = (event) => {
+    if (!svgRef.current || event.button !== 0) {
+      return;
+    }
+
+    if (event.target !== svgRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    panRef.current = {
+      active: true,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: view.panX,
+      originY: view.panY,
+    };
+    setIsPanning(true);
+  };
+
+  const handlePanMove = (event) => {
+    if (!svgRef.current || !panRef.current.active) {
+      return;
+    }
+
+    const rect = svgRef.current.getBoundingClientRect();
+    const scaleX = rect.width ? GRAPH_WIDTH / rect.width : 1;
+    const scaleY = rect.height ? GRAPH_HEIGHT / rect.height : 1;
+    const dx = (event.clientX - panRef.current.startX) * scaleX;
+    const dy = (event.clientY - panRef.current.startY) * scaleY;
+
+    setView((prev) => ({
+      ...prev,
+      panX: panRef.current.originX + dx,
+      panY: panRef.current.originY + dy,
+    }));
+  };
+
+  const handlePanEnd = () => {
+    if (!panRef.current.active) {
+      return;
+    }
+
+    panRef.current.active = false;
+    setIsPanning(false);
+  };
+
+  const handleZoomIn = () => {
+    setView((prev) => applyZoom(prev, prev.zoom + ZOOM_STEP, GRAPH_CENTER));
+  };
+
+  const handleZoomOut = () => {
+    setView((prev) => applyZoom(prev, prev.zoom - ZOOM_STEP, GRAPH_CENTER));
+  };
+
+  const handleZoomReset = () => {
+    setView({ zoom: 1, panX: 0, panY: 0 });
+  };
+
+  const handleZoomSlider = (event) => {
+    const nextZoom = Number(event.target.value);
+    if (Number.isNaN(nextZoom)) {
+      return;
+    }
+    setView((prev) => applyZoom(prev, nextZoom, GRAPH_CENTER));
   };
 
   return (
@@ -484,6 +618,49 @@ export function CitationGraphPage() {
                 </div>
               </div>
 
+              <div className="citation-graph-toolbar">
+                <div className="citation-graph-toolbar__hint">
+                  Kéo nền để di chuyển, lăn chuột để phóng to / thu nhỏ.
+                </div>
+                <div className="citation-graph-toolbar__controls">
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--icon"
+                    onClick={handleZoomOut}
+                    disabled={view.zoom <= ZOOM_MIN + 0.01}
+                    aria-label="Thu nhỏ"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="range"
+                    min={ZOOM_MIN}
+                    max={ZOOM_MAX}
+                    step="0.01"
+                    value={view.zoom}
+                    onChange={handleZoomSlider}
+                    aria-label="Mức zoom"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--icon"
+                    onClick={handleZoomIn}
+                    disabled={view.zoom >= ZOOM_MAX - 0.01}
+                    aria-label="Phóng to"
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={handleZoomReset}
+                  >
+                    Reset
+                  </button>
+                  <span className="citation-graph-toolbar__value">{zoomPercent}%</span>
+                </div>
+              </div>
+
               {loading ? (
                 <div className="citation-empty">Đang tải dữ liệu mạng trích dẫn...</div>
               ) : !network?.nodes?.length ? (
@@ -492,10 +669,16 @@ export function CitationGraphPage() {
                 <>
                   <div className="citation-graph-wrap">
                     <svg
-                      className="citation-graph-svg"
+                      ref={svgRef}
+                      className={`citation-graph-svg ${isPanning ? "citation-graph-svg--panning" : ""}`}
                       viewBox={`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`}
                       role="img"
                       aria-label="Citation network graph"
+                      onWheel={handleWheel}
+                      onMouseDown={handlePanStart}
+                      onMouseMove={handlePanMove}
+                      onMouseUp={handlePanEnd}
+                      onMouseLeave={handlePanEnd}
                     >
                       <defs>
                         <marker
@@ -533,88 +716,90 @@ export function CitationGraphPage() {
                         </marker>
                       </defs>
 
-                      {(network.edges || []).map((edge) => {
-                        const source = nodePosition[edge.source_canonical_id];
-                        const target = nodePosition[edge.target_canonical_id];
+                      <g className="citation-graph-layer" transform={viewTransform}>
+                        {(network.edges || []).map((edge) => {
+                          const source = nodePosition[edge.source_canonical_id];
+                          const target = nodePosition[edge.target_canonical_id];
 
-                        if (!source || !target) {
-                          return null;
-                        }
+                          if (!source || !target) {
+                            return null;
+                          }
 
-                        const sourceNode = nodeById.get(edge.source_canonical_id);
-                        const targetNode = nodeById.get(edge.target_canonical_id);
-                        const sourceRadius = nodeRadius(sourceNode);
-                        const targetRadius = nodeRadius(targetNode);
+                          const sourceNode = nodeById.get(edge.source_canonical_id);
+                          const targetNode = nodeById.get(edge.target_canonical_id);
+                          const sourceRadius = nodeRadius(sourceNode);
+                          const targetRadius = nodeRadius(targetNode);
 
-                        const hasReverse = reversePairs.has(
-                          `${edge.target_canonical_id}::${edge.source_canonical_id}`
-                        );
-                        const curveOffset = hasReverse
-                          ? edge.source_canonical_id < edge.target_canonical_id
-                            ? 28
-                            : -28
-                          : 0;
+                          const hasReverse = reversePairs.has(
+                            `${edge.target_canonical_id}::${edge.source_canonical_id}`
+                          );
+                          const curveOffset = hasReverse
+                            ? edge.source_canonical_id < edge.target_canonical_id
+                              ? 28
+                              : -28
+                            : 0;
 
-                        const path = edgePath(
-                          source,
-                          target,
-                          sourceRadius,
-                          targetRadius,
-                          curveOffset
-                        );
+                          const path = edgePath(
+                            source,
+                            target,
+                            sourceRadius,
+                            targetRadius,
+                            curveOffset
+                          );
 
-                        if (!path) {
-                          return null;
-                        }
+                          if (!path) {
+                            return null;
+                          }
 
-                        const isSelected = edge.edge_id === selectedEdgeId;
-                        const score = Number(edge.citation_score ?? 0);
+                          const isSelected = edge.edge_id === selectedEdgeId;
+                          const score = Number(edge.citation_score ?? 0);
 
-                        return (
-                          <g key={edge.edge_id}>
-                            <path
-                              d={path}
-                              stroke="transparent"
-                              strokeWidth="14"
-                              fill="none"
-                              onClick={() => setSelectedEdgeId(edge.edge_id)}
-                            />
-                            <path
-                              d={path}
-                              className={`citation-edge citation-edge--${edge.score_band || "low"} ${
-                                isSelected ? "citation-edge--selected" : ""
-                              }`}
-                              strokeWidth={isSelected ? 3.2 : 1.2 + score * 2.2}
-                              markerEnd={`url(#citation-arrow-${edge.score_band || "low"})`}
-                              onClick={() => setSelectedEdgeId(edge.edge_id)}
-                            />
-                          </g>
-                        );
-                      })}
+                          return (
+                            <g key={edge.edge_id}>
+                              <path
+                                d={path}
+                                stroke="transparent"
+                                strokeWidth="14"
+                                fill="none"
+                                onClick={() => setSelectedEdgeId(edge.edge_id)}
+                              />
+                              <path
+                                d={path}
+                                className={`citation-edge citation-edge--${edge.score_band || "low"} ${
+                                  isSelected ? "citation-edge--selected" : ""
+                                }`}
+                                strokeWidth={isSelected ? 3.2 : 1.2 + score * 2.2}
+                                markerEnd={`url(#citation-arrow-${edge.score_band || "low"})`}
+                                onClick={() => setSelectedEdgeId(edge.edge_id)}
+                              />
+                            </g>
+                          );
+                        })}
 
-                      {(network.nodes || []).map((node) => {
-                        const position = nodePosition[node.canonical_document_id];
-                        if (!position) {
-                          return null;
-                        }
+                        {(network.nodes || []).map((node) => {
+                          const position = nodePosition[node.canonical_document_id];
+                          if (!position) {
+                            return null;
+                          }
 
-                        const radius = nodeRadius(node);
-                        const isActive =
-                          selectedEdge &&
-                          (selectedEdge.source_canonical_id === node.canonical_document_id ||
-                            selectedEdge.target_canonical_id === node.canonical_document_id);
+                          const radius = nodeRadius(node);
+                          const isActive =
+                            selectedEdge &&
+                            (selectedEdge.source_canonical_id === node.canonical_document_id ||
+                              selectedEdge.target_canonical_id === node.canonical_document_id);
 
-                        return (
-                          <g
-                            key={node.canonical_document_id}
-                            className={`citation-node ${isActive ? "citation-node--active" : ""}`}
-                            transform={`translate(${position.x}, ${position.y})`}
-                          >
-                            <circle r={radius} />
-                            <text x={radius + 4} y={4}>{trimTitle(node.title, 24)}</text>
-                          </g>
-                        );
-                      })}
+                          return (
+                            <g
+                              key={node.canonical_document_id}
+                              className={`citation-node ${isActive ? "citation-node--active" : ""}`}
+                              transform={`translate(${position.x}, ${position.y})`}
+                            >
+                              <circle r={radius} />
+                              <text x={radius + 4} y={4}>{trimTitle(node.title, 24)}</text>
+                            </g>
+                          );
+                        })}
+                      </g>
                     </svg>
                   </div>
 
