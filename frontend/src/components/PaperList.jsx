@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { PaperStatusBadge } from "./PaperStatusBadge.jsx";
 import { CanonicalLink } from "./CanonicalLink.jsx";
-import { getPaperFileViewUrl, getCanonicalDocumentByPaper, getPaperDetail } from "../services/paperApi.js";
+import { getPaperFileViewUrl, getPaperDetail } from "../services/paperApi.js";
 import { formatDate } from "../utils/formatDate.js";
 
 const actionButtonStyle = {
@@ -24,15 +24,14 @@ export function PaperList({ papers, selectedId }) {
   const [processingSort, setProcessingSort] = useState("newest"); // "newest" or "oldest"
   const [processedSort, setProcessedSort] = useState("newest"); // "newest" or "oldest"
   const [enhancedPapers, setEnhancedPapers] = useState([]);
-  const [lastUpdate, setLastUpdate] = useState(Date.now());
+  const [refreshTick, setRefreshTick] = useState(0);
   const itemsPerPage = 5;
   const navigate = useNavigate();
 
   // Auto-refresh every 5 seconds for real-time updates
   useEffect(() => {
     const interval = setInterval(() => {
-      setLastUpdate(Date.now());
-      console.log("🔄 Auto-refreshing PaperList for real-time updates");
+      setRefreshTick((previous) => previous + 1);
     }, 5000); // 5 seconds
 
     return () => clearInterval(interval);
@@ -42,29 +41,19 @@ export function PaperList({ papers, selectedId }) {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        setLastUpdate(Date.now());
-        console.log("👁️ Page became visible, refreshing PaperList");
+        setRefreshTick((previous) => previous + 1);
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
-  // Debug: Log papers data
-  console.log("PaperList received papers:", papers.map(p => ({
-    id: p.id,
-    processing_status: p.processing_status,
-    publication_status: p.publication_status,
-    processing_stage: p.processing_stage,
-    originalFilename: p.originalFilename
-  })));
-
   // Fetch details for processing and processed papers to get detected_title
-  useMemo(() => {
+  useEffect(() => {
+    let isCancelled = false;
+
     async function fetchPapersDetails() {
-      console.log("🔄 Fetching paper details - papers updated or auto-refresh triggered");
-      
       // Only fetch details for processing and processed papers
       const papersNeedingDetails = papers.filter(
         (p) => p.processing_status === "processing" ||
@@ -75,11 +64,11 @@ export function PaperList({ papers, selectedId }) {
       );
 
       if (papersNeedingDetails.length === 0) {
-        setEnhancedPapers(papers);
+        if (!isCancelled) {
+          setEnhancedPapers(papers);
+        }
         return;
       }
-
-      console.log("Fetching details for processing and processed papers...");
       
       const enhanced = await Promise.all(
         papersNeedingDetails.map(async (paper) => {
@@ -113,14 +102,21 @@ export function PaperList({ papers, selectedId }) {
       );
 
       const finalPapers = [...pendingPapers, ...enhanced];
-      setEnhancedPapers(finalPapers);
-      console.log("✅ Enhanced papers updated:", finalPapers.length);
+      if (!isCancelled) {
+        setEnhancedPapers(finalPapers);
+      }
     }
 
     if (papers.length > 0) {
-      fetchPapersDetails();
+      void fetchPapersDetails();
+    } else {
+      setEnhancedPapers([]);
     }
-  }, [papers, lastUpdate]); // Add lastUpdate to trigger re-fetch
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [papers, refreshTick]);
 
   function openPaperPdf(event, paperId) {
     event.stopPropagation();
@@ -163,7 +159,6 @@ export function PaperList({ papers, selectedId }) {
               .toLowerCase()
               .includes(searchText.toLowerCase())) ||
             (p.detectedDoi && p.detectedDoi !== null && p.detectedDoi !== undefined && (
-              console.log(`Checking DOI search: searching for "${searchText}" in DOI "${p.detectedDoi}"`),
               p.detectedDoi.toLowerCase().includes(searchText.toLowerCase()) ||
               // Handle DOI format like "10.1234/example" when user searches "1234" or "example"
               (searchText.match(/^\d+$/) && p.detectedDoi.includes(`10.${searchText}/`)) ||
@@ -181,7 +176,6 @@ export function PaperList({ papers, selectedId }) {
               .toLowerCase()
               .includes(searchText.toLowerCase())) ||
             (p.detectedDoi && p.detectedDoi !== null && p.detectedDoi !== undefined && (
-              console.log(`Checking DOI search: searching for "${searchText}" in DOI "${p.detectedDoi}"`),
               p.detectedDoi.toLowerCase().includes(searchText.toLowerCase()) ||
               // Handle DOI format like "10.1234/example" when user searches "1234" or "example"
               (searchText.match(/^\d+$/) && p.detectedDoi.includes(`10.${searchText}/`)) ||
@@ -349,8 +343,7 @@ export function PaperList({ papers, selectedId }) {
             className="btn btn--secondary"
             style={{ marginLeft: "0.5rem", fontSize: "0.8rem", padding: "0.4rem 0.8rem" }}
             onClick={() => {
-              setLastUpdate(Date.now());
-              console.log("🔄 Manual refresh triggered by user");
+              setRefreshTick((previous) => previous + 1);
             }}
             title="Làm mới danh sách"
           >

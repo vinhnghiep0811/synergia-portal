@@ -79,7 +79,11 @@ function mapPaperDetail(detail, canonical, extractionRun) {
       ? "done"
       : null,
     parseError: detail.processing_error,
-    hasLLMExtraction: detail.processing_stage === "llm_extracting" && detail.processing_status !== "failed",
+    hasLLMExtraction:
+      (detail.processing_stage === "llm_extracting"
+        || detail.processing_stage === "citation_scoring"
+        || detail.processing_stage === "citation_scored")
+      && detail.processing_status !== "failed",
   };
 }
 

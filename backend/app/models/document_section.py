@@ -55,3 +55,8 @@ class DocumentSection(Base):
         foreign_keys=[parent_section_id],
         backref="child_sections",
     )
+    citation_mentions = relationship(
+        "CitationMention",
+        foreign_keys="CitationMention.source_section_id",
+        back_populates="source_section",
+    )

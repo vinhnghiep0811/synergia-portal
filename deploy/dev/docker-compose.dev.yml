@@ -113,7 +113,7 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - D:/docker-data/synergia/rustfs:/data
+      - /Users/thinh/docker-data/synergia/rustfs:/data:rw
 
   docling_worker:
     build:

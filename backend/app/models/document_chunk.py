@@ -51,3 +51,8 @@ class DocumentChunk(Base):
 
     canonical_document = relationship("CanonicalDocument", back_populates="document_chunks")
     section_ref = relationship("DocumentSection")
+    citation_mentions = relationship(
+        "CitationMention",
+        foreign_keys="CitationMention.source_chunk_id",
+        back_populates="source_chunk",
+    )
