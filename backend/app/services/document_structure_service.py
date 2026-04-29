@@ -360,8 +360,9 @@ class DocumentStructureService:
         self,
         canonical_document_id,
         sections: List[DocumentSection],
-        max_chars: int = 3000,
+        max_chars: int = 1500,
         min_chunk_chars: int = 80,
+        overlap_chars: int = 200,
     ) -> List[DocumentChunk]:
         chunks: List[DocumentChunk] = []
         chunk_index = 0
@@ -372,13 +373,13 @@ class DocumentStructureService:
             if section_type in {"references", "appendix"}:
                 continue
 
-            section_text = (section.content or "").strip()
+            section_text = self._clean_section_content(section.content or "")
 
             if self._should_skip_section_content(section, section_text):
                 continue
             dynamic_max_chars = self._get_section_chunk_size(section, default=max_chars)
 
-            parts = self._split_text(section_text, max_chars=dynamic_max_chars)
+            parts = self._split_text(section_text, max_chars=dynamic_max_chars, overlap_chars=overlap_chars)
 
             for part in parts:
                 normalized = self._normalize_chunk_text(part)
@@ -388,7 +389,8 @@ class DocumentStructureService:
                 if self._should_drop_chunk(normalized, min_chunk_chars=min_chunk_chars):
                     continue
 
-                content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+                final_content = f"Section: {section.full_path}\n\n{normalized}" if section.full_path else normalized
+                content_hash = hashlib.sha256(final_content.encode("utf-8")).hexdigest()
 
                 is_retrievable = self._is_retrievable_section(section)
 
@@ -404,9 +406,9 @@ class DocumentStructureService:
                         is_retrievable=is_retrievable,
                         page_from=section.page_from,
                         page_to=section.page_to,
-                        content=normalized,
+                        content=final_content,
                         content_hash=content_hash,
-                        token_count=self._estimate_token_count(normalized),
+                        token_count=self._estimate_token_count(final_content),
                     )
                 )
                 chunk_index += 1
@@ -655,7 +657,8 @@ class DocumentStructureService:
                 current = [line]
                 current_kind = kind
                 continue
-
+            if kind in {"table", "code"}:
+                continue
             # merge caption + table
             if current_kind == "caption" and kind in {"table", "code", "paragraph"}:
                 current.append(line)
@@ -684,7 +687,27 @@ class DocumentStructureService:
         flush()
         return blocks
 
-    def _split_text(self, text: str, max_chars: int = 3000) -> List[str]:
+    def _get_overlap(self, text: str, overlap_chars: int) -> str:
+        if len(text) <= overlap_chars:
+            return text
+        
+        window = text[-overlap_chars:]
+        split_pos = max(
+            window.find("\n\n"),
+            window.find("\n"),
+            window.find(". "),
+            window.find("; ")
+        )
+        if split_pos != -1:
+            return window[split_pos+1:].strip()
+        
+        split_space = window.find(" ")
+        if split_space != -1:
+            return window[split_space+1:].strip()
+            
+        return window
+
+    def _split_text(self, text: str, max_chars: int = 1500, overlap_chars: int = 200) -> List[str]:
         text = self._normalize_chunk_text(text)
         if not text:
             return []
@@ -694,7 +717,7 @@ class DocumentStructureService:
 
         blocks = self._split_into_blocks(text)
         if not blocks:
-            return [self._normalize_chunk_text(text[i:i + max_chars]) for i in range(0, len(text), max_chars)]
+            return self._hard_split_long_text(text, max_chars=max_chars, overlap_chars=overlap_chars)
 
         chunks: List[str] = []
         current = ""
@@ -712,14 +735,17 @@ class DocumentStructureService:
 
             if current:
                 chunks.append(self._normalize_chunk_text(current))
+                current = self._get_overlap(current, overlap_chars)
 
-            if len(block) <= max_chars:
-                current = block
+            candidate = f"{current}\n\n{block}".strip() if current else block
+
+            if len(candidate) <= max_chars:
+                current = candidate
                 continue
 
             paragraphs = [self._normalize_chunk_text(p) for p in re.split(r"\n\s*\n", block) if self._normalize_chunk_text(p)]
             if len(paragraphs) > 1:
-                temp = ""
+                temp = current
                 for para in paragraphs:
                     para_candidate = f"{temp}\n\n{para}".strip() if temp else para
                     if len(para_candidate) <= max_chars:
@@ -727,24 +753,27 @@ class DocumentStructureService:
                     else:
                         if temp:
                             chunks.append(self._normalize_chunk_text(temp))
-                        if len(para) <= max_chars:
-                            temp = para
+                            temp = self._get_overlap(temp, overlap_chars)
+                        
+                        para_candidate = f"{temp}\n\n{para}".strip() if temp else para
+                        if len(para_candidate) <= max_chars:
+                            temp = para_candidate
                         else:
-                            hard_splits = self._hard_split_long_text(para, max_chars=max_chars)
+                            hard_splits = self._hard_split_long_text(para_candidate, max_chars=max_chars, overlap_chars=overlap_chars)
                             chunks.extend(hard_splits[:-1])
                             temp = hard_splits[-1] if hard_splits else ""
                 current = temp
             else:
-                hard_splits = self._hard_split_long_text(block, max_chars=max_chars)
-                chunks.extend(hard_splits)
-                current = ""
+                hard_splits = self._hard_split_long_text(candidate, max_chars=max_chars, overlap_chars=overlap_chars)
+                chunks.extend(hard_splits[:-1])
+                current = hard_splits[-1] if hard_splits else ""
 
         if current:
             chunks.append(self._normalize_chunk_text(current))
 
         return [c for c in chunks if c]
 
-    def _hard_split_long_text(self, text: str, max_chars: int) -> List[str]:
+    def _hard_split_long_text(self, text: str, max_chars: int, overlap_chars: int = 200) -> List[str]:
         text = self._normalize_chunk_text(text)
         if len(text) <= max_chars:
             return [text]
@@ -768,7 +797,21 @@ class DocumentStructureService:
             piece = self._normalize_chunk_text(text[start:end])
             if piece:
                 results.append(piece)
+                
             start = end
+            if start < len(text) and overlap_chars > 0:
+                overlap_start = max(0, start - overlap_chars)
+                window = text[overlap_start:start]
+                split_pos = max(
+                    window.find(". "),
+                    window.find("; "),
+                    window.find(", "),
+                    window.find(" ")
+                )
+                if split_pos != -1:
+                    start = overlap_start + split_pos + 1
+                else:
+                    start = overlap_start
 
         return results
 
@@ -937,13 +980,15 @@ class DocumentStructureService:
         text = re.sub(r" ?\n ?", "\n", text)
         text = re.sub(r"([a-zA-Z0-9])\n([a-z])", r"\1 \2", text)
         text = re.sub(r"\s{2,}", " ", text)
+        text = re.sub(r"\{\{.*?\}\}", "", text)
         return text.strip()
 
     def _should_drop_chunk(self, text: str, min_chunk_chars: int = 80) -> bool:
         stripped = text.strip()
         if not stripped:
             return True
-
+        if "|" in text and text.count("|") > 5:
+            return True
         if len(stripped) < min_chunk_chars:
             if not re.search(r"[A-Za-z]{20,}", stripped):
                 return True

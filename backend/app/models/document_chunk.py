@@ -1,6 +1,7 @@
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
 import uuid
 
 from app.core.database import Base
@@ -40,6 +41,7 @@ class DocumentChunk(Base):
     content = Column(Text, nullable=False)
     content_hash = Column(String(64), nullable=False, index=True)
     token_count = Column(Integer, nullable=True)
+    embedding = Column(Vector(384), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
