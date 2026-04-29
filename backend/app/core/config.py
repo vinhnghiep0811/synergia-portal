@@ -124,7 +124,7 @@ REFRESH_TOKEN_EXPIRE_DAYS = get_env_int("REFRESH_TOKEN_EXPIRE_DAYS", 30)
 # LLM - Gemini (Week 5)
 # =========================
 LLM_PROVIDER = get_env("LLM_PROVIDER", "gemini")
-
+ 
 GEMINI_API_KEY = get_env("GEMINI_API_KEY", "")
 GEMINI_MODEL = get_env("GEMINI_MODEL", "gemini-2.5-pro")
 

@@ -260,6 +260,7 @@ def get_citation_network(
     run_id: UUID | None = Query(default=None),
     limit_edges: int = Query(default=300, ge=1, le=1000),
     min_score: float = Query(default=0.0, ge=0.0, le=1.0),
+    include_all_documents: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
     service = CitationGraphService(db)
@@ -330,7 +331,7 @@ def get_citation_network(
                 continue
 
     doc_query = db.query(CanonicalDocument)
-    if scoped_source_ids:
+    if scoped_source_ids and not include_all_documents:
         doc_query = doc_query.filter(CanonicalDocument.id.in_(scoped_source_ids))
 
     canonical_docs = doc_query.all()

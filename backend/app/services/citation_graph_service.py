@@ -23,6 +23,9 @@ from app.models.paper_record import PaperRecord
 DOI_REGEX = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", re.IGNORECASE)
 NUMERIC_CITATION_REGEX = re.compile(r"\[(\d{1,3}(?:\s*[-,]\s*\d{1,3})*)\]")
 AUTHOR_YEAR_CITATION_REGEX = re.compile(r"\(([^)]*?\b(?:19|20)\d{2}[a-z]?\b[^)]*)\)")
+NARRATIVE_AUTHOR_YEAR_REGEX = re.compile(
+    r"\b([A-Z][A-Za-z'\-]+(?:\s+(?:et\s+al\.?|and|&)\s+[A-Z][A-Za-z'\-]+|(?:\s+[A-Z][A-Za-z'\-]+){0,3}|\s+et\s+al\.?)?)\s*\(((?:19|20)\d{2}[a-z]?)\)"
+)
 TOKEN_REGEX = re.compile(r"[a-z0-9]{2,}", re.IGNORECASE)
 
 MAX_CONTEXT_SNIPPET_CHARS = 500
@@ -77,6 +80,7 @@ class TargetDocumentInfo:
     doi_normalized: str | None
     publication_year: int | None
     author_surnames: set[str]
+    first_author_surname: str | None
 
 
 @dataclass
@@ -197,6 +201,346 @@ class CitationGraphService:
         "mention_only": 0.20,
     }
 
+    INTENT_USE_METHOD_PHRASES = (
+        "we use",
+        "we used",
+        "we employ",
+        "we employed",
+        "we apply",
+        "we applied",
+        "we utilize",
+        "we utilized",
+        "we adopt",
+        "we adopted",
+        "we leverage",
+        "we leveraged",
+        "we follow",
+        "we followed",
+        "we implement",
+        "we implemented",
+        "we build on",
+        "we built on",
+        "we extend",
+        "we extended",
+        "we fine tune",
+        "we finetune",
+        "we pre train",
+        "we pretrain",
+        "is used",
+        "are used",
+        "was used",
+        "were used",
+        "is employed",
+        "are employed",
+        "is applied",
+        "are applied",
+        "is adopted",
+        "are adopted",
+        "is based on",
+        "are based on",
+        "based on",
+        "building on",
+        "built upon",
+        "building upon",
+        "following",
+        "similar to",
+        "analogous to",
+        "in the spirit of",
+        "using",
+        "using the",
+        "using a",
+        "adopt the",
+        "adopt a",
+        "adopts",
+        "inspired by",
+        "motivated by",
+        "same architecture as",
+        "same setup as",
+        "same configuration",
+        "same hyperparameters",
+        "same training procedure",
+        "same objective",
+        "proposed by",
+        "introduced by",
+        "developed by",
+        "as proposed in",
+        "as introduced in",
+        "as described in",
+        "as defined in",
+        "as done in",
+        "as used in",
+        "as proposed by",
+        "as described by",
+        "as in",
+        "proposed in",
+        "attention layer proposed in",
+        "uses only self attention",
+        "uses only self attention and",
+        "uses only self attention and feed forward",
+        "multi head attention",
+        "warm up strategy",
+        "learning rate warm up",
+        "proportionally reduced",
+        "introduce the transformer",
+        "introduce the transformer network",
+        "avoids the recurrence",
+    )
+
+    INTENT_COMPARE_PHRASES = (
+        "compare",
+        "compared",
+        "compared to",
+        "compared with",
+        "comparison with",
+        "comparison to",
+        "versus",
+        "vs",
+        "outperform",
+        "outperforms",
+        "outperformed",
+        "better than",
+        "worse than",
+        "superior to",
+        "inferior to",
+        "surpass",
+        "surpasses",
+        "surpassed",
+        "exceeds",
+        "improve over",
+        "improves over",
+        "improvement over",
+        "achieves higher",
+        "achieves better",
+        "achieves lower",
+        "state of the art",
+        "sota",
+        "competitive with",
+        "on par with",
+        "significantly better",
+        "slightly better",
+        "gain over",
+        "gains over",
+        "evaluation against",
+        "evaluate against",
+        "benchmark against",
+        "benchmarked against",
+        "experimental results",
+        "our model outperforms",
+        "our approach outperforms",
+        "our method outperforms",
+        "our system outperforms",
+        "reasons for the preference",
+        "do not use any averaging strategies",
+        "instead of using",
+    )
+
+    INTENT_BASELINE_PHRASES = (
+        "baseline",
+        "baselines",
+        "as a baseline",
+        "as the baseline",
+        "as our baseline",
+        "serve as baseline",
+        "serves as baseline",
+        "used as baseline",
+        "treated as baseline",
+        "strong baseline",
+        "competitive baseline",
+        "lower bound",
+        "upper bound",
+        "reference model",
+        "reference system",
+        "vanilla",
+        "standard model",
+        "baseline transformer",
+        "transformer baseline",
+        "transformer small",
+        "transformer large",
+        "configuration a",
+        "configuration b",
+        "newstest",
+    )
+
+    INTENT_SUPPORT_PHRASES = (
+        "support",
+        "supports",
+        "supported by",
+        "consistent with",
+        "in line with",
+        "in agreement with",
+        "agrees with",
+        "corroborate",
+        "corroborates",
+        "corroborated",
+        "confirm",
+        "confirms",
+        "confirmed by",
+        "validate",
+        "validates",
+        "validated by",
+        "verify",
+        "verifies",
+        "verified by",
+        "as shown by",
+        "as demonstrated by",
+        "as reported by",
+        "as observed by",
+        "as found by",
+        "as noted by",
+        "evidence from",
+        "evidence in",
+        "which aligns with",
+        "which is consistent",
+        "similar findings",
+        "similar results",
+        "also show",
+        "also shows",
+        "also found",
+        "further supported",
+        "also reported",
+    )
+
+    INTENT_BACKGROUND_PHRASES = (
+        "related work",
+        "related works",
+        "prior work",
+        "prior works",
+        "prior research",
+        "previous work",
+        "previous works",
+        "previous research",
+        "earlier work",
+        "earlier works",
+        "background",
+        "survey",
+        "overview",
+        "for example",
+        "for instance",
+        "eg",
+        "e g",
+        "such as",
+        "including",
+        "have been proposed",
+        "has been proposed",
+        "have been studied",
+        "has been studied",
+        "have been explored",
+        "has been explored",
+        "have been shown",
+        "has been shown",
+        "recent work",
+        "traditionally",
+        "historically",
+        "in the literature",
+        "in recent literature",
+        "widely used",
+        "commonly used",
+        "frequently used",
+        "popular approach",
+        "common approach",
+        "well known",
+        "among others",
+        "and others",
+        "there has been",
+        "there have been",
+        "a number of",
+        "a variety of",
+        "many approaches",
+        "several approaches",
+        "numerous studies",
+        "several studies",
+        "for additional details",
+        "for the sake of brevity",
+        "we refer the reader",
+        "for details regarding",
+    )
+
+    RESULTS_COMPARISON_PHRASES = (
+        "bleu score",
+        "bleu scores",
+        "rouge score",
+        "f1 score",
+        "accuracy",
+        "perplexity",
+        "en de bleu",
+        "en fr bleu",
+    )
+
+    SECTION_TYPE_ALIASES = {
+        "methods": "method",
+        "methodology": "method",
+        "approach": "method",
+        "approaches": "method",
+        "proposed method": "method",
+        "our approach": "method",
+        "model": "method",
+        "architecture": "method",
+        "framework": "method",
+        "task planning": "method",
+        "model selection": "method",
+        "task execution": "method",
+        "response generation": "method",
+        "experiments": "evaluation",
+        "experiment": "evaluation",
+        "experimental setup": "evaluation",
+        "experimental results": "evaluation",
+        "ablation": "evaluation",
+        "ablation study": "evaluation",
+        "quantitative evaluation": "evaluation",
+        "human evaluation": "evaluation",
+        "analysis": "evaluation",
+        "settings": "evaluation",
+        "result": "results",
+        "qualitative results": "results",
+        "quantitative results": "results",
+        "main results": "results",
+        "discussions": "discussion",
+        "error analysis": "discussion",
+        "limitations and future work": "discussion",
+        "limitations": "discussion",
+        "limitation": "discussion",
+        "future work": "discussion",
+        "conclusions": "conclusion",
+        "summary": "conclusion",
+        "concluding remarks": "conclusion",
+        "outlook": "conclusion",
+        "related works": "related_work",
+        "prior work": "related_work",
+        "previous work": "related_work",
+        "intro": "introduction",
+        "bibliography": "references",
+        "supplementary": "appendix",
+        "supplementary material": "appendix",
+        "supplementary information": "appendix",
+    }
+
+    SEMANTIC_TASK_KEYWORDS = {
+        "translation",
+        "machine translation",
+        "bleu",
+        "english",
+        "german",
+        "french",
+        "wmt",
+        "attention",
+        "transformer",
+        "encoder",
+        "decoder",
+        "language model",
+        "sequence",
+        "neural",
+        "rouge",
+        "f1",
+        "accuracy",
+        "perplexity",
+    }
+
+    SEMANTIC_RESULT_ANCHOR_TERMS = {
+        "table",
+        "experimental results",
+        "benchmark",
+    }
+
     DEFAULT_WEIGHTS_JSON: dict[str, Any] = {
         "link_confidence": {
             "doi_match": 0.70,
@@ -214,7 +558,7 @@ class CitationGraphService:
             "intent_score": 0.30,
             "section_weight": 0.25,
             "chunk_quality": 0.10,
-            "link_confidence_gate": "multiply",
+            "link_confidence_gate": "method_aware_blend",
         },
         "edge_score": {
             "top3_mean_score": 0.60,
@@ -321,6 +665,10 @@ class CitationGraphService:
             if self._is_full_rebuild_run(run):
                 return run
 
+        for run in runs:
+            if (run.processed_edges or 0) > 0:
+                return run
+
         return runs[0]
 
     def list_edges(
@@ -335,13 +683,18 @@ class CitationGraphService:
         if not run:
             return None, []
 
+        effective_run_ids = self._resolve_effective_run_ids(
+            run=run,
+            requested_run_id=run_id,
+        )
+
         query = (
             self.db.query(CitationEdge)
             .options(
                 selectinload(CitationEdge.source_canonical_document),
                 selectinload(CitationEdge.target_canonical_document),
             )
-            .filter(CitationEdge.run_id == run.id)
+            .filter(CitationEdge.run_id.in_(effective_run_ids))
         )
 
         if direction == "incoming":
@@ -406,13 +759,18 @@ class CitationGraphService:
         if not run:
             return None, []
 
+        effective_run_ids = self._resolve_effective_run_ids(
+            run=run,
+            requested_run_id=run_id,
+        )
+
         query = (
             self.db.query(CitationEdge)
             .options(
                 selectinload(CitationEdge.source_canonical_document),
                 selectinload(CitationEdge.target_canonical_document),
             )
-            .filter(CitationEdge.run_id == run.id)
+            .filter(CitationEdge.run_id.in_(effective_run_ids))
         )
 
         if min_score > 0:
@@ -547,6 +905,75 @@ class CitationGraphService:
 
         return self.get_latest_completed_run(prefer_full_rebuild=prefer_full_rebuild)
 
+    def _resolve_effective_run_ids(
+        self,
+        run: CitationScoreRun,
+        requested_run_id: UUID | None,
+    ) -> list[UUID]:
+        # Respect explicit run selection from callers.
+        if requested_run_id is not None:
+            return [run.id]
+
+        if self._is_full_rebuild_run(run):
+            return [run.id]
+
+        latest_subset_run_ids = self._latest_subset_run_ids_by_source(
+            algorithm_version=run.algorithm_version,
+        )
+        if latest_subset_run_ids:
+            return latest_subset_run_ids
+
+        return [run.id]
+
+    def _latest_subset_run_ids_by_source(self, algorithm_version: str) -> list[UUID]:
+        runs = (
+            self.db.query(CitationScoreRun)
+            .filter(CitationScoreRun.status == "completed")
+            .filter(CitationScoreRun.algorithm_version == algorithm_version)
+            .order_by(CitationScoreRun.started_at.desc())
+            .limit(1000)
+            .all()
+        )
+
+        latest_run_id_by_source: dict[UUID, UUID] = {}
+        for run in runs:
+            if self._is_full_rebuild_run(run):
+                continue
+
+            source_ids = self._extract_source_ids_from_run(run)
+            if len(source_ids) != 1:
+                continue
+
+            source_id = source_ids[0]
+            if source_id in latest_run_id_by_source:
+                continue
+
+            latest_run_id_by_source[source_id] = run.id
+
+        return list(latest_run_id_by_source.values())
+
+    def _extract_source_ids_from_run(self, run: CitationScoreRun) -> list[UUID]:
+        run_meta = self._extract_run_meta(run)
+        raw_source_ids = run_meta.get("source_canonical_ids")
+        if not isinstance(raw_source_ids, list):
+            return []
+
+        source_ids: list[UUID] = []
+        seen: set[UUID] = set()
+        for item in raw_source_ids:
+            try:
+                source_id = UUID(str(item))
+            except (TypeError, ValueError):
+                continue
+
+            if source_id in seen:
+                continue
+
+            seen.add(source_id)
+            source_ids.append(source_id)
+
+        return source_ids
+
     def _load_source_documents(self, source_ids: list[UUID]) -> list[CanonicalDocument]:
         docs = (
             self.db.query(CanonicalDocument)
@@ -575,6 +1002,7 @@ class CitationGraphService:
             title_tokens = set(self._tokenize(title))
             doi_normalized = self._normalize_doi(doc.doi)
             author_surnames = self._extract_author_surnames(doc.authors_json)
+            first_author_surname = self._extract_first_author_surname(doc.authors_json)
 
             info = TargetDocumentInfo(
                 canonical_id=doc.id,
@@ -585,6 +1013,7 @@ class CitationGraphService:
                 doi_normalized=doi_normalized,
                 publication_year=doc.publication_year,
                 author_surnames=author_surnames,
+                first_author_surname=first_author_surname,
             )
 
             by_id[doc.id] = info
@@ -660,7 +1089,7 @@ class CitationGraphService:
                     end=candidate.span_end,
                 )
 
-                section_type = self._normalize_section_type(chunk.section_type)
+                section_type = self._resolve_chunk_section_type(chunk)
                 section_weight = self._section_weight(section_type)
                 intent_label, intent_score = self._infer_intent(context_snippet)
                 chunk_quality = self._calculate_chunk_quality(context_snippet, candidate.kind)
@@ -688,6 +1117,7 @@ class CitationGraphService:
                             doi_match=link.doi_match,
                             title_match=title_match,
                             author_year_match=link.author_year_match,
+                            link_method=link.link_method,
                         )
 
                         is_internal = True
@@ -705,6 +1135,7 @@ class CitationGraphService:
                         section_weight=section_weight,
                         chunk_quality=chunk_quality,
                         link_confidence=link_confidence,
+                        link_method=link.link_method,
                     )
 
                     mentions.append(
@@ -818,6 +1249,7 @@ class CitationGraphService:
                 doi_match=doi_match,
                 title_match=title_match,
                 author_year_match=author_year_match,
+                link_method="pairwise_reference_scan",
             )
 
             mention_score = self._compute_mention_score(
@@ -826,6 +1258,7 @@ class CitationGraphService:
                 section_weight=section_weight,
                 chunk_quality=chunk_quality,
                 link_confidence=link_confidence,
+                link_method="pairwise_reference_scan",
             )
 
             anchor_text = (
@@ -980,6 +1413,7 @@ class CitationGraphService:
                 doi_match=ref.doi_match,
                 title_match=title_match,
                 author_year_match=ref.author_year_match,
+                link_method=f"reference_fallback_{ref.link_method or 'mapped'}",
             )
 
             mention_score = self._compute_mention_score(
@@ -988,6 +1422,7 @@ class CitationGraphService:
                 section_weight=section_weight,
                 chunk_quality=chunk_quality,
                 link_confidence=link_confidence,
+                link_method=f"reference_fallback_{ref.link_method or 'mapped'}",
             )
 
             anchor_text = (
@@ -1269,6 +1704,26 @@ class CitationGraphService:
                     )
                 )
 
+        for match in NARRATIVE_AUTHOR_YEAR_REGEX.finditer(text):
+            author_chunk = re.sub(r"\s+", " ", (match.group(1) or "")).strip(" ,.;")
+            year_chunk = (match.group(2) or "").strip()
+            if not author_chunk or not year_chunk:
+                continue
+
+            author_year_text = f"{author_chunk}, {year_chunk}"
+            if not self._looks_like_author_year_anchor(author_year_text):
+                continue
+
+            candidates.append(
+                MentionCandidate(
+                    kind="author_year",
+                    anchor_text=re.sub(r"\s+", " ", match.group(0)).strip(),
+                    span_start=match.start(),
+                    span_end=match.end(),
+                    author_year_text=author_year_text,
+                )
+            )
+
         unique: dict[tuple[str, int, int, str], MentionCandidate] = {}
         for item in candidates:
             key = (item.kind, item.span_start, item.span_end, item.anchor_text)
@@ -1296,9 +1751,17 @@ class CitationGraphService:
                 segment,
                 flags=re.IGNORECASE,
             ).strip()
-            if not self._looks_like_author_year_anchor(candidate):
+            if self._looks_like_author_year_anchor(candidate):
+                normalized_segments.append(candidate)
                 continue
-            normalized_segments.append(candidate)
+
+            if (
+                len(candidate) <= 160
+                and not DOI_REGEX.search(candidate)
+                and re.search(r"(?:19|20)\d{2}", candidate)
+                and re.search(r"[A-Za-z]{2,}", candidate)
+            ):
+                normalized_segments.append(candidate)
 
         if normalized_segments:
             return normalized_segments[:MAX_AUTHOR_YEAR_SEGMENTS]
@@ -1345,16 +1808,17 @@ class CitationGraphService:
         return deduped[:12]
 
     def _looks_like_author_year_anchor(self, raw: str) -> bool:
-        if len(raw) > 140:
+        if len(raw) > 160:
             return False
 
         if DOI_REGEX.search(raw):
             return False
 
-        if not re.search(r"\b(?:19|20)\d{2}[a-z]?\b", raw):
-            return False
+        if not re.search(r"\b(?:19|20)\d{2}[a-z]?(?=\b|[)\],.;:])", raw):
+            if not re.search(r"(?:19|20)\d{2}", raw):
+                return False
 
-        has_letters = bool(re.search(r"[A-Za-z]", raw))
+        has_letters = bool(re.search(r"[A-Za-z]{2,}", raw))
         return has_letters
 
     def _resolve_candidate_links(
@@ -1437,13 +1901,14 @@ class CitationGraphService:
     ) -> list[MentionLink]:
         year = self._extract_year(author_year_text)
         surnames = self._extract_surnames_from_author_year(author_year_text)
+        primary_surname = self._extract_primary_surname_from_author_year(author_year_text)
 
         if year:
             candidates = target_catalog.by_year.get(year, [])
         else:
             candidates = target_catalog.all_targets
 
-        scored_candidates: list[tuple[TargetDocumentInfo, float, float, float]] = []
+        scored_candidates: list[tuple[TargetDocumentInfo, float, float, float, bool]] = []
 
         for target in candidates:
             if target.canonical_id == source_document_id:
@@ -1452,10 +1917,27 @@ class CitationGraphService:
             author_year_match = self._surname_overlap(surnames, target.author_surnames)
             title_match = self._title_similarity(context_snippet, target.title)
 
-            combined = 0.70 * author_year_match + 0.30 * title_match
+            first_author_match = bool(
+                primary_surname
+                and target.first_author_surname
+                and primary_surname == target.first_author_surname
+            )
+
+            if primary_surname and target.first_author_surname and not first_author_match:
+                # Avoid mapping citations that only match a co-author unless context title signal is strong.
+                if title_match < 0.35:
+                    continue
+                author_year_match *= 0.50
+            elif first_author_match:
+                author_year_match = max(author_year_match, 0.80)
+
+            combined = self._clip01((0.55 * author_year_match) + (0.45 * title_match))
+            if first_author_match:
+                combined = self._clip01(combined + 0.10)
+
             if combined >= 0.40:
                 scored_candidates.append(
-                    (target, combined, title_match, author_year_match)
+                    (target, combined, title_match, author_year_match, first_author_match)
                 )
 
         if not scored_candidates:
@@ -1463,11 +1945,13 @@ class CitationGraphService:
 
         scored_candidates.sort(key=lambda item: item[1], reverse=True)
         top_score = scored_candidates[0][1]
-        adaptive_threshold = max(0.40, top_score - 0.08)
+        adaptive_threshold = max(0.42, top_score - 0.10)
 
         links: list[MentionLink] = []
-        for target, combined, title_match, author_year_match in scored_candidates:
+        for target, combined, title_match, author_year_match, first_author_match in scored_candidates:
             if combined < adaptive_threshold:
+                continue
+            if not first_author_match and combined < 0.62:
                 continue
 
             links.append(
@@ -1490,6 +1974,16 @@ class CitationGraphService:
     def _build_context_snippet(self, text: str, start: int, end: int) -> str:
         if not text:
             return ""
+
+        local_window = text[max(0, start - 120): min(len(text), end + 120)]
+        if (
+            "|" in local_window
+            or "-- image -->" in local_window.lower()
+            or re.search(r"\btable\s+\d+\b", local_window, flags=re.IGNORECASE)
+        ):
+            expanded_window = text[max(0, start - 260): min(len(text), end + 260)]
+            if "|" in expanded_window or "table" in expanded_window.lower():
+                return self._truncate_snippet(expanded_window)
 
         sentence_matches = list(re.finditer(r"[^.!?]+[.!?]?", text))
         if not sentence_matches:
@@ -1521,18 +2015,56 @@ class CitationGraphService:
 
         return cut.strip()
 
-    def _infer_intent(self, snippet: str) -> tuple[str, float]:
-        lowered = (snippet or "").lower()
+    def _normalize_phrase_for_match(self, text: str | None) -> str:
+        normalized = re.sub(r"[^a-z0-9]+", " ", (text or "").lower())
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        if not normalized:
+            return " "
+        return f" {normalized} "
 
-        if any(token in lowered for token in ["we use", "using ", "adopt", "based on", "following ", "build on", "built on"]):
-            label = "use_method"
-        elif any(token in lowered for token in ["compare", "compared", "versus", "vs.", "outperform", "better than"]):
-            label = "compare"
-        elif "baseline" in lowered:
+    def _contains_any_phrase(self, normalized_text: str, phrases: tuple[str, ...]) -> bool:
+        if not normalized_text.strip():
+            return False
+
+        for phrase in phrases:
+            phrase_normalized = self._normalize_phrase_for_match(phrase).strip()
+            if phrase_normalized and f" {phrase_normalized} " in normalized_text:
+                return True
+
+        return False
+
+    def _infer_intent(self, snippet: str) -> tuple[str, float]:
+        normalized = self._normalize_phrase_for_match(snippet)
+
+        has_table_signal = bool(re.search(r"\btable\s+\d+\b", normalized))
+        has_table_layout = (
+            "|" in (snippet or "")
+            or "-- image -->" in (snippet or "").lower()
+            or (
+                " model " in normalized
+                and (" bleu " in normalized or " score " in normalized)
+            )
+        )
+        has_result_metric = self._contains_any_phrase(normalized, self.RESULTS_COMPARISON_PHRASES)
+        has_compare_signal = self._contains_any_phrase(normalized, self.INTENT_COMPARE_PHRASES)
+        has_baseline_signal = self._contains_any_phrase(normalized, self.INTENT_BASELINE_PHRASES)
+        has_transformer_signal = bool(re.search(r"\btransformer\b", normalized))
+
+        if has_table_layout and has_baseline_signal and not has_compare_signal:
             label = "baseline"
-        elif any(token in lowered for token in ["support", "consistent with", "in line with"]):
+        elif has_table_layout and has_transformer_signal and (has_compare_signal or has_result_metric):
+            label = "compare"
+        elif has_table_signal and (has_compare_signal or has_result_metric):
+            label = "compare"
+        elif self._contains_any_phrase(normalized, self.INTENT_USE_METHOD_PHRASES):
+            label = "use_method"
+        elif has_compare_signal:
+            label = "compare"
+        elif has_baseline_signal:
+            label = "baseline"
+        elif self._contains_any_phrase(normalized, self.INTENT_SUPPORT_PHRASES):
             label = "support"
-        elif any(token in lowered for token in ["related work", "background", "survey", "for example", "e.g."]):
+        elif self._contains_any_phrase(normalized, self.INTENT_BACKGROUND_PHRASES):
             label = "background"
         else:
             label = "mention_only"
@@ -1616,8 +2148,25 @@ class CitationGraphService:
         doi_match: float,
         title_match: float,
         author_year_match: float,
+        link_method: str | None = None,
     ) -> float:
         score = (0.70 * doi_match) + (0.20 * title_match) + (0.10 * author_year_match)
+        method = (link_method or "").lower()
+
+        if method == "doi_exact":
+            return 1.0
+
+        if "author_year" in method:
+            score = max(score, 0.45 + (0.35 * author_year_match) + (0.20 * title_match))
+        elif method == "title_fuzzy":
+            score = max(score, 0.55 + (0.35 * title_match) + (0.10 * author_year_match))
+        elif (
+            method.startswith("ref_index_")
+            or method.startswith("reference_fallback_")
+            or method == "pairwise_reference_scan"
+        ):
+            score = max(score, 0.55 + (0.25 * title_match) + (0.20 * author_year_match))
+
         return self._clip01(score)
 
     def _compute_mention_score(
@@ -1627,6 +2176,7 @@ class CitationGraphService:
         section_weight: float,
         chunk_quality: float,
         link_confidence: float,
+        link_method: str | None = None,
     ) -> float:
         base_score = (
             (0.35 * semantic_similarity)
@@ -1634,7 +2184,34 @@ class CitationGraphService:
             + (0.25 * section_weight)
             + (0.10 * chunk_quality)
         )
-        return self._clip01(base_score) * self._clip01(link_confidence)
+
+        method = (link_method or "").lower()
+        if method == "doi_exact":
+            effective_confidence = 1.0
+        elif "heuristic" in method:
+            effective_confidence = max(0.25, link_confidence)
+        elif (
+            method.startswith("ref_index_")
+            or method.startswith("reference_fallback_")
+            or method == "pairwise_reference_scan"
+        ):
+            effective_confidence = max(0.30, link_confidence)
+        else:
+            effective_confidence = link_confidence
+
+        if method == "doi_exact":
+            confidence_gate = 1.0
+        elif (
+            "heuristic" in method
+            or method.startswith("ref_index_")
+            or method.startswith("reference_fallback_")
+            or method == "pairwise_reference_scan"
+        ):
+            confidence_gate = 0.60 + (0.40 * self._clip01(effective_confidence))
+        else:
+            confidence_gate = self._clip01(effective_confidence)
+
+        return self._clip01(base_score) * self._clip01(confidence_gate)
 
     def _build_edges_from_mentions(
         self,
@@ -1742,20 +2319,63 @@ class CitationGraphService:
         normalized = self._normalize_section_type(section_type)
         return self.SECTION_WEIGHTS.get(normalized, self.SECTION_WEIGHTS["other"])
 
+    def _resolve_chunk_section_type(self, chunk: Any) -> str:
+        normalized = self._normalize_section_type(getattr(chunk, "section_type", None))
+        if normalized != "other":
+            return normalized
+
+        fallback_candidates = (
+            getattr(chunk, "section", None),
+            getattr(chunk, "section_full_path", None),
+        )
+        for candidate in fallback_candidates:
+            fallback = self._normalize_section_type(candidate)
+            if fallback != "other":
+                return fallback
+
+        return normalized
+
     def _normalize_section_type(self, section_type: str | None) -> str:
-        raw = (section_type or "").strip().lower()
+        raw = str(section_type or "").strip().lower()
         if not raw:
             return "other"
 
-        aliases = {
-            "methods": "method",
-            "methodology": "method",
-            "experiments": "evaluation",
-            "experiment": "evaluation",
-            "conclusions": "conclusion",
-            "related works": "related_work",
-        }
-        return aliases.get(raw, raw)
+        normalized = re.sub(r"\s+", " ", raw)
+
+        if normalized in self.SECTION_TYPE_ALIASES:
+            return self.SECTION_TYPE_ALIASES[normalized]
+
+        if normalized in self.SECTION_WEIGHTS:
+            return normalized
+
+        if "related" in normalized and "work" in normalized:
+            return "related_work"
+
+        if any(keyword in normalized for keyword in ("method", "approach", "architecture", "framework")):
+            return "method"
+
+        if any(keyword in normalized for keyword in ("experiment", "evaluation", "ablation", "setup")):
+            return "evaluation"
+
+        if "result" in normalized:
+            return "results"
+
+        if any(keyword in normalized for keyword in ("discussion", "limitation", "future work")):
+            return "discussion"
+
+        if any(keyword in normalized for keyword in ("conclusion", "summary", "outlook")):
+            return "conclusion"
+
+        if any(keyword in normalized for keyword in ("intro", "motivation")):
+            return "introduction"
+
+        if any(keyword in normalized for keyword in ("reference", "bibliography")):
+            return "references"
+
+        if any(keyword in normalized for keyword in ("appendix", "supplementary")):
+            return "appendix"
+
+        return "other"
 
     def _extract_doi(self, text: str) -> str | None:
         match = DOI_REGEX.search(text or "")
@@ -1910,6 +2530,20 @@ class CitationGraphService:
         }
         return surnames
 
+    def _extract_primary_surname_from_author_year(self, text: str) -> str | None:
+        cleaned = re.sub(r"\b(?:see\s+also|see|cf\.)\b", " ", text or "", flags=re.IGNORECASE)
+        before_year = re.split(r"\b(?:19|20)\d{2}[a-z]?\b", cleaned, maxsplit=1)[0]
+        tokens = re.findall(r"[A-Za-z][A-Za-z'\-]+", before_year)
+
+        stopwords = {"and", "et", "al"}
+        for token in tokens:
+            lowered = token.lower()
+            if len(lowered) <= 2 or lowered in stopwords:
+                continue
+            return lowered
+
+        return None
+
     def _extract_author_surnames(self, authors_json: Any) -> set[str]:
         if not isinstance(authors_json, list):
             return set()
@@ -1930,6 +2564,25 @@ class CitationGraphService:
                 surnames.add(surname)
 
         return surnames
+
+    def _extract_first_author_surname(self, authors_json: Any) -> str | None:
+        if not isinstance(authors_json, list) or not authors_json:
+            return None
+
+        first_item = authors_json[0]
+        if isinstance(first_item, dict):
+            name = str(first_item.get("name") or "")
+        else:
+            name = str(first_item)
+
+        tokens = re.findall(r"[A-Za-z][A-Za-z'\-]+", name)
+        if not tokens:
+            return None
+
+        surname = tokens[-1].lower()
+        if len(surname) <= 1:
+            return None
+        return surname
 
     def _author_year_match(self, entry: ReferenceEntry, target: TargetDocumentInfo) -> float:
         year_match = 1.0 if entry.year and target.publication_year == entry.year else 0.0
@@ -1963,10 +2616,40 @@ class CitationGraphService:
         if not left_tokens or not right_tokens:
             return 0.0
 
-        token_score = len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+        intersection_size = len(left_tokens & right_tokens)
+        jaccard_score = intersection_size / len(left_tokens | right_tokens)
+        left_coverage_score = intersection_size / max(1, len(left_tokens))
+        token_score = self._clip01((0.55 * jaccard_score) + (0.45 * left_coverage_score))
         seq_score = SequenceMatcher(None, left_norm[:500], right_norm[:500]).ratio()
 
-        return self._clip01((0.70 * token_score) + (0.30 * seq_score))
+        base_score = self._clip01((0.70 * token_score) + (0.30 * seq_score))
+
+        left_keywords = {
+            keyword
+            for keyword in self.SEMANTIC_TASK_KEYWORDS
+            if keyword in left_norm
+        }
+        right_keywords = {
+            keyword
+            for keyword in self.SEMANTIC_TASK_KEYWORDS
+            if keyword in right_norm
+        }
+
+        if left_keywords and right_keywords:
+            overlap_ratio = len(left_keywords & right_keywords) / max(1, len(left_keywords))
+            if overlap_ratio >= 0.25:
+                base_score = self._clip01(base_score + (0.10 * overlap_ratio))
+
+        has_result_anchor = any(term in left_norm for term in self.SEMANTIC_RESULT_ANCHOR_TERMS)
+        has_metric_overlap = bool(
+            {"bleu", "rouge", "f1", "accuracy", "perplexity"} & left_keywords
+        ) and bool(
+            {"bleu", "rouge", "f1", "accuracy", "perplexity"} & right_keywords
+        )
+        if has_result_anchor and has_metric_overlap:
+            base_score = self._clip01(base_score + 0.05)
+
+        return base_score
 
     def _title_similarity(self, left: str, right: str) -> float:
         left_norm = self._normalize_title(left)

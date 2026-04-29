@@ -48,3 +48,5 @@ frontend/.env
 frontend/.env.*
 !frontend/.env.example
 
+/data_set
+/result_set
