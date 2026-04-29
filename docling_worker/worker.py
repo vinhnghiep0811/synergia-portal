@@ -2,7 +2,7 @@ import os
 import logging
 from redis import Redis
 from rq import Worker, SimpleWorker
-
+import app.models
 from app.core.config import REDIS_URL, RQ_DOCLING_QUEUE
 
 
