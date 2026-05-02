@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 EMBEDDING_DIM = 384
 
 SECTION_TYPE_WEIGHTS = {
-    "abstract": 0.06,
+    "abstract": 0.02,
     "introduction": 0.01,
     "background": 0.01,
     "related_work": -0.01,
-    "method": 0.06,
+    "method": 0.08,
     "evaluation": 0.03,
     "results": 0.03,
     "discussion": 0.01,
@@ -46,7 +46,6 @@ EXCLUDED_SECTION_KEYWORDS = [
 ]
 
 SOFT_EXCLUDED_SECTION_KEYWORDS = [
-    "experiment",
     "qualitative result",
     "case study",
 ]
@@ -57,14 +56,20 @@ class SearchService:
         self.db = db
         self.embedding_service = EmbeddingService()
 
-    def semantic_search(self, query: str, top_k: int = 5) -> list[SearchResultItem]:
+    def semantic_search(self, query: str, top_k: int = 5, canonical_document_id: str | None = None,) -> list[SearchResultItem]:
         if not query or not query.strip():
             return []
 
         raw_query = query.strip()
         top_k = max(1, min(top_k, 20))
+        query_type = self._detect_query_type(raw_query)
 
-        logger.info("[search] query='%s' top_k=%s", raw_query, top_k)
+        logger.info(
+            "[search] query='%s' top_k=%s query_type=%s",
+            raw_query,
+            top_k,
+            query_type,
+        )
 
         query_for_embedding = (
             f"Represent this sentence for searching relevant passages: {raw_query}"
@@ -76,7 +81,7 @@ class SearchService:
             return []
 
         distance = DocumentChunk.embedding.cosine_distance(query_vector)
-        candidate_limit = max(top_k * 10, 30)
+        candidate_limit = max(top_k * 12, 40)
 
         rows = (
             self.db.query(
@@ -109,6 +114,7 @@ class SearchService:
                 continue
 
             similarity = 1.0 - float(dist if dist is not None else 1.0)
+
             section_boost = self._section_boost(chunk.section_type)
             section_penalty = self._section_penalty(chunk.section)
             query_boost = self._query_aware_boost(raw_query, chunk)
@@ -125,12 +131,23 @@ class SearchService:
                 }
             )
 
+        if not candidates:
+            return []
+
         selected = self._mmr_select(
             candidates=candidates,
             top_k=top_k,
             lambda_mult=0.65,
             duplicate_threshold=0.88,
+            query_type=query_type,
         )
+
+        if query_type == "comparison":
+            selected = self._ensure_multi_document(
+                selected=selected,
+                candidates=candidates,
+                top_k=top_k,
+            )
 
         return [
             SearchResultItem(
@@ -140,32 +157,121 @@ class SearchService:
                 content=item["chunk"].content,
                 similarity_score=round(item["relevance"], 4),
             )
-            for item in selected
+            for item in selected[:top_k]
         ]
+
+    def _detect_query_type(self, query: str) -> str:
+        q = query.lower()
+
+        if any(w in q for w in ["compare", "difference", "differ", "vs", "versus"]):
+            return "comparison"
+
+        if any(w in q for w in ["how", "process", "workflow", "pipeline", "mechanism"]):
+            return "process"
+
+        return "general"
 
     def _section_boost(self, section_type: str | None) -> float:
         if not section_type:
             return 0.0
 
-        return SECTION_TYPE_WEIGHTS.get(section_type, 0.0)
+        return SECTION_TYPE_WEIGHTS.get(section_type.lower(), 0.0)
 
     def _section_penalty(self, section: str | None) -> float:
         section_lower = (section or "").lower()
 
         for keyword in SOFT_EXCLUDED_SECTION_KEYWORDS:
             if keyword in section_lower:
-                return -0.06
+                return -0.04
 
         return 0.0
+
+    def _query_aware_boost(self, query: str, chunk: DocumentChunk) -> float:
+        q = query.lower()
+        section_type = (chunk.section_type or "").lower()
+        section = (chunk.section or "").lower()
+        full_path = (getattr(chunk, "section_full_path", "") or "").lower()
+
+        boost = 0.0
+
+        process_terms = [
+            "how", "work", "works", "workflow", "pipeline",
+            "process", "break down", "decompose", "orchestrate",
+            "step", "steps", "mechanism", "handle", "handling",
+        ]
+
+        evaluation_terms = [
+            "evaluate", "evaluation", "experiment", "result",
+            "performance", "metric", "benchmark", "accuracy",
+            "precision", "recall", "f1",
+        ]
+
+        limitation_terms = [
+            "limitation", "challenge", "risk", "problem",
+            "weakness", "failure",
+        ]
+
+        summary_terms = [
+            "summary", "overview", "what is", "main idea",
+            "contribution", "abstract",
+        ]
+
+        if any(t in q for t in process_terms):
+            if section_type == "method":
+                boost += 0.10
+            if section_type == "introduction":
+                boost -= 0.03
+
+        if any(t in q for t in evaluation_terms):
+            if section_type in {"evaluation", "results"}:
+                boost += 0.08
+
+        if any(t in q for t in limitation_terms):
+            if section_type in {"limitations", "discussion"}:
+                boost += 0.08
+
+        if any(t in q for t in summary_terms):
+            if section_type in {"abstract", "introduction"}:
+                boost += 0.06
+
+        # Generic subsection matching
+        searchable_section = f"{section} {full_path}"
+
+        keyword_pairs = [
+            ("planning", "planning"),
+            ("plan", "planning"),
+            ("selection", "selection"),
+            ("select", "selection"),
+            ("execution", "execution"),
+            ("execute", "execution"),
+            ("response", "response"),
+            ("memory", "memory"),
+            ("reasoning", "reasoning"),
+            ("perception", "perception"),
+            ("interaction", "interaction"),
+            ("governance", "governance"),
+            ("risk", "risk"),
+            ("safeguard", "safeguard"),
+            ("autonomy", "autonomy"),
+        ]
+
+        for query_term, section_term in keyword_pairs:
+            if query_term in q and section_term in searchable_section:
+                boost += 0.06
+
+        return boost
 
     def _is_hard_excluded_section(self, chunk: DocumentChunk) -> bool:
         section = (chunk.section or "").lower()
         section_type = (chunk.section_type or "").lower()
+        full_path = (getattr(chunk, "section_full_path", "") or "").lower()
 
         if section_type in EXCLUDED_SECTION_TYPES:
             return True
 
-        return any(keyword in section for keyword in EXCLUDED_SECTION_KEYWORDS)
+        target = f"{section} {full_path}"
+
+        return any(keyword in target for keyword in EXCLUDED_SECTION_KEYWORDS)
 
     def _mmr_select(
         self,
@@ -173,6 +279,7 @@ class SearchService:
         top_k: int,
         lambda_mult: float = 0.65,
         duplicate_threshold: float = 0.88,
+        query_type: str = "general",
     ) -> list[dict[str, Any]]:
         if not candidates:
             return []
@@ -194,7 +301,6 @@ class SearchService:
                     for s in selected
                 )
 
-                # Bỏ chunk quá giống chunk đã chọn
                 if max_sim_to_selected >= duplicate_threshold:
                     continue
 
@@ -203,15 +309,17 @@ class SearchService:
                     - (1.0 - lambda_mult) * max_sim_to_selected
                 )
 
-                # Phạt nếu cùng section root
                 if self._same_section_root(item["chunk"], selected):
                     mmr_score -= 0.08
+
+                if query_type == "comparison":
+                    if self._is_new_document(item, selected):
+                        mmr_score += 0.08
 
                 if mmr_score > best_score:
                     best_score = mmr_score
                     best_item = item
 
-            # Nếu tất cả đều bị duplicate_threshold loại, nới điều kiện để vẫn trả đủ top_k
             if best_item is None:
                 best_item = max(remaining, key=lambda x: x["relevance"])
 
@@ -220,25 +328,98 @@ class SearchService:
 
         return selected
 
+    def _ensure_multi_document(
+        self,
+        selected: list[dict[str, Any]],
+        candidates: list[dict[str, Any]],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        if not selected:
+            return []
+
+        selected_doc_ids = {
+            item["chunk"].canonical_document_id
+            for item in selected
+        }
+
+        candidate_doc_ids = {
+            item["chunk"].canonical_document_id
+            for item in candidates
+        }
+
+        if len(candidate_doc_ids) <= 1:
+            return selected
+
+        if len(selected_doc_ids) >= min(2, len(candidate_doc_ids)):
+            return selected
+
+        missing_doc_items = []
+
+        for item in sorted(candidates, key=lambda x: x["relevance"], reverse=True):
+            doc_id = item["chunk"].canonical_document_id
+
+            if doc_id not in selected_doc_ids:
+                missing_doc_items.append(item)
+                selected_doc_ids.add(doc_id)
+
+            if len(selected_doc_ids) >= min(2, len(candidate_doc_ids)):
+                break
+
+        if not missing_doc_items:
+            return selected
+
+        final = selected.copy()
+
+        for item in missing_doc_items:
+            already_exists = any(
+                x["chunk"].id == item["chunk"].id
+                for x in final
+            )
+
+            if not already_exists:
+                final.append(item)
+
+        final.sort(key=lambda x: x["relevance"], reverse=True)
+
+        return final[:top_k]
+
+    def _is_new_document(
+        self,
+        item: dict[str, Any],
+        selected_items: list[dict[str, Any]],
+    ) -> bool:
+        item_doc_id = item["chunk"].canonical_document_id
+
+        return all(
+            selected["chunk"].canonical_document_id != item_doc_id
+            for selected in selected_items
+        )
+
     def _same_section_root(
         self,
         item_chunk: DocumentChunk,
         selected_items: list[dict[str, Any]],
     ) -> bool:
-        item_root = (item_chunk.section or "").split(">")[0].strip().lower()
+        item_root = self._section_root(item_chunk)
 
         if not item_root:
             return False
 
         for selected in selected_items:
-            selected_root = (
-                selected["chunk"].section or ""
-            ).split(">")[0].strip().lower()
+            selected_root = self._section_root(selected["chunk"])
 
             if item_root == selected_root:
                 return True
 
         return False
+
+    def _section_root(self, chunk: DocumentChunk) -> str:
+        full_path = getattr(chunk, "section_full_path", None)
+
+        if full_path:
+            return full_path.split(">")[0].strip().lower()
+
+        return (chunk.section or "").split(">")[0].strip().lower()
 
     def _cosine_similarity(self, vec_a, vec_b) -> float:
         if vec_a is None or vec_b is None:
@@ -257,62 +438,3 @@ class SearchService:
             return 0.0
 
         return float(np.dot(a, b) / (norm_a * norm_b))
-
-    def _query_aware_boost(self, query: str, chunk: DocumentChunk) -> float:
-        q = query.lower()
-        section_type = (chunk.section_type or "").lower()
-        section = (chunk.section or "").lower()
-
-        boost = 0.0
-
-        process_terms = [
-            "how", "work", "works", "workflow", "pipeline",
-            "process", "break down", "decompose", "orchestrate",
-            "step", "steps", "mechanism"
-        ]
-
-        evaluation_terms = [
-            "evaluate", "evaluation", "experiment", "result",
-            "performance", "metric", "benchmark", "accuracy",
-            "precision", "recall", "f1"
-        ]
-
-        limitation_terms = [
-            "limitation", "challenge", "risk", "problem",
-            "weakness", "failure"
-        ]
-
-        summary_terms = [
-            "summary", "overview", "what is", "main idea",
-            "contribution", "abstract"
-        ]
-
-        if any(t in q for t in process_terms):
-            if section_type == "method":
-                boost += 0.08
-            if section_type == "introduction":
-                boost -= 0.02
-
-        if any(t in q for t in evaluation_terms):
-            if section_type in {"evaluation", "results"}:
-                boost += 0.08
-
-        if any(t in q for t in limitation_terms):
-            if section_type in {"limitations", "discussion"}:
-                boost += 0.08
-
-        if any(t in q for t in summary_terms):
-            if section_type in {"abstract", "introduction"}:
-                boost += 0.06
-
-        # ưu tiên subsection có tên khớp ý query, nhưng vẫn generic
-        if "planning" in q and "planning" in section:
-            boost += 0.06
-        if "selection" in q and "selection" in section:
-            boost += 0.06
-        if "execution" in q and "execution" in section:
-            boost += 0.06
-        if "response" in q and "response" in section:
-            boost += 0.06
-
-        return boost

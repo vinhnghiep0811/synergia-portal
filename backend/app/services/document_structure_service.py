@@ -66,6 +66,7 @@ class DocumentStructureService:
     }
 
     ALLOWED_UNNUMBERED_MAIN_HEADINGS = {
+        "perspective summary",
         "abstract",
         "introduction",
         "background",
@@ -125,7 +126,38 @@ class DocumentStructureService:
         "model selection",
         "task execution",
         "response generation",
+        "perspective summary",
     }
+
+    FRONT_MATTER_HEADINGS = {
+        "author",
+        "authors",
+        "affiliation",
+        "affiliations",
+        "contact",
+        "contacts",
+        "correspondence",
+        "author information",
+        "author details",
+    }
+
+    AFFILIATION_KEYWORDS = (
+        "university",
+        "college",
+        "school",
+        "department",
+        "institute",
+        "faculty",
+        "laboratory",
+        "lab",
+        "hospital",
+        "clinic",
+        "research center",
+        "research centre",
+        "research institute",
+        "corresponding author",
+        "equal contribution",
+    )
 
     def _is_retrievable_section(self, section: DocumentSection) -> bool:
         if not section:
@@ -154,20 +186,25 @@ class DocumentStructureService:
         heading_level = getattr(section, "heading_level", None)
 
         # bỏ front matter
-        if heading_level == 0 or section_name == "document":
+        if heading_level == 0 and not text:
             return True
 
         return False
 
     def _extract_heading_info(self, line: str) -> Dict[str, Any]:
-        line = re.sub(r"^#+\s*", "", line).strip()
+        markdown_heading_match = re.match(r"^(#+)\s*(.*)$", line.strip())
+        markdown_heading_level = None
+        if markdown_heading_match:
+            markdown_heading_level = len(markdown_heading_match.group(1))
+            line = markdown_heading_match.group(2).strip()
+
         line = re.sub(r"\s+", " ", line).strip()
 
         m = re.match(r"^(\d+(?:\.\d+)*)\.?\s+(.*)$", line)
         if m:
             heading_number = m.group(1).strip()
             section_name = m.group(2).strip()
-            heading_level = heading_number.count(".") + 1
+            heading_level = markdown_heading_level or (heading_number.count(".") + 1)
             return {
                 "heading_number": heading_number,
                 "heading_level": heading_level,
@@ -176,7 +213,7 @@ class DocumentStructureService:
 
         return {
             "heading_number": None,
-            "heading_level": 1,
+            "heading_level": markdown_heading_level or 1,
             "section_name": line[:500],
         }
 
@@ -207,14 +244,18 @@ class DocumentStructureService:
         def flush_section():
             nonlocal section_index, current_lines
             nonlocal current_title, current_type, current_heading_number, current_heading_level, current_parent_key
-
+            if not seen_main_section:
+                return
             content = "\n".join(current_lines).strip()
 
             # chỉ bỏ nếu vừa không có content, vừa không phải heading thật
             if not content and current_title == "Document" and current_heading_level == 0:
                 return
 
-            section_key = self._make_section_key(current_heading_number, current_title)
+            if not seen_main_section and current_type == "other":
+                return
+
+            section_key = self._make_section_key(section_index)
             full_path = self._build_full_path(
                 section_name=current_title,
                 parent_key=current_parent_key,
@@ -227,6 +268,7 @@ class DocumentStructureService:
                 "section_type": current_type,
                 "heading_number": current_heading_number,
                 "heading_level": current_heading_level,
+                "section_key": section_key,
                 "parent_key": current_parent_key,
                 "full_path": full_path,
                 "content": content,   # có thể rỗng
@@ -242,7 +284,11 @@ class DocumentStructureService:
             line = raw_line.strip()
 
             if not line:
-                current_lines.append(raw_line)
+                if seen_main_section:
+                    current_lines.append(raw_line)
+                continue
+
+            if self._looks_like_affiliation_line(line):
                 continue
 
             # if in_references:
@@ -250,17 +296,28 @@ class DocumentStructureService:
             #     continue
             is_heading = self._is_heading(line)
 
+            if not seen_main_section and not is_heading:
+                continue
+            if not seen_main_section:
+                if self._looks_like_affiliation_line(line):
+                    continue
             if current_type == "references" and not is_heading:
                 if self._is_reference_like_line(raw_line):
                     current_lines.append(raw_line)
                 continue
 
             if is_heading:
+                if not seen_main_section:
+                    current_lines = []
                 heading_info = self._extract_heading_info(line)
                 cleaned_title = heading_info["section_name"]
                 heading_number = heading_info["heading_number"]
                 heading_level = heading_info["heading_level"]
                 normalized_type = self._normalize_section_type(cleaned_title)
+
+                if not seen_main_section:
+                    if normalized_type == "other":
+                        continue
 
                 is_main = self._is_main_section_heading(
                     cleaned_title,
@@ -269,10 +326,23 @@ class DocumentStructureService:
                 )
 
                 if not seen_main_section:
-                    allowed_before_main = bool(heading_number) or self._is_allowed_unnumbered_main_heading(cleaned_title)
-                    if not allowed_before_main:
-                        current_lines.append(raw_line)
+                    if self._looks_like_affiliation_line(line):
                         continue
+                    allowed_before_main = (
+                        self._is_allowed_unnumbered_main_heading(cleaned_title)
+                        or normalized_type in {"abstract"}
+                    )
+                    if not allowed_before_main:
+                        continue
+
+                if (
+                    seen_main_section
+                    and cleaned_title.strip().lower() == current_title.strip().lower()
+                    and heading_level == current_heading_level
+                    and heading_number == current_heading_number
+                    and normalized_type == current_type
+                ):
+                    continue
 
                 flush_section()
 
@@ -292,7 +362,7 @@ class DocumentStructureService:
                 current_heading_level = heading_level
                 current_parent_key = parent_key
 
-                current_key = self._make_section_key(current_heading_number, current_title)
+                current_key = self._make_section_key(section_index)
                 heading_stack[heading_level] = current_key
 
                 # xóa các level sâu hơn khi gặp heading mới
@@ -308,7 +378,8 @@ class DocumentStructureService:
 
                 continue
 
-            current_lines.append(raw_line)
+            if not self._looks_like_affiliation_line(raw_line):
+                current_lines.append(raw_line)
 
         flush_section()
 
@@ -320,6 +391,7 @@ class DocumentStructureService:
                     "section_type": "other",
                     "heading_number": None,
                     "heading_level": 0,
+                    "section_key": self._make_section_key(0),
                     "parent_key": None,
                     "full_path": "Document",
                     "content": markdown.strip(),
@@ -346,7 +418,7 @@ class DocumentStructureService:
             )
             section_objects.append(obj)
 
-            section_key = self._make_section_key(sec["heading_number"], sec["section_name"])
+            section_key = sec["section_key"]
             object_by_key[section_key] = obj
 
         for sec, obj in zip(sections, section_objects):
@@ -370,9 +442,9 @@ class DocumentStructureService:
         for section in sections:
 
             section_type = (section.section_type or "").strip().lower()
-            if section_type in {"references", "appendix"}:
+            if section_type in {"references", "appendix", "affiliation"}:
                 continue
-
+            
             section_text = self._clean_section_content(section.content or "")
 
             if self._should_skip_section_content(section, section_text):
@@ -389,8 +461,10 @@ class DocumentStructureService:
                 if self._should_drop_chunk(normalized, min_chunk_chars=min_chunk_chars):
                     continue
 
-                final_content = f"Section: {section.full_path}\n\n{normalized}" if section.full_path else normalized
-                content_hash = hashlib.sha256(final_content.encode("utf-8")).hexdigest()
+                prefix = f"{section.section_name}\n" if section.section_name else ""
+                final_content = prefix + normalized
+                hash_input = f"{section.full_path}\n{normalized}" if section.full_path else normalized
+                content_hash = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
 
                 is_retrievable = self._is_retrievable_section(section)
 
@@ -440,11 +514,18 @@ class DocumentStructureService:
         if not line:
             return False
 
-        line = line.strip()
+        line = line.replace("\u00a0", " ").strip()
         lower = line.lower()
+        candidate_title = self._clean_heading(line)
+        lower_candidate = candidate_title.lower().strip()
+        if self._looks_like_affiliation_line(line): 
+            return False
 
         if len(line) > 120:
             return False
+        
+        if lower_candidate in self.KNOWN_HEADING_KEYWORDS or any(kw in lower for kw in ["summary", "abstract"]):
+            return True
 
         if self._is_noise_line(line):
             return False
@@ -455,21 +536,22 @@ class DocumentStructureService:
         if line.endswith(":") and len(line.split()) <= 6:
             return False
 
+        if self._looks_like_front_matter_heading(candidate_title):
+            return False
+
         if line.startswith("#"):
             return True
 
         if re.match(r"^\d+(\.\d+)*\.?\s+[A-Za-z]", line):
             if len(line.split()) <= 14:
+                if self._looks_like_affiliation_line(line):
+                    return False
                 return True
 
         if lower in self.KNOWN_HEADING_KEYWORDS:
             return True
 
-        if any(token in lower for token in [
-            "university", "school", "department", "institute",
-            "hospital", "faculty", "laboratory", "lab",
-            "email", "@", "corresponding author"
-        ]):
+        if self._contains_affiliation_keyword(line) or "email" in lower or "@" in line:
             return False
 
         if lower.startswith((
@@ -479,11 +561,15 @@ class DocumentStructureService:
             return False
 
         words = line.split()
+        if len(words) > 20:
+            return False
         if len(words) < 1 or len(words) > 12:
             return False
 
         if self._looks_like_sentence(line):
-            return False
+            # Chỉ cho phép đi tiếp nếu là tiêu đề quan trọng (Summary/Abstract)
+            if not any(kw in lower for kw in ["summary", "abstract"]):
+                return False
 
         if self._looks_like_table_row(line):
             return False
@@ -539,6 +625,27 @@ class DocumentStructureService:
     def _clean_heading(self, line: str) -> str:
         return self._extract_heading_info(line)["section_name"]
 
+    def _looks_like_front_matter_heading(self, title: str) -> bool:
+        normalized = re.sub(r"\s+", " ", (title or "").strip().lower())
+        if not normalized:
+            return False
+
+        if normalized in self.FRONT_MATTER_HEADINGS:
+            return True
+
+        return self._looks_like_affiliation_line(title)
+
+    def _contains_affiliation_keyword(self, text: str) -> bool:
+        normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
+        if not normalized:
+            return False
+
+        for keyword in self.AFFILIATION_KEYWORDS:
+            if re.search(rf"\b{re.escape(keyword)}\b", normalized):
+                return True
+
+        return False
+
     def _looks_like_reference_entry(self, line: str) -> bool:
         lower = line.lower()
 
@@ -564,11 +671,79 @@ class DocumentStructureService:
         return False
 
     def _normalize_section_type(self, title: str) -> str:
-        normalized = title.strip().lower()
+        normalized = title.replace("\u00a0", " ").strip().lower()
         normalized = re.sub(r"\s+", " ", normalized).strip()
+
+        if any(kw in normalized for kw in ["perspective summary", "abstract", "summary"]):
+            return "abstract"
 
         if normalized in self.SECTION_TYPE_MAP:
             return self.SECTION_TYPE_MAP[normalized]
+
+        if "perspective summary" in normalized or "summary" in normalized:
+            return "abstract"
+
+        if normalized.startswith("abstract"):
+            return "abstract"
+
+        if normalized.startswith(("introduction", "motivation")):
+            return "introduction"
+
+        if normalized.startswith("background"):
+            return "background"
+
+        if "analysis" in normalized:
+            return "discussion"
+
+        if "discussion" in normalized and "result" in normalized:
+            return "discussion"
+
+        if "limitation" in normalized:
+            return "limitations"
+
+        if "case study" in normalized:
+            return "evaluation"
+
+        if "dataset" in normalized:
+            return "evaluation"
+
+        if "related work" in normalized:
+            return "related_work"
+
+        if normalized.startswith(("method", "methods", "methodology", "approach")):
+            return "method"
+
+        if any(token in normalized for token in [
+            "experimental setup", "experiment", "evaluation", "benchmark", "dataset"
+        ]):
+            return "evaluation"
+
+        if normalized.startswith(("result", "results")):
+            return "results"
+
+        if normalized.startswith("discussion"):
+            return "discussion"
+
+        if normalized.startswith(("conclusion", "conclusions", "future work")):
+            return "conclusion"
+
+        if normalized.startswith(("limitation", "limitations")):
+            return "limitations"
+
+        if normalized.startswith(("reference", "references", "bibliography")):
+            return "references"
+
+        if normalized.startswith(("acknowledgement", "acknowledgements", "acknowledgment", "acknowledgments")):
+            return "other"
+
+        if "experiment" in normalized and "result" in normalized:
+            return "evaluation"
+
+        if "implementation" in normalized:
+            return "method"
+
+        if "future work" in normalized:
+            return "conclusion"
 
         if normalized == "appendix":
             return "appendix"
@@ -578,15 +753,15 @@ class DocumentStructureService:
 
         if normalized.startswith("appendix "):
             return "appendix"
+        
+        if any(token in normalized for token in [
+            "university", "department", "institute", "hospital", "college"
+        ]):
+            return "affiliation"
 
         if re.match(r"^[a-z]\.\d+(\.\d+)*\s+", normalized):
             return "appendix"
         
-        if re.match(r"^[a-z]\s+[a-z].+", normalized):
-            words = normalized.split()
-            if len(words) >= 2 and len(words) <= 12:
-                return "appendix"
-
         return "other"
 
     def _split_into_blocks(self, text: str) -> List[str]:
@@ -657,8 +832,6 @@ class DocumentStructureService:
                 current = [line]
                 current_kind = kind
                 continue
-            if kind in {"table", "code"}:
-                continue
             # merge caption + table
             if current_kind == "caption" and kind in {"table", "code", "paragraph"}:
                 current.append(line)
@@ -688,36 +861,33 @@ class DocumentStructureService:
         return blocks
 
     def _get_overlap(self, text: str, overlap_chars: int) -> str:
-        if len(text) <= overlap_chars:
-            return text
-        
-        window = text[-overlap_chars:]
-        split_pos = max(
-            window.find("\n\n"),
-            window.find("\n"),
-            window.find(". "),
-            window.find("; ")
-        )
-        if split_pos != -1:
-            return window[split_pos+1:].strip()
-        
-        split_space = window.find(" ")
-        if split_space != -1:
-            return window[split_space+1:].strip()
-            
-        return window
+        sentences = re.split(r'(?<=[.!?])\s+', text)
 
-    def _split_text(self, text: str, max_chars: int = 1500, overlap_chars: int = 200) -> List[str]:
+        overlap = []
+        total_len = 0
+
+        for sent in reversed(sentences):
+            if total_len + len(sent) > overlap_chars:
+                break
+            overlap.insert(0, sent)
+            total_len += len(sent)
+
+        return " ".join(overlap)
+
+    def _split_text(
+        self,
+        text: str,
+        max_chars: int = 1200,
+        overlap_chars: int = 150,
+    ) -> List[str]:
+
         text = self._normalize_chunk_text(text)
         if not text:
             return []
 
-        if len(text) <= max_chars:
-            return [text]
-
         blocks = self._split_into_blocks(text)
         if not blocks:
-            return self._hard_split_long_text(text, max_chars=max_chars, overlap_chars=overlap_chars)
+            blocks = [text]
 
         chunks: List[str] = []
         current = ""
@@ -727,51 +897,74 @@ class DocumentStructureService:
             if not block:
                 continue
 
-            candidate = f"{current}\n\n{block}".strip() if current else block
+            semantic_units = self._split_into_semantic_units(block, max_chars=max_chars)
+            fixed_units = []
+            for unit in semantic_units:
+                if len(unit) > max_chars:
+                    fixed_units.extend(
+                        self._hard_split_long_text(unit, max_chars, overlap_chars)
+                    )
+                else:
+                    fixed_units.append(unit)
 
-            if len(candidate) <= max_chars:
-                current = candidate
-                continue
+            semantic_units = fixed_units
+            if not semantic_units:
+                semantic_units = [block]
 
-            if current:
-                chunks.append(self._normalize_chunk_text(current))
-                current = self._get_overlap(current, overlap_chars)
+            temp = current
 
-            candidate = f"{current}\n\n{block}".strip() if current else block
+            for unit in semantic_units:
+                unit = self._normalize_chunk_text(unit)
+                if not unit:
+                    continue
+                if len(unit) > max_chars:
+                    long_parts = self._hard_split_long_text(unit, max_chars, overlap_chars)
+                    for lp in long_parts:
+                        lp = self._normalize_chunk_text(lp)
+                        if not lp:
+                            continue
 
-            if len(candidate) <= max_chars:
-                current = candidate
-                continue
+                        candidate = f"{temp}\n\n{lp}".strip() if temp else lp
 
-            paragraphs = [self._normalize_chunk_text(p) for p in re.split(r"\n\s*\n", block) if self._normalize_chunk_text(p)]
-            if len(paragraphs) > 1:
-                temp = current
-                for para in paragraphs:
-                    para_candidate = f"{temp}\n\n{para}".strip() if temp else para
-                    if len(para_candidate) <= max_chars:
-                        temp = para_candidate
-                    else:
-                        if temp:
-                            chunks.append(self._normalize_chunk_text(temp))
-                            temp = self._get_overlap(temp, overlap_chars)
-                        
-                        para_candidate = f"{temp}\n\n{para}".strip() if temp else para
-                        if len(para_candidate) <= max_chars:
-                            temp = para_candidate
+                        if len(candidate) <= max_chars:
+                            temp = candidate
                         else:
-                            hard_splits = self._hard_split_long_text(para_candidate, max_chars=max_chars, overlap_chars=overlap_chars)
-                            chunks.extend(hard_splits[:-1])
-                            temp = hard_splits[-1] if hard_splits else ""
-                current = temp
-            else:
-                hard_splits = self._hard_split_long_text(candidate, max_chars=max_chars, overlap_chars=overlap_chars)
-                chunks.extend(hard_splits[:-1])
-                current = hard_splits[-1] if hard_splits else ""
+                            if temp:
+                                previous_chunk = temp
+                                chunks.append(previous_chunk)
+                                temp = self._compose_with_overlap(
+                                    previous_chunk=previous_chunk,
+                                    next_text=lp,
+                                    overlap_chars=overlap_chars,
+                                    max_chars=max_chars,
+                                )
+                            else:
+                                temp = lp
+                    continue
+                candidate = f"{temp}\n\n{unit}".strip() if temp else unit
+
+                if len(candidate) <= max_chars:
+                    temp = candidate
+                    continue
+
+                if temp:
+                    previous_chunk = temp
+                    chunks.append(previous_chunk)
+                    temp = self._compose_with_overlap(
+                        previous_chunk=previous_chunk,
+                        next_text=unit,
+                        overlap_chars=overlap_chars,
+                        max_chars=max_chars,
+                    )
+                else:
+                    temp = unit
+
+            current = temp
 
         if current:
-            chunks.append(self._normalize_chunk_text(current))
+            chunks.append(current)
 
-        return [c for c in chunks if c]
+        return [c.strip() for c in chunks if c.strip()]
 
     def _hard_split_long_text(self, text: str, max_chars: int, overlap_chars: int = 200) -> List[str]:
         text = self._normalize_chunk_text(text)
@@ -818,10 +1011,33 @@ class DocumentStructureService:
     def _estimate_token_count(self, text: str) -> int:
         return max(1, len(text) // 4)
 
-    def _make_section_key(self, heading_number: str | None, section_name: str) -> str:
-        if heading_number:
-            return f"{heading_number}|{section_name}".lower()
-        return section_name.lower()
+    def _compose_with_overlap(
+        self,
+        previous_chunk: str,
+        next_text: str,
+        overlap_chars: int,
+        max_chars: int,
+    ) -> str:
+        next_text = self._normalize_chunk_text(next_text)
+        if not next_text:
+            return ""
+
+        if not previous_chunk or overlap_chars <= 0:
+            return next_text
+
+        overlap = self._get_overlap(previous_chunk, overlap_chars)
+        if not overlap:
+            return next_text
+
+        candidate = f"{overlap} {next_text}".strip()
+        candidate = re.sub(r"^[\)\]\.,\s]+", "", candidate)
+        if len(candidate) <= max_chars:
+            return candidate
+
+        return next_text
+
+    def _make_section_key(self, section_index: int) -> str:
+        return f"sec:{section_index}"
 
     def _build_full_path(
         self,
@@ -853,7 +1069,7 @@ class DocumentStructureService:
         if len(line.split()) >= 12:
             return True
 
-        if any(p in line for p in [".", ";", "?", "!"]):
+        if any(p in line for p in [".", ";", "?", "!"]) and len(line.split()) > 6:
             return True
 
         lower = line.lower()
@@ -902,6 +1118,30 @@ class DocumentStructureService:
             return True
 
         if stripped.count("{") + stripped.count("}") >= 2:
+            return True
+
+        return False
+
+    def _looks_like_affiliation_line(self, line: str) -> bool:
+        stripped = (line or "").strip()
+        lower = stripped.lower()
+
+        if not stripped:
+            return False
+
+        if "@" in stripped or "orcid" in lower:
+            return True
+
+        if self._contains_affiliation_keyword(stripped):
+            return True
+
+        if re.search(r"\b(email|e-mail|address|addresses)\b", lower):
+            return True
+
+        if re.match(r"^\d+\s+", stripped) and any(
+            re.search(rf"\b{re.escape(token)}\b", lower)
+            for token in ["university", "department", "institute", "lab"]
+        ):
             return True
 
         return False
@@ -958,11 +1198,18 @@ class DocumentStructureService:
     def _clean_section_content(self, text: str) -> str:
         if not text:
             return ""
-
+        
         cleaned_lines = []
         for raw_line in text.splitlines():
             line = raw_line.rstrip()
+            if self._looks_like_affiliation_line(line):
+                continue
             if self._is_noise_line(line):
+                continue
+            if "|" in line:
+                line = re.sub(r"\|", " ", line)
+
+            if re.search(r"^\s*Table\s+\d+", line, flags=re.IGNORECASE):
                 continue
             cleaned_lines.append(line)
 
@@ -981,6 +1228,9 @@ class DocumentStructureService:
         text = re.sub(r"([a-zA-Z0-9])\n([a-z])", r"\1 \2", text)
         text = re.sub(r"\s{2,}", " ", text)
         text = re.sub(r"\{\{.*?\}\}", "", text)
+        text = re.sub(r"\|[^|\n]*\|", " ", text)
+        text = re.sub(r"Table\s+\d+[:\.]?.*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"<!--.*?-->", "", text)
         return text.strip()
 
     def _should_drop_chunk(self, text: str, min_chunk_chars: int = 80) -> bool:
@@ -991,8 +1241,10 @@ class DocumentStructureService:
             return True
         if len(stripped) < min_chunk_chars:
             if not re.search(r"[A-Za-z]{20,}", stripped):
-                return True
-
+                if not self._is_definition_sentence(stripped):
+                    return True
+        if len(stripped.split()) < 5 and not self._is_definition_sentence(stripped):
+            return True
         alpha_count = sum(1 for c in stripped if c.isalpha())
         punct_like = sum(1 for c in stripped if c in "{}[]|:_<>/")
         if len(stripped) > 0 and punct_like / len(stripped) > 0.25 and alpha_count < 40:
@@ -1017,3 +1269,45 @@ class DocumentStructureService:
             return min(default, 1800)
 
         return default
+    
+    def _split_into_semantic_units(self, text: str, max_chars: int = 400) -> List[str]:
+        text = self._normalize_chunk_text(text)
+        if not text:
+            return []
+
+        sentences = [
+            sent.strip()
+            for sent in re.split(r'(?<=[.!?])\s+', text)
+            if sent.strip()
+        ]
+        if not sentences:
+            return [text]
+
+        groups = []
+        current = []
+
+        for sent in sentences:
+            if len(sent) > max_chars:
+                if current:
+                    groups.append(" ".join(current))
+                    current = []
+                groups.append(sent)
+                continue
+
+            if len(" ".join(current + [sent])) <= max_chars:
+                current.append(sent)
+            else:
+                if current:
+                    groups.append(" ".join(current))
+                current = [sent]
+
+        if current:
+            groups.append(" ".join(current))
+
+        return groups
+    
+    def _is_definition_sentence(self, sent: str) -> bool:
+        return bool(re.search(
+            r"\b(is a|are a|refers to|we propose|we present)\b",
+            sent.lower()
+        ))
