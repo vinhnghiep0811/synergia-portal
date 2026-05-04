@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { PaperList } from "../components/PaperList.jsx";
-import { getPapers } from "../services/paperApi.js";
+import { getPapers, getPaperDetail } from "../services/paperApi.js";
 import { AppHeader } from "../components/AppHeader.jsx";
 
 function bytesToMB(bytes) {
@@ -39,6 +39,7 @@ export function PaperDashboard() {
   const navigate = useNavigate();
   const location = useLocation();
   const [successMessage, setSuccessMessage] = useState("");
+  const [lastUpdateTime, setLastUpdateTime] = useState(Date.now());
 
   // ====================== LOAD PAPERS ======================
   const loadPapers = async () => {
@@ -82,9 +83,15 @@ export function PaperDashboard() {
           return detailed || paper;
         });
 
-        if (isMounted) setPapers(finalPapers);
+        if (isMounted) {
+          setPapers(finalPapers);
+          setLastUpdateTime(Date.now());
+        }
       } else {
-        if (isMounted) setPapers(mappedPapers);
+        if (isMounted) {
+          setPapers(mappedPapers);
+          setLastUpdateTime(Date.now());
+        }
       }
     } catch (error) {
       if (isMounted) setListError(error.message || "Không thể tải danh sách paper");
@@ -145,7 +152,7 @@ export function PaperDashboard() {
           ) : listError ? (
             <div className="card" style={{ padding: "1rem", color: "#dc2626" }}>{listError}</div>
           ) : (
-            <PaperList papers={papers} />
+            <PaperList papers={papers} lastUpdateTime={lastUpdateTime} />
           )}
         </div>
       </main>

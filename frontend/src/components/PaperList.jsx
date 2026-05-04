@@ -14,9 +14,26 @@ const actionButtonStyle = {
   cursor: "pointer",
 };
 
-export function PaperList({ papers, selectedId }) {
+export function PaperList({ papers, selectedId, lastUpdateTime }) {
   const [searchText, setSearchText] = useState("");
-  const [activeTab, setActiveTab] = useState("pending"); // "pending", "processing", or "processed"
+
+  // Load activeTab from localStorage on mount, default to "pending"
+  const [activeTab, setActiveTabState] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('paperList_activeTab');
+      return saved || "pending";
+    }
+    return "pending";
+  });
+
+  // Wrapper to update both state and localStorage
+  const setActiveTab = (tab) => {
+    setActiveTabState(tab);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('paperList_activeTab', tab);
+    }
+  };
+
   const [pendingPage, setPendingPage] = useState(1);
   const [processingPage, setProcessingPage] = useState(1);
   const [processedPage, setProcessedPage] = useState(1);
@@ -28,7 +45,15 @@ export function PaperList({ papers, selectedId }) {
   const itemsPerPage = 5;
   const navigate = useNavigate();
 
-  // Auto-refresh every 5 seconds for real-time updates
+  // Sync with parent component's lastUpdateTime prop for coordinated real-time updates
+  useEffect(() => {
+    if (lastUpdateTime) {
+      setLastUpdate(lastUpdateTime);
+      console.log("🔄 PaperList synced with parent update:", new Date(lastUpdateTime).toLocaleTimeString());
+    }
+  }, [lastUpdateTime]);
+
+  // Auto-refresh every 5 seconds for real-time updates as backup
   useEffect(() => {
     const interval = setInterval(() => {
       setLastUpdate(Date.now());
@@ -121,6 +146,48 @@ export function PaperList({ papers, selectedId }) {
       fetchPapersDetails();
     }
   }, [papers, lastUpdate]); // Add lastUpdate to trigger re-fetch
+
+  // Intelligent tab switching: when current tab becomes empty, switch to tab with papers
+  useEffect(() => {
+    if (enhancedPapers.length === 0) return;
+
+    // Count papers in each tab
+    const pendingCount = enhancedPapers.filter(p => p.processing_status === "pending").length;
+    const processingCount = enhancedPapers.filter(p =>
+      p.processing_status === "processing" ||
+      p.processing_status === "parsing" ||
+      p.processing_status === "enriching" ||
+      p.processing_status === "llm_extracting" ||
+      p.processing_status === "parse_queued" ||
+      p.processing_status === "canonicalized"
+    ).length;
+    const processedCount = enhancedPapers.filter(p =>
+      p.processing_status === "processed" ||
+      p.processing_status === "completed" ||
+      p.processing_status === "failed" ||
+      p.processing_status === "duplicate_detected"
+    ).length;
+
+    // Check if current tab is empty
+    const currentTabEmpty =
+      (activeTab === "pending" && pendingCount === 0) ||
+      (activeTab === "processing" && processingCount === 0) ||
+      (activeTab === "processed" && processedCount === 0);
+
+    if (currentTabEmpty) {
+      // Switch to the first tab that has papers, prioritizing processing > pending > processed
+      if (processingCount > 0) {
+        console.log(`🔄 Tab auto-switch: ${activeTab} is empty, switching to "processing" (${processingCount} papers)`);
+        setActiveTab("processing");
+      } else if (pendingCount > 0) {
+        console.log(`🔄 Tab auto-switch: ${activeTab} is empty, switching to "pending" (${pendingCount} papers)`);
+        setActiveTab("pending");
+      } else if (processedCount > 0) {
+        console.log(`🔄 Tab auto-switch: ${activeTab} is empty, switching to "processed" (${processedCount} papers)`);
+        setActiveTab("processed");
+      }
+    }
+  }, [enhancedPapers]); // Run when papers change
 
   function openPaperPdf(event, paperId) {
     event.stopPropagation();
@@ -323,21 +390,72 @@ export function PaperList({ papers, selectedId }) {
     return numbers;
   };
 
+  // Check if any papers are currently being processed for live indicator
+  const hasProcessingPapers = enhancedPapers.some(p =>
+    p.processing_status === "processing" ||
+    p.processing_status === "parsing" ||
+    p.processing_status === "enriching" ||
+    p.processing_status === "llm_extracting"
+  );
+
+  // Format last update time
+  const formatLastUpdate = (timestamp) => {
+    if (!timestamp) return "";
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000); // seconds
+
+    if (diff < 60) return "Vừa cập nhật";
+    if (diff < 3600) return `${Math.floor(diff / 60)} phút trước`;
+    return date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+  };
+
   return (
     <section className="card list-card">
       <header className="card__header card__header--with-actions">
         <div>
-          <h2 className="card__title">Danh sách tài liệu nghiên cứu</h2>
-          <p className="card__subtitle">
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
+            <h2 className="card__title" style={{ margin: 0 }}>Danh sách tài liệu nghiên cứu</h2>
+            {hasProcessingPapers && (
+              <span style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                padding: "0.25rem 0.75rem",
+                backgroundColor: "#dbeafe",
+                color: "#1d4ed8",
+                borderRadius: "999px",
+                fontSize: "0.75rem",
+                fontWeight: "600"
+              }}>
+                <span style={{
+                  width: "6px",
+                  height: "6px",
+                  borderRadius: "50%",
+                  backgroundColor: "#3b82f6",
+                  animation: "pulse 1.5s infinite"
+                }}></span>
+                Đang cập nhật real-time
+              </span>
+            )}
+          </div>
+          <p className="card__subtitle" style={{ margin: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
             Quản lý và theo dõi trạng thái xử lý của các tài liệu học thuật.
+            <span style={{
+              fontSize: "0.75rem",
+              color: "#6b7280",
+              fontStyle: "italic"
+            }}>
+              (Cập nhật: {formatLastUpdate(lastUpdate)})
+            </span>
           </p>
         </div>
         <div className="list-filters">
           <input
             type="search"
             placeholder={
-              activeTab === "pending" 
-                ? "Tìm kiếm theo tên file gốc" 
+              activeTab === "pending"
+                ? "Tìm kiếm theo tên file gốc"
                 : activeTab === "processing"
                 ? "Tìm kiếm theo tiêu đề, DOI"
                 : "Tìm kiếm theo tiêu đề, DOI"
@@ -359,7 +477,7 @@ export function PaperList({ papers, selectedId }) {
         </div>
       </header>
 
-      {/* Tabs */}
+      {/* Tabs with real-time counts */}
       <div className="tabs">
         <button
           className={`tab ${activeTab === "pending" ? "tab--active" : ""}`}
@@ -367,6 +485,28 @@ export function PaperList({ papers, selectedId }) {
         >
           <div className="tab__indicator tab__indicator--pending"></div>
           Đang chờ
+          <span className="tab__badge" style={{
+            marginLeft: "0.5rem",
+            backgroundColor: activeTab === "pending" ? "#f59e0b" : "#e5e7eb",
+            color: activeTab === "pending" ? "#fff" : "#6b7280",
+            padding: "0.125rem 0.5rem",
+            borderRadius: "999px",
+            fontSize: "0.75rem",
+            fontWeight: "600",
+            transition: "all 0.3s ease"
+          }}>
+            {enhancedPapers.filter(p => p.processing_status === "pending").length}
+          </span>
+          {enhancedPapers.some(p => p.processing_status === "pending") && (
+            <span className="tab__live-indicator" style={{
+              marginLeft: "0.5rem",
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              backgroundColor: "#f59e0b",
+              animation: "pulse 2s infinite"
+            }}></span>
+          )}
         </button>
         <button
           className={`tab ${activeTab === "processing" ? "tab--active" : ""}`}
@@ -374,6 +514,40 @@ export function PaperList({ papers, selectedId }) {
         >
           <div className="tab__indicator tab__indicator--processing"></div>
           Đang xử lý
+          <span className="tab__badge" style={{
+            marginLeft: "0.5rem",
+            backgroundColor: activeTab === "processing" ? "#3b82f6" : "#e5e7eb",
+            color: activeTab === "processing" ? "#fff" : "#6b7280",
+            padding: "0.125rem 0.5rem",
+            borderRadius: "999px",
+            fontSize: "0.75rem",
+            fontWeight: "600",
+            transition: "all 0.3s ease"
+          }}>
+            {enhancedPapers.filter(p =>
+              p.processing_status === "processing" ||
+              p.processing_status === "parsing" ||
+              p.processing_status === "enriching" ||
+              p.processing_status === "llm_extracting" ||
+              p.processing_status === "parse_queued" ||
+              p.processing_status === "canonicalized"
+            ).length}
+          </span>
+          {enhancedPapers.some(p =>
+            p.processing_status === "processing" ||
+            p.processing_status === "parsing" ||
+            p.processing_status === "enriching" ||
+            p.processing_status === "llm_extracting"
+          ) && (
+            <span className="tab__live-indicator" style={{
+              marginLeft: "0.5rem",
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              backgroundColor: "#3b82f6",
+              animation: "pulse 1.5s infinite"
+            }}></span>
+          )}
         </button>
         <button
           className={`tab ${activeTab === "processed" ? "tab--active" : ""}`}
@@ -381,8 +555,39 @@ export function PaperList({ papers, selectedId }) {
         >
           <div className="tab__indicator tab__indicator--processed"></div>
           Đã xử lý
+          <span className="tab__badge" style={{
+            marginLeft: "0.5rem",
+            backgroundColor: activeTab === "processed" ? "#10b981" : "#e5e7eb",
+            color: activeTab === "processed" ? "#fff" : "#6b7280",
+            padding: "0.125rem 0.5rem",
+            borderRadius: "999px",
+            fontSize: "0.75rem",
+            fontWeight: "600",
+            transition: "all 0.3s ease"
+          }}>
+            {enhancedPapers.filter(p =>
+              p.processing_status === "processed" ||
+              p.processing_status === "completed" ||
+              p.processing_status === "failed" ||
+              p.processing_status === "duplicate_detected"
+            ).length}
+          </span>
         </button>
       </div>
+
+      {/* Add CSS animation for live indicator */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% {
+            opacity: 1;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.5;
+            transform: scale(1.2);
+          }
+        }
+      `}</style>
 
       {/* Content based on active tab */}
       {activeTab === "pending" && paginatedPending.length > 0 && (
