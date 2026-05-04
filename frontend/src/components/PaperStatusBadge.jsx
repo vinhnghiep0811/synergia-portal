@@ -6,6 +6,8 @@ const STATUS_META = {
   parsed: { label: "Parsed", className: "badge badge--pending" },
   enriched: { label: "Enriched", className: "badge badge--pending" },
   llm_extracting: { label: "LLM Extracting", className: "badge badge--pending" },
+  citation_scoring: { label: "Citation Scoring", className: "badge badge--pending" },
+  citation_scored: { label: "Citation Scored", className: "badge badge--processed" },
   processed: { label: "Processed", className: "badge badge--processed" },
   completed: { label: "Completed", className: "badge badge--processed" },
   duplicate_detected: { label: "Duplicate", className: "badge badge--processed" },

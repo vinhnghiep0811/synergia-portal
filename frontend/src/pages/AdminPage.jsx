@@ -1,5 +1,4 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
 import { AppHeader } from "../components/AppHeader.jsx";
 import { 
   getAdminOverview, 
@@ -31,37 +30,8 @@ export function AdminPage() {
   const papersPageSize = 5;
   const canonicalPageSize = 5;
   const activitiesPageSize = 20;
-  const navigate = useNavigate();
 
-  // Load Overview
-  useEffect(() => {
-    if (activeTab === "overview") {
-      loadOverview();
-    }
-  }, [activeTab]);
-
-  // Load Papers
-  useEffect(() => {
-    if (activeTab === "papers") {
-      loadPapers();
-    }
-  }, [activeTab, papersPage]);
-
-  // Load Canonical Documents
-  useEffect(() => {
-    if (activeTab === "canonical") {
-      loadCanonicalDocuments();
-    }
-  }, [activeTab, canonicalPage]);
-
-  // Load Activities
-  useEffect(() => {
-    if (activeTab === "activities") {
-      loadActivities();
-    }
-  }, [activeTab, activitiesPage]);
-
-  const loadOverview = async () => {
+  const loadOverview = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
@@ -72,9 +42,9 @@ export function AdminPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const loadPapers = async () => {
+  const loadPapers = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
@@ -87,9 +57,9 @@ export function AdminPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [papersPage, papersPageSize]);
 
-  const loadCanonicalDocuments = async () => {
+  const loadCanonicalDocuments = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
@@ -102,9 +72,9 @@ export function AdminPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [canonicalPage, canonicalPageSize]);
 
-  const loadActivities = async () => {
+  const loadActivities = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
@@ -119,7 +89,35 @@ export function AdminPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activitiesPage, activitiesPageSize]);
+
+  // Load Overview
+  useEffect(() => {
+    if (activeTab === "overview") {
+      loadOverview();
+    }
+  }, [activeTab, loadOverview]);
+
+  // Load Papers
+  useEffect(() => {
+    if (activeTab === "papers") {
+      loadPapers();
+    }
+  }, [activeTab, loadPapers]);
+
+  // Load Canonical Documents
+  useEffect(() => {
+    if (activeTab === "canonical") {
+      loadCanonicalDocuments();
+    }
+  }, [activeTab, loadCanonicalDocuments]);
+
+  // Load Activities
+  useEffect(() => {
+    if (activeTab === "activities") {
+      loadActivities();
+    }
+  }, [activeTab, loadActivities]);
 
   const getStatusColor = (status) => {
     const colors = {

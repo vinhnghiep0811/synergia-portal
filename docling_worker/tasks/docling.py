@@ -17,6 +17,10 @@ from app.models.paper_record import PaperRecord
 from app.services.queue_service import QueueService
 from app.services.storage_service import StorageService
 
+# from app.models.document_section import DocumentSection
+# from app.models.document_chunk import DocumentChunk
+# from app.services.document_structure_service import DocumentStructureService
+
 logger = logging.getLogger(__name__)
 
 DOCLING_ARTIFACTS_PATH = os.getenv("DOCLING_ARTIFACTS_PATH")
@@ -107,20 +111,72 @@ def extract_docling_text(paper_id: str) -> None:
         if hasattr(paper, "docling_markdown_storage_path"):
             paper.docling_markdown_storage_path = md_storage_path
 
+        # sections_count = 0
+        # chunks_count = 0
+
+        # if paper.canonical_document_id:
+        #     structure_service = DocumentStructureService()
+
+        #     # Xóa dữ liệu cũ để rebuild
+        #     db.query(DocumentChunk).filter(
+        #         DocumentChunk.canonical_document_id == paper.canonical_document_id
+        #     ).delete(synchronize_session=False)
+
+        #     db.query(DocumentSection).filter(
+        #         DocumentSection.canonical_document_id == paper.canonical_document_id
+        #     ).delete(synchronize_session=False)
+
+        #     # Tạo sections từ markdown
+        #     sections = structure_service.parse_markdown_to_sections(
+        #         canonical_document_id=paper.canonical_document_id,
+        #         markdown=markdown,
+        #     )
+
+        #     if sections:
+        #         db.add_all(sections)
+        #         db.flush()  # cần để mỗi section có id trước khi build chunks
+
+        #         chunks = structure_service.build_chunks_from_sections(
+        #             canonical_document_id=paper.canonical_document_id,
+        #             sections=sections,
+        #         )
+
+        #         if chunks:
+        #             from app.services.embedding_service import EmbeddingService
+        #             embedding_svc = EmbeddingService()
+                    
+        #             # Tạo danh sách các văn bản cần tính vector
+        #             texts_to_embed = [chunk.content for chunk in chunks]
+                    
+        #             # Tính vector nhúng theo lô (batch)
+        #             embeddings = embedding_svc.generate_embeddings(texts_to_embed)
+                    
+        #             # Gán vector vào mỗi chunk
+        #             for chunk, emb in zip(chunks, embeddings):
+        #                 chunk.embedding = emb
+
+        #             db.add_all(chunks)
+
+        #         sections_count = len(sections)
+        #         chunks_count = len(chunks)
+
         db.commit()
 
         logger.info(
-            "[docling] Finished extraction for paper_id=%s, markdown_chars=%s, md_storage_path=%s",
+            "[docling] Finished extraction for paper_id=%s, markdown_chars=%s, md_storage_path=%s, sections=%s, chunks=%s",
             paper_uuid,
             len(markdown),
             md_storage_path,
+            # sections_count,
+            # chunks_count
         )
 
-        # queue_service = QueueService()
+        queue_service = QueueService()
         # queue_service.enqueue_llm_extract(str(paper.canonical_document_id))
         logger.info("[docling] NEW CODE PATH reached for paper_id=%s", paper_uuid)
         enqueued = False
         if paper.canonical_document_id:
+            queue_service.enqueue_build_structure(str(paper.canonical_document_id))
             enqueued = try_enqueue_llm_if_ready(str(paper.canonical_document_id))
 
         logger.info(

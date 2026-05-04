@@ -1,10 +1,7 @@
-import { useEffect, useState, useMemo } from "react";
+import { useMemo } from "react";
 
 export function ProcessingTimeline({ paper }) {
-  const [currentStep, setCurrentStep] = useState(0);
-  const [isProcessing, setIsProcessing] = useState(false);
-
-  // ✅ Tách steps ra useMemo để ổn định reference
+  // Tách steps ra useMemo để ổn định reference
   const steps = useMemo(() => [
     {
       id: 'uploaded',
@@ -21,6 +18,8 @@ export function ProcessingTimeline({ paper }) {
       isCompleted: 
         paper.processing_stage === 'enriching' ||
         paper.processing_stage === 'llm_extracting' ||
+        paper.processing_stage === 'citation_scoring' ||
+        paper.processing_stage === 'citation_scored' ||
         paper.processing_status === 'parsed' ||
         paper.processing_status === 'processed' ||
         paper.processing_status === 'completed' ||  // thêm
@@ -34,6 +33,8 @@ export function ProcessingTimeline({ paper }) {
       description: 'Liên kết với canonical document và làm giàu metadata.',
       isCompleted: 
         paper.processing_stage === 'llm_extracting' ||
+        paper.processing_stage === 'citation_scoring' ||
+        paper.processing_stage === 'citation_scored' ||
         paper.processing_status === 'completed' ||
         paper.processing_status === 'processed' ||
         paper.processing_status === 'enriched' ||
@@ -46,40 +47,66 @@ export function ProcessingTimeline({ paper }) {
       title: 'Trích xuất LLM',
       description: 'Trích xuất metadata nâng cao bằng LLM.',
       isCompleted: 
+        paper.processing_stage === 'citation_scoring' ||
+        paper.processing_stage === 'citation_scored' ||
         paper.processing_status === 'completed' ||
         paper.processing_stage === 'llm_extracted'  ,  
       isActive: paper.processing_stage === 'enriched',
       hasError: paper.processing_status === 'failed' && paper.processing_stage === 'llm_extracting'
+    },
+    {
+      id: 'citation_scoring',
+      title: 'Citation Graph Scoring',
+      description: 'Phân tích trích dẫn theo section/chunk và tính điểm cạnh.',
+      isCompleted:
+        paper.processing_stage === 'citation_scored' ||
+        paper.processing_status === 'completed',
+      isActive:
+        paper.processing_stage === 'citation_scoring' ||
+        paper.processing_stage === 'llm_extracted',
+      hasError:
+        paper.processing_status === 'failed' && paper.processing_stage === 'citation_scoring'
     }
-  ], [paper.processing_stage, paper.processing_status]); // chỉ depend vào các field thật sự cần
+  ], [paper.processing_stage, paper.processing_status]);
 
-  useEffect(() => {
-    if (!paper) return;
+  const { currentStep, isProcessing } = useMemo(() => {
+    if (!paper) {
+      return { currentStep: 0, isProcessing: false };
+    }
 
     if (paper.processing_status === 'failed') {
-      setIsProcessing(false);
-      const failedIndex = steps.findIndex(s => s.hasError);
-      if (failedIndex !== -1) setCurrentStep(failedIndex);
-      return;
+      const failedIndex = steps.findIndex((step) => step.hasError);
+      return {
+        currentStep: failedIndex !== -1 ? failedIndex : 0,
+        isProcessing: false,
+      };
     }
 
     if (paper.processing_status === 'completed') {
-      setIsProcessing(false);
-      setCurrentStep(steps.length); // tất cả hoàn thành
-      return;
+      return {
+        currentStep: steps.length,
+        isProcessing: false,
+      };
     }
 
-    // Đang xử lý
-    setIsProcessing(true);
-    const activeIndex = steps.findIndex(step => step.isActive);
+    const activeIndex = steps.findIndex((step) => step.isActive);
     if (activeIndex !== -1) {
-      setCurrentStep(activeIndex);
-    } else {
-      // fallback: tìm step cuối cùng đã hoàn thành
-      const lastCompleted = steps.findLastIndex(step => step.isCompleted);
-      setCurrentStep(lastCompleted >= 0 ? lastCompleted + 1 : 0);
+      return {
+        currentStep: activeIndex,
+        isProcessing: true,
+      };
     }
-  }, [paper, steps]); // giờ steps đã ổn định
+
+    const lastCompleted = steps.reduce(
+      (lastIndex, step, index) => (step.isCompleted ? index : lastIndex),
+      -1
+    );
+
+    return {
+      currentStep: lastCompleted >= 0 ? lastCompleted + 1 : 0,
+      isProcessing: true,
+    };
+  }, [paper, steps]);
 
   return (
     <div className="detail-section">

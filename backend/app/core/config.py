@@ -124,7 +124,7 @@ REFRESH_TOKEN_EXPIRE_DAYS = get_env_int("REFRESH_TOKEN_EXPIRE_DAYS", 30)
 # LLM - Gemini (Week 5)
 # =========================
 LLM_PROVIDER = get_env("LLM_PROVIDER", "gemini")
-
+ 
 GEMINI_API_KEY = get_env("GEMINI_API_KEY", "")
 GEMINI_MODEL = get_env("GEMINI_MODEL", "gemini-2.5-pro")
 
@@ -150,3 +150,8 @@ LLM_TIMEOUT_SECONDS = get_env_int("LLM_TIMEOUT_SECONDS", 60)
 # =========================
 TELEGRAM_BOT_TOKEN = get_env("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = get_env("TELEGRAM_CHAT_ID", "")
+
+RQ_STRUCTURE_QUEUE = get_env("RQ_STRUCTURE_QUEUE", "structure_queue")
+RQ_EMBEDDING_QUEUE = get_env("RQ_EMBEDDING_QUEUE", "embedding_queue")
+
+HF_TOKEN = get_env("HF_TOKEN", "")

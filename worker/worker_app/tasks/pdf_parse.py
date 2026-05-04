@@ -221,7 +221,7 @@ def pdf_parse(paper_id: str) -> None:
         try:
             if not paper.is_duplicate:
                 docling_queue.enqueue(
-                    "tasks.extract_docling_text",
+                    "tasks.docling.extract_docling_text",
                     str(paper.id)
                 )
                 logger.info(

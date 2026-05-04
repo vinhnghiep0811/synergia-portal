@@ -8,6 +8,7 @@ import { PublishConfirmPage } from "./pages/PublishConfirmPage.jsx";
 import { CanonicalDocumentsPage } from "./pages/CanonicalDocumentsPage.jsx";
 import { CanonicalDocumentDetailPage } from "./pages/CanonicalDocumentDetailPage.jsx";
 import { ExtractionRunDetailPage } from "./pages/ExtractionRunDetailPage.jsx";
+import { CitationGraphPage } from "./pages/CitationGraphPage.jsx";
 import { AdminPage } from "./pages/AdminPage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage.jsx";
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/papers/:paperId/publish/confirm" element={<PublishConfirmPage />} />
         <Route path="/canonical" element={<CanonicalDocumentsPage />} />
         <Route path="/canonical/:canonicalId" element={<CanonicalDocumentDetailPage />} />
+        <Route path="/citation-graph" element={<CitationGraphPage />} />
         <Route path="/extraction-runs/:runId" element={<ExtractionRunDetailPage />} />
         <Route path="/admin" element={<AdminPage />} />
       </Route>

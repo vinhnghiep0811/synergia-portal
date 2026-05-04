@@ -8,3 +8,4 @@ minio==7.2.20
 python-dotenv==1.2.2
 pydantic==2.12.5
 typing_extensions==4.15.0
+pgvector

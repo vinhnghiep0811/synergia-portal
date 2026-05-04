@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import { apiClient } from "../services/apiClient";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export function AuthCallbackPage() {

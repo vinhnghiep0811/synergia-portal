@@ -58,4 +58,44 @@ class CanonicalDocument(Base):
         foreign_keys=[latest_extraction_run_id],
         post_update=True,
     )
+
+    document_sections = relationship(
+        "DocumentSection",
+        back_populates="canonical_document",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    document_chunks = relationship(
+        "DocumentChunk",
+        back_populates="canonical_document",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    citation_mentions_source = relationship(
+        "CitationMention",
+        foreign_keys="CitationMention.source_canonical_id",
+        back_populates="source_canonical_document",
+        lazy="selectin",
+    )
+    citation_mentions_target = relationship(
+        "CitationMention",
+        foreign_keys="CitationMention.target_canonical_id",
+        back_populates="target_canonical_document",
+        lazy="selectin",
+    )
+
+    citation_edges_outgoing = relationship(
+        "CitationEdge",
+        foreign_keys="CitationEdge.source_canonical_id",
+        back_populates="source_canonical_document",
+        lazy="selectin",
+    )
+    citation_edges_incoming = relationship(
+        "CitationEdge",
+        foreign_keys="CitationEdge.target_canonical_id",
+        back_populates="target_canonical_document",
+        lazy="selectin",
+    )
     
