@@ -7,7 +7,7 @@ import {
   getCitationEdgeMentions,
   getCitationNetwork,
 } from "../services/citationApi.js";
-import "./CitationGraphPage.css";
+import "../styles/CitationGraphPage.css";
 
 const GRAPH_WIDTH = 1240;
 const GRAPH_HEIGHT = 640;
@@ -528,7 +528,7 @@ export function CitationGraphPage() {
   return (
     <div className="app-shell">
       <AppHeader
-        title="Citation Network"
+        title="Mạng lưới trích dẫn"
         subtitle="Mạng trích dẫn giữa các canonical document với mũi tên thể hiện hướng source tới target."
         showUploadButton={false}
         extraAction={

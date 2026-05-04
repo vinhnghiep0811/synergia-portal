@@ -29,6 +29,7 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
   // Wrapper to update both state and localStorage
   const setActiveTab = (tab) => {
     setActiveTabState(tab);
+    setUserManuallySwitched(true); // Mark that user manually switched
     if (typeof window !== 'undefined') {
       localStorage.setItem('paperList_activeTab', tab);
     }
@@ -37,11 +38,14 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
   const [pendingPage, setPendingPage] = useState(1);
   const [processingPage, setProcessingPage] = useState(1);
   const [processedPage, setProcessedPage] = useState(1);
+  const [processedSubTab, setProcessedSubTab] = useState("all"); // "all" | "drafted" | "published"
   const [pendingSort, setPendingSort] = useState("newest"); // "newest" or "oldest"
   const [processingSort, setProcessingSort] = useState("newest"); // "newest" or "oldest"
   const [processedSort, setProcessedSort] = useState("newest"); // "newest" or "oldest"
   const [enhancedPapers, setEnhancedPapers] = useState([]);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [userManuallySwitched, setUserManuallySwitched] = useState(false);
   const itemsPerPage = 5;
   const navigate = useNavigate();
 
@@ -144,8 +148,10 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
   }, [papers, refreshTick]);
 
   // Intelligent tab switching: when current tab becomes empty, switch to tab with papers
+  // Only auto-switch on initial load, not after user manually switched
   useEffect(() => {
     if (enhancedPapers.length === 0) return;
+    if (userManuallySwitched) return; // Don't auto-switch if user manually switched
 
     // Count papers in each tab
     const pendingCount = enhancedPapers.filter(p => p.processing_status === "pending").length;
@@ -174,16 +180,16 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
       // Switch to the first tab that has papers, prioritizing processing > pending > processed
       if (processingCount > 0) {
         console.log(`🔄 Tab auto-switch: ${activeTab} is empty, switching to "processing" (${processingCount} papers)`);
-        setActiveTab("processing");
+        setActiveTabState("processing"); // Use setActiveTabState to avoid marking as manual switch
       } else if (pendingCount > 0) {
         console.log(`🔄 Tab auto-switch: ${activeTab} is empty, switching to "pending" (${pendingCount} papers)`);
-        setActiveTab("pending");
+        setActiveTabState("pending");
       } else if (processedCount > 0) {
         console.log(`🔄 Tab auto-switch: ${activeTab} is empty, switching to "processed" (${processedCount} papers)`);
-        setActiveTab("processed");
+        setActiveTabState("processed");
       }
     }
-  }, [enhancedPapers]); // Run when papers change
+  }, [enhancedPapers, userManuallySwitched]); // Run when papers change
 
   function openPaperPdf(event, paperId) {
     event.stopPropagation();
@@ -303,16 +309,22 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
   }, [sortedFiltered, processingPage]);
 
   const paginatedProcessed = useMemo(() => {
-    const processed = sortedFiltered.filter(p => 
+    let processed = sortedFiltered.filter(p => 
       p.processing_status === "processed" || 
       p.processing_status === "completed" || 
       p.processing_status === "failed" ||
       p.processing_status === "duplicate_detected"
     );
+    // Filter by publication_status sub-tab
+    if (processedSubTab === "drafted") {
+      processed = processed.filter(p => p.publication_status === "draft" || !p.publication_status);
+    } else if (processedSubTab === "published") {
+      processed = processed.filter(p => p.publication_status === "published");
+    }
     const startIndex = (processedPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
     return processed.slice(startIndex, endIndex);
-  }, [sortedFiltered, processedPage]);
+  }, [sortedFiltered, processedPage, processedSubTab]);
 
   const totalPendingPages = useMemo(() => {
     const pending = sortedFiltered.filter(p => 
@@ -334,14 +346,20 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
   }, [sortedFiltered]);
 
   const totalProcessedPages = useMemo(() => {
-    const processed = sortedFiltered.filter(p => 
+    let processed = sortedFiltered.filter(p => 
       p.processing_status === "processed" || 
       p.processing_status === "completed" || 
       p.processing_status === "failed" ||
       p.processing_status === "duplicate_detected"
     );
+    // Filter by publication_status sub-tab
+    if (processedSubTab === "drafted") {
+      processed = processed.filter(p => p.publication_status === "draft" || !p.publication_status);
+    } else if (processedSubTab === "published") {
+      processed = processed.filter(p => p.publication_status === "published");
+    }
     return Math.ceil(processed.length / itemsPerPage);
-  }, [sortedFiltered]);
+  }, [sortedFiltered, processedSubTab]);
 
   // Generate pagination numbers with ellipsis
   const generatePaginationNumbers = (currentPage, totalPages) => {
@@ -659,11 +677,10 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
             <table className="paper-table">
               <thead>
                 <tr>
-                  <th>Mã</th>
                   <th>Tệp</th>
                   <th>Dung lượng</th>
                   <th>Tải lên</th>
-                  <th>Canonical</th>
+                  <th>Tài liệu chuẩn hóa</th>
                   <th>Chi tiết</th>
                   <th>Xem PDF</th>
                 </tr>
@@ -680,9 +697,6 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
                     style={{ cursor: "pointer" }}
                     onClick={() => navigate(`/papers/${paper.id}`)}
                   >
-                    <td>
-                      <div className="simple-list-id">{paper.id}</div>
-                    </td>
                     <td className="paper-title-cell" style={{ maxWidth: "250px", wordWrap: "break-word", whiteSpace: "normal", overflow: "hidden", textOverflow: "ellipsis" }}>
                       <div className="paper-title-main" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {paper.originalFilename || paper.filename || "Unknown file"}
@@ -894,11 +908,10 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
             <table className="paper-table">
               <thead>
                 <tr>
-                  <th>Mã</th>
                   <th>Tiêu đề</th>
                   <th>Trạng thái</th>
                   <th>Tải lên</th>
-                  <th>Canonical</th>
+                  <th>Tài liệu chuẩn hóa</th>
                   <th>Chi tiết</th>
                   <th>Xem PDF</th>
                 </tr>
@@ -915,9 +928,6 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
                     style={{ cursor: "pointer" }}
                     onClick={() => navigate(`/papers/${paper.id}`)}
                   >
-                    <td>
-                      <div className="simple-list-id">{paper.id}</div>
-                    </td>
                     <td className="paper-title-cell" style={{ maxWidth: "300px", wordWrap: "break-word", whiteSpace: "normal", overflow: "hidden", textOverflow: "ellipsis" }}>
                       <div className="paper-title-main" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {paper.detectedTitle || paper.title || paper.originalFilename || paper.filename || "Không có tiêu đề"}
@@ -1123,15 +1133,132 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
             </div>
           </div>
 
+          {/* Sub-tabs for publication status */}
+          <div style={{
+            display: "flex",
+            gap: "0.5rem",
+            marginBottom: "1rem",
+            padding: "0.5rem",
+            backgroundColor: "#f9fafb",
+            borderRadius: "8px",
+          }}>
+            <button
+              onClick={() => {
+                setProcessedSubTab("all");
+                setProcessedPage(1);
+              }}
+              style={{
+                padding: "0.5rem 1rem",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: processedSubTab === "all" ? "#fff" : "transparent",
+                color: processedSubTab === "all" ? "#374151" : "#6b7280",
+                fontWeight: processedSubTab === "all" ? "600" : "400",
+                fontSize: "0.875rem",
+                cursor: "pointer",
+                boxShadow: processedSubTab === "all" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                transition: "all 0.2s ease",
+              }}
+            >
+              Tất cả
+              <span style={{
+                marginLeft: "0.5rem",
+                padding: "0.125rem 0.375rem",
+                backgroundColor: "#e5e7eb",
+                color: "#374151",
+                borderRadius: "999px",
+                fontSize: "0.75rem",
+              }}>
+                {sortedFiltered.filter(p => 
+                  (p.processing_status === "processed" || 
+                   p.processing_status === "completed" || 
+                   p.processing_status === "failed" ||
+                   p.processing_status === "duplicate_detected")
+                ).length}
+              </span>
+            </button>
+            <button
+              onClick={() => {
+                setProcessedSubTab("drafted");
+                setProcessedPage(1);
+              }}
+              style={{
+                padding: "0.5rem 1rem",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: processedSubTab === "drafted" ? "#fff" : "transparent",
+                color: processedSubTab === "drafted" ? "#374151" : "#6b7280",
+                fontWeight: processedSubTab === "drafted" ? "600" : "400",
+                fontSize: "0.875rem",
+                cursor: "pointer",
+                boxShadow: processedSubTab === "drafted" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                transition: "all 0.2s ease",
+              }}
+            >
+              Chưa xuất bản 
+              <span style={{
+                marginLeft: "0.5rem",
+                padding: "0.125rem 0.375rem",
+                backgroundColor: "#fef3c7",
+                color: "#92400e",
+                borderRadius: "999px",
+                fontSize: "0.75rem",
+              }}>
+                {sortedFiltered.filter(p => 
+                  (p.processing_status === "processed" || 
+                   p.processing_status === "completed" || 
+                   p.processing_status === "failed" ||
+                   p.processing_status === "duplicate_detected") &&
+                  (p.publication_status === "draft" || !p.publication_status)
+                ).length}
+              </span>
+            </button>
+            <button
+              onClick={() => {
+                setProcessedSubTab("published");
+                setProcessedPage(1);
+              }}
+              style={{
+                padding: "0.5rem 1rem",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: processedSubTab === "published" ? "#fff" : "transparent",
+                color: processedSubTab === "published" ? "#374151" : "#6b7280",
+                fontWeight: processedSubTab === "published" ? "600" : "400",
+                fontSize: "0.875rem",
+                cursor: "pointer",
+                boxShadow: processedSubTab === "published" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                transition: "all 0.2s ease",
+              }}
+            >
+              Đã xuất bản
+              <span style={{
+                marginLeft: "0.5rem",
+                padding: "0.125rem 0.375rem",
+                backgroundColor: "#d1fae5",
+                color: "#065f46",
+                borderRadius: "999px",
+                fontSize: "0.75rem",
+              }}>
+                {sortedFiltered.filter(p => 
+                  (p.processing_status === "processed" || 
+                   p.processing_status === "completed" || 
+                   p.processing_status === "failed" ||
+                   p.processing_status === "duplicate_detected") &&
+                  p.publication_status === "published"
+                ).length}
+              </span>
+            </button>
+          </div>
+
           <div className="table-wrapper">
             <table className="paper-table">
               <thead>
                 <tr>
-                  <th>Mã</th>
                   <th>Tiêu đề</th>
-                  <th>Trạng thái</th>
-                  <th>Năm</th>
-                  <th>Canonical</th>
+                  <th>Trạng thái xử lý</th>
+                  <th>Trạng thái xuất bản</th>
+                  <th>Tài liệu chuẩn hóa</th>
                   <th>Chi tiết</th>
                   <th>Xem PDF</th>
                 </tr>
@@ -1148,9 +1275,6 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
                     style={{ cursor: "pointer" }}
                     onClick={() => navigate(`/papers/${paper.id}`)}
                   >
-                    <td>
-                      <div className="simple-list-id">{paper.id}</div>
-                    </td>
                     <td className="paper-title-cell" style={{ maxWidth: "300px", wordWrap: "break-word", whiteSpace: "normal", overflow: "hidden", textOverflow: "ellipsis" }}>
                       <div className="paper-title-main" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {paper.detected_title || paper.title || paper.originalFilename || paper.filename || "Không có tiêu đề"}
@@ -1160,7 +1284,28 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
                     <td>
                       <PaperStatusBadge status={paper.processing_status} />
                     </td>
-                    <td>{paper.year || "-"}</td>
+                    <td>
+                      <span style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "0.375rem",
+                        padding: "0.25rem 0.75rem",
+                        backgroundColor: paper.publication_status === "published" ? "#d1fae5" : "#fef3c7",
+                        color: paper.publication_status === "published" ? "#065f46" : "#92400e",
+                        borderRadius: "999px",
+                        fontSize: "0.75rem",
+                        fontWeight: "600",
+                        textTransform: "capitalize",
+                      }}>
+                        <span style={{
+                          width: "6px",
+                          height: "6px",
+                          borderRadius: "50%",
+                          backgroundColor: paper.publication_status === "published" ? "#10b981" : "#f59e0b",
+                        }} />
+                        {paper.publication_status === "published" ? "Published" : "Drafted"}
+                      </span>
+                    </td>
                     <td>
                       <CanonicalLink paperId={paper.id} />
                     </td>
@@ -1245,15 +1390,15 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
         <div style={{ 
           padding: "3rem", 
           textAlign: "center", 
-          backgroundColor: "#f0fdf4",
+          backgroundColor: processedSubTab === "published" ? "#f0fdf4" : processedSubTab === "drafted" ? "#fffbeb" : "#f0fdf4",
           borderRadius: "8px",
-          border: "1px solid #bbf7d0",
+          border: `1px solid ${processedSubTab === "published" ? "#bbf7d0" : processedSubTab === "drafted" ? "#fde68a" : "#bbf7d0"}`,
           marginBottom: "2rem"
         }}>
           <div style={{
             width: "48px",
             height: "48px",
-            backgroundColor: "#22c55e",
+            backgroundColor: processedSubTab === "published" ? "#22c55e" : processedSubTab === "drafted" ? "#f59e0b" : "#22c55e",
             borderRadius: "50%",
             display: "flex",
             alignItems: "center",
@@ -1262,22 +1407,30 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
             fontSize: "1.5rem",
             color: "white"
           }}>
-            ✅
+            {processedSubTab === "published" ? "✅" : processedSubTab === "drafted" ? "📝" : "✅"}
           </div>
           <h3 style={{
             fontSize: "1.1rem",
             fontWeight: "600",
-            color: "#166534",
+            color: processedSubTab === "published" ? "#166534" : processedSubTab === "drafted" ? "#92400e" : "#166534",
             margin: "0 0 0.5rem"
           }}>
-            Không có tài liệu nào đã xử lý
+            {processedSubTab === "published" 
+              ? "Không có tài liệu nào đã publish" 
+              : processedSubTab === "drafted" 
+                ? "Không có tài liệu nào ở trạng thái draft" 
+                : "Không có tài liệu nào đã xử lý"}
           </h3>
           <p style={{
             fontSize: "0.9rem",
-            color: "#15803d",
+            color: processedSubTab === "published" ? "#15803d" : processedSubTab === "drafted" ? "#b45309" : "#15803d",
             margin: 0
           }}>
-            Chưa có tài liệu nào được xử lý hoàn tất. Hãy tải lên tài liệu để bắt đầu xử lý.
+            {processedSubTab === "published" 
+              ? "Chưa có tài liệu nào được publish. Hãy publish tài liệu từ trạng thái draft." 
+              : processedSubTab === "drafted" 
+                ? "Tất cả tài liệu đã xử lý đều đã được publish hoặc chưa có tài liệu nào." 
+                : "Chưa có tài liệu nào được xử lý hoàn tất. Hãy tải lên tài liệu để bắt đầu xử lý."}
           </p>
         </div>
       )}
