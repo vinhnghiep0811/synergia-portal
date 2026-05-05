@@ -1059,7 +1059,7 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
         </div>
       )}
 
-      {activeTab === "processed" && paginatedProcessed.length > 0 && (
+      {activeTab === "processed"  && (
         <div>
           <div
             style={{

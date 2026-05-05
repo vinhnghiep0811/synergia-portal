@@ -11,6 +11,7 @@ export function SemanticSearchPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
+  const [expandedEvidence, setExpandedEvidence] = useState({});
   const navigate = useNavigate();
 
   const handleSearch = async (e) => {
@@ -39,6 +40,14 @@ export function SemanticSearchPage() {
     setResults([]);
     setError("");
     setHasSearched(false);
+    setExpandedEvidence({});
+  };
+
+  const toggleEvidence = (index) => {
+    setExpandedEvidence(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }));
   };
 
   return (
@@ -176,6 +185,7 @@ export function SemanticSearchPage() {
                           <tr>
                             <th style={{ width: "60px" }}>#</th>
                             <th>Tiêu đề</th>
+                            <th style={{ width: "450px" }}>Bằng chứng</th>
                             <th>Độ tương đồng</th>
                             <th>Chi tiết</th>
                           </tr>
@@ -222,6 +232,29 @@ export function SemanticSearchPage() {
                                     {result.venue}
                                   </div>
                                 )}
+                              </td>
+                              <td>
+                                <div className="semantic-search-evidence">
+                                  <div
+                                    className={`semantic-search-evidence-content ${
+                                      expandedEvidence[index] ? 'expanded' : ''
+                                    }`}
+                                    title={result.content || "Không có evidence"}
+                                  >
+                                    {result.content || "Không có evidence"}
+                                  </div>
+
+                                  {result.content && result.content.length > 180 && (
+                                    <button
+                                      onClick={() => toggleEvidence(index)}
+                                      className={`semantic-search-evidence-toggle ${
+                                        expandedEvidence[index] ? 'expanded' : ''
+                                      }`}
+                                    >
+                                      {expandedEvidence[index] ? 'Thu gọn' : 'Xem thêm'}
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                               <td>
                                 <span
