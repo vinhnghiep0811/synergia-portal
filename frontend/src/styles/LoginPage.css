@@ -1,0 +1,185 @@
+/* LoginPage responsive styles */
+.login-container {
+  min-height: 100vh;
+  background: linear-gradient(to bottom, #f9fafb, #eef2ff);
+}
+
+.login-header {
+  height: 80px;
+  display: flex;
+  align-items: center;
+  padding: 0 2rem;
+}
+
+.login-main {
+  display: flex;
+  justify-content: center;
+  padding: 60px 1rem 0;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 2.5rem;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.08);
+  text-align: center;
+}
+
+.login-logo {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 1.5rem;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.login-title {
+  font-size: 1.4rem;
+  margin-bottom: 0.5rem;
+  color: #1f2937;
+}
+
+.login-subtitle {
+  font-size: 0.95rem;
+  color: #6b7280;
+  margin-bottom: 1.8rem;
+  line-height: 1.6;
+}
+
+.login-highlight {
+  color: #4f46e5;
+  font-weight: 500;
+}
+
+.login-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  padding: 0.8rem;
+  border-radius: 8px;
+  margin-bottom: 1.2rem;
+  font-size: 0.85rem;
+}
+
+.login-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  padding: 0.9rem;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+  text-decoration: none;
+  color: #1f2937;
+  min-height: 44px;
+}
+
+.login-button:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.login-footer {
+  margin-top: 1.8rem;
+  font-size: 0.8rem;
+  color: #9ca3af;
+}
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  .login-header {
+    height: 60px;
+    padding: 0 1rem;
+  }
+
+  .login-main {
+    padding: 40px 0.75rem 0;
+  }
+
+  .login-card {
+    padding: 2rem 1.5rem;
+    border-radius: 12px;
+  }
+
+  .login-logo {
+    width: 60px;
+    height: 60px;
+    font-size: 1.5rem;
+    margin-bottom: 1.2rem;
+  }
+
+  .login-title {
+    font-size: 1.25rem;
+  }
+
+  .login-subtitle {
+    font-size: 0.9rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .login-button {
+    padding: 0.75rem;
+    font-size: 0.95rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .login-header {
+    height: 50px;
+    padding: 0 0.75rem;
+  }
+
+  .login-main {
+    padding: 30px 0.5rem 0;
+  }
+
+  .login-card {
+    padding: 1.5rem 1rem;
+    border-radius: 8px;
+  }
+
+  .login-logo {
+    width: 50px;
+    height: 50px;
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
+  }
+
+  .login-title {
+    font-size: 1.1rem;
+  }
+
+  .login-subtitle {
+    font-size: 0.85rem;
+    margin-bottom: 1.2rem;
+    line-height: 1.5;
+  }
+
+  .login-error {
+    padding: 0.6rem;
+    font-size: 0.8rem;
+  }
+
+  .login-button {
+    padding: 0.6rem;
+    font-size: 0.9rem;
+    gap: 0.5rem;
+  }
+
+  .login-footer {
+    font-size: 0.75rem;
+    margin-top: 1.5rem;
+  }
+}

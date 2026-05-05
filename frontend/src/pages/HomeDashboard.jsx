@@ -30,7 +30,24 @@ export function HomeDashboard() {
               Xem danh sách các canonical documents, DOI, và số lượng papers liên quan.
             </p>
           </section>
-
+          <section
+            className="card list-card home-card"
+            style={{ cursor: "pointer" }}
+            onClick={() => navigate("/semantic-search")}
+          >
+            <header className="card__header">
+              <div>
+                <h2 className="card__title">Tìm kiếm ngữ nghĩa</h2>
+                <p className="card__subtitle">
+                  Tìm kiếm tài liệu dựa trên ý nghĩa ngữ cảnh thay vì từ khóa.
+                </p>
+              </div>
+            </header>
+            <p style={{ fontSize: "0.85rem", color: "#4b5563" }}>
+              Sử dụng AI để tìm các tài liệu liên quan theo ngữ nghĩa, hiển thị
+              độ tương đồng và xếp hạng kết quả.
+            </p>
+          </section>
           <section className="card stats-card">
             <header className="card__header">
               <div>
@@ -89,7 +106,7 @@ export function HomeDashboard() {
           >
             <header className="card__header">
               <div>
-                <h2 className="card__title">Citation Network</h2>
+                <h2 className="card__title">Mạng lưới trích dẫn </h2>
                 <p className="card__subtitle">
                   Quan sát trực quan hướng trích dẫn giữa các tài liệu trong kho.
                 </p>
