@@ -7,18 +7,100 @@
 .citation-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 1rem;
   align-items: flex-end;
+  padding: 1rem;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
 }
 
 .citation-controls .form-label {
-  min-width: 130px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 140px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.citation-controls .form-label input[type="number"] {
+  padding: 0.6rem 0.75rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #1f2937;
+  background: #ffffff;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.citation-controls .form-label input[type="number"]:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+.citation-controls .form-label select {
+  padding: 0.6rem 0.75rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #1f2937;
+  background: #ffffff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.citation-controls .form-label select:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+.citation-controls .form-label select:hover {
+  border-color: #cbd5e1;
 }
 
 .citation-controls__actions {
   display: flex;
   gap: 0.5rem;
   margin-left: auto;
+}
+
+.citation-controls__actions .btn {
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  border: none;
+  cursor: pointer;
+}
+
+.citation-controls__actions .btn--primary {
+  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  color: white;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
+}
+
+.citation-controls__actions .btn--primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.4);
+}
+
+.citation-controls__actions .btn--secondary {
+  background: #ffffff;
+  color: #4b5563;
+  border: 1px solid #d1d5db;
+}
+
+.citation-controls__actions .btn--secondary:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
 }
 
 .citation-notice {

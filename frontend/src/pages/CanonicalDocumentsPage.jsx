@@ -221,7 +221,6 @@ export function CanonicalDocumentsPage() {
                 <table className="paper-table">
                   <thead>
                     <tr>
-                      <th>ID</th>
                       <th>Tiêu đề</th>
                       <th>Venue</th>
                       <th>DOI</th>
@@ -233,9 +232,6 @@ export function CanonicalDocumentsPage() {
                   <tbody>
                     {paginatedDocuments.map((doc) => (
                       <tr key={doc.id} className="paper-row">
-                        <td>
-                          <div className="simple-list-id">{doc.id}</div>
-                        </td>
                         <td className="paper-title-cell">
                           <div className="paper-title-main">
                             {doc.title || "Không có tiêu đề"}

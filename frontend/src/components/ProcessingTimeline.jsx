@@ -51,7 +51,7 @@ export function ProcessingTimeline({ paper }) {
         paper.processing_stage === 'citation_scored' ||
         paper.processing_status === 'completed' ||
         paper.processing_stage === 'llm_extracted'  ,  
-      isActive: paper.processing_stage === 'llm_extracting' || paper.processing_stage === 'enriched',
+      isActive: paper.processing_stage === 'enriched',
       hasError: paper.processing_status === 'failed' && paper.processing_stage === 'llm_extracting'
     },
     {

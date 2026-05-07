@@ -7,7 +7,7 @@ import {
   getCitationEdgeMentions,
   getCitationNetwork,
 } from "../services/citationApi.js";
-import "./CitationGraphPage.css";
+import "../styles/CitationGraphPage.css";
 
 const GRAPH_WIDTH = 1240;
 const GRAPH_HEIGHT = 640;
@@ -528,7 +528,7 @@ export function CitationGraphPage() {
   return (
     <div className="app-shell">
       <AppHeader
-        title="Citation Network"
+        title="Mạng lưới trích dẫn"
         subtitle="Mạng trích dẫn giữa các canonical document với mũi tên thể hiện hướng source tới target."
         showUploadButton={false}
         extraAction={
@@ -541,71 +541,93 @@ export function CitationGraphPage() {
       <main className="app-main app-main--papers">
         <div className="app-main__full">
           <section className="card">
-            <div className="card__header card__header--with-actions">
-              <div>
-                <h2 className="card__title">Bảng điều khiển mạng trích dẫn</h2>
-                <p className="card__subtitle">
-                  Chọn ngưỡng điểm, xem cạnh trích dẫn, và kích hoạt global rescore ngay tại đây.
-                </p>
-              </div>
-            </div>
+  <div className="card__header card__header--with-actions">
+    <div>
+      <h2 className="card__title">Bảng điều khiển mạng trích dẫn</h2>
+      <p className="card__subtitle">
+        Điều chỉnh ngưỡng và giới hạn cạnh • Thực hiện Global Rescore
+      </p>
+    </div>
+  </div>
 
-            <div className="citation-controls">
-              <label className="form-label">
-                Điểm cạnh tối thiểu
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={minScore}
-                  onChange={(event) => setMinScore(Math.max(0, Math.min(1, toNumber(event.target.value))))}
-                />
-              </label>
+  <div className="citation-controls">
+    <div className="citation-control-group">
+      <label className="form-label">
+        Điểm cạnh tối thiểu
+        <input
+          type="number"
+          min="0"
+          max="1"
+          step="0.05"
+          value={minScore}
+          onChange={(event) => setMinScore(Math.max(0, Math.min(1, toNumber(event.target.value))))}
+          className="citation-input"
+        />
+      </label>
 
-              <label className="form-label">
-                Số cạnh tối đa
-                <select
-                  value={edgeLimit}
-                  onChange={(event) => setEdgeLimit(Number(event.target.value) || 300)}
-                >
-                  <option value={120}>120</option>
-                  <option value={200}>200</option>
-                  <option value={300}>300</option>
-                  <option value={500}>500</option>
-                  <option value={800}>800</option>
-                </select>
-              </label>
+      <label className="form-label">
+        Số cạnh tối đa
+        <select
+          value={edgeLimit}
+          onChange={(event) => setEdgeLimit(Number(event.target.value) || 300)}
+          className="citation-select"
+        >
+          <option value={120}>120 cạnh</option>
+          <option value={200}>200 cạnh</option>
+          <option value={300}>300 cạnh</option>
+          <option value={500}>500 cạnh</option>
+          <option value={800}>800 cạnh</option>
+        </select>
+      </label>
+    </div>
 
-              <div className="citation-controls__actions">
-                <button className="btn btn--secondary" onClick={() => loadNetwork()} disabled={loading}>
-                  {loading ? "Đang tải..." : "Làm mới mạng"}
-                </button>
-                <button
-                  className="btn btn--primary"
-                  onClick={handleRescore}
-                  disabled={rescoreBusy || rescoreTracking}
-                >
-                  {rescoreBusy
-                    ? "Đang enqueue..."
-                    : rescoreTracking
-                      ? "Đang chạy rescore..."
-                      : "Global Rescore"}
-                </button>
-              </div>
-            </div>
+    <div className="citation-controls__actions">
+      <button 
+        className="btn btn--secondary" 
+        onClick={() => loadNetwork()} 
+        disabled={loading}
+      >
+        {loading ? "Đang tải..." : "⟳ Làm mới mạng"}
+      </button>
+      
+      <button
+        className="btn btn--primary"
+        onClick={handleRescore}
+        disabled={rescoreBusy || rescoreTracking}
+      >
+        {rescoreBusy
+          ? "Đang enqueue..."
+          : rescoreTracking
+            ? "Đang chạy rescore..."
+            : "🚀 Global Rescore"}
+      </button>
+    </div>
+  </div>
 
-            <div className="citation-legend" style={{ marginTop: "0.8rem" }}>
-              <span>Dữ liệu cập nhật lần cuối: {formatDateTime(lastLoadedAt)}</span>
-            </div>
+  {/* Last updated */}
+  <div className="citation-last-updated">
+    Dữ liệu cập nhật lần cuối: <strong>{formatDateTime(lastLoadedAt)}</strong>
+  </div>
 
-            {rescoreMessage && <div className="citation-notice">{rescoreMessage}</div>}
-            {rescoreTracking && rescoreTrackingMessage && (
-              <div className="citation-notice citation-notice--pending">{rescoreTrackingMessage}</div>
-            )}
-            {rescoreError && <div className="citation-notice citation-notice--error">{rescoreError}</div>}
-            {error && <div className="citation-notice citation-notice--error">{error}</div>}
-          </section>
+  {/* Messages */}
+  {rescoreMessage && (
+    <div className="citation-notice">{rescoreMessage}</div>
+  )}
+  
+  {rescoreTracking && rescoreTrackingMessage && (
+    <div className="citation-notice citation-notice--pending">
+      {rescoreTrackingMessage}
+    </div>
+  )}
+  
+  {rescoreError && (
+    <div className="citation-notice citation-notice--error">{rescoreError}</div>
+  )}
+  
+  {error && (
+    <div className="citation-notice citation-notice--error">{error}</div>
+  )}
+</section>
 
           <section className="citation-layout">
             <article className="card">

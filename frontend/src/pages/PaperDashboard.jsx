@@ -39,12 +39,32 @@ export function PaperDashboard() {
   const navigate = useNavigate();
   const location = useLocation();
   const [successMessage, setSuccessMessage] = useState("");
+  const [lastUpdateTime, setLastUpdateTime] = useState(Date.now());
+
+  // Helper to check if papers data actually changed
+  const hasPapersChanged = (oldPapers, newPapers) => {
+    if (oldPapers.length !== newPapers.length) return true;
+    const oldMap = new Map(oldPapers.map(p => [p.id, p]));
+    for (const newPaper of newPapers) {
+      const oldPaper = oldMap.get(newPaper.id);
+      if (!oldPaper) return true;
+      // Compare key fields that affect display
+      if (oldPaper.processing_status !== newPaper.processing_status) return true;
+      if (oldPaper.publication_status !== newPaper.publication_status) return true;
+      if (oldPaper.processing_stage !== newPaper.processing_stage) return true;
+      if (oldPaper.updatedAt !== newPaper.updatedAt) return true;
+    }
+    return false;
+  };
 
   // ====================== LOAD PAPERS ======================
-  const loadPapers = async () => {
+  const loadPapers = async (silent = false) => {
     let isMounted = true;
     try {
-      setLoadingList(true);
+      // Only show loading on initial load, not during polling
+      if (!silent) {
+        setLoadingList(true);
+      }
       setListError("");
 
       const data = await getPapers(0, 50);
@@ -55,11 +75,13 @@ export function PaperDashboard() {
         (p) => ["processed", "completed", "failed", "duplicate_detected"].includes(p.processing_status)
       );
 
+      let finalPapers = mappedPapers;
+
       if (processedPapers.length > 0) {
         const detailedPapers = await Promise.all(
           processedPapers.map(async (paper) => {
             try {
-              const detail = await getPaperDetail(paper.id); // bạn đã import ở trên
+              const detail = await getPaperDetail(paper.id);
               return {
                 ...paper,
                 detectedTitle: detail.detected_title,
@@ -77,25 +99,35 @@ export function PaperDashboard() {
           })
         );
 
-        const finalPapers = mappedPapers.map((paper) => {
+        finalPapers = mappedPapers.map((paper) => {
           const detailed = detailedPapers.find((d) => d.id === paper.id);
           return detailed || paper;
         });
+      }
 
-        if (isMounted) setPapers(finalPapers);
-      } else {
-        if (isMounted) setPapers(mappedPapers);
+      if (isMounted) {
+        // Only update state if data actually changed
+        setPapers(prevPapers => {
+          if (!hasPapersChanged(prevPapers, finalPapers)) {
+            return prevPapers; // Return same reference, no re-render
+          }
+          console.log("📊 Data changed, updating papers list");
+          setLastUpdateTime(Date.now());
+          return finalPapers;
+        });
       }
     } catch (error) {
       if (isMounted) setListError(error.message || "Không thể tải danh sách paper");
     } finally {
-      if (isMounted) setLoadingList(false);
+      if (isMounted && !silent) {
+        setLoadingList(false);
+      }
     }
   };
 
   // Initial load
   useEffect(() => {
-    loadPapers();
+    loadPapers(false); // Show loading on initial load
   }, []);
 
   // ====================== CONDITIONAL POLLING ======================
@@ -111,8 +143,8 @@ export function PaperDashboard() {
     console.log("%c⏳ Bắt đầu polling real-time (chỉ khi có paper đang xử lý)", "color:#8b5cf6;font-weight:bold");
 
     const interval = setInterval(() => {
-      loadPapers();
-    }, 3000);
+      loadPapers(true); // Silent mode during polling
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [papers]); // Khi papers thay đổi → kiểm tra lại có còn cần poll không
@@ -153,7 +185,7 @@ export function PaperDashboard() {
           ) : listError ? (
             <div className="card" style={{ padding: "1rem", color: "#dc2626" }}>{listError}</div>
           ) : (
-            <PaperList papers={papers} />
+            <PaperList papers={papers} lastUpdateTime={lastUpdateTime} />
           )}
         </div>
       </main>
