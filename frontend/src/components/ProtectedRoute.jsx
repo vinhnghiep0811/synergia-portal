@@ -6,7 +6,8 @@ export function ProtectedRoute() {
   const location = useLocation();
   if (isLoading) return (
       <div className="loading-screen">
-        <p>Đang kiểm tra quyền truy cập...</p>
+        <div className="loading-spinner"></div>
+        <p className="loading-text">Đang kiểm tra quyền truy cập...</p>
       </div>
     );
 
