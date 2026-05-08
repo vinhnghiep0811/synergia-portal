@@ -115,6 +115,7 @@ class MentionCandidate:
     numbers: list[int] = field(default_factory=list)
     doi: str | None = None
     author_year_text: str | None = None
+    grouped_citation_size: int = 1
 
 
 @dataclass
@@ -130,12 +131,15 @@ class MentionLink:
 class CitationGraphService:
     DEFAULT_ALGORITHM_VERSION = "citation-v1"
 
-    DIVERSITY_HIGH_WEIGHT_SECTIONS = {
+    DIVERSITY_COUNTED_SECTIONS = {
         "method",
         "evaluation",
         "results",
         "discussion",
         "conclusion",
+        "introduction",
+        "background",
+        "related_work",
     }
 
     COHERENCE_VERB_HINTS = {
@@ -466,6 +470,49 @@ class CitationGraphService:
         "en fr bleu",
     )
 
+    RESULTS_SECTION_HINTS = (
+        "comparison of",
+        "comparison",
+        "results",
+        "analysis",
+        "ablation",
+        "bleu",
+        "accuracy",
+        "rouge",
+        "f1",
+        "perplexity",
+        "table",
+    )
+
+    METHOD_SECTION_HINTS = (
+        "method",
+        "methodology",
+        "approach",
+        "architecture",
+        "model",
+        "training",
+        "training technique",
+        "in this section we",
+        "we train",
+        "optimizer",
+        "hyperparameter",
+    )
+
+    COMPARE_OVERRIDE_REGEXES = (
+        re.compile(
+            r"\b(?:do\s+not|don't|without|unlike|instead\s+of)\b.{0,40}\b(?:as|like)\b.{0,40}\bet\s+al",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:report|reports|reported)\b.{0,40}\b(?:bleu|rouge|f1|accuracy|perplexity)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bour\s+(?:model|approach|method|system)\b.{0,40}\b(?:vs|versus|compared\s+to|compared\s+with)\b",
+            re.IGNORECASE,
+        ),
+    )
+
     SECTION_TYPE_ALIASES = {
         "methods": "method",
         "methodology": "method",
@@ -494,6 +541,8 @@ class CitationGraphService:
         "qualitative results": "results",
         "quantitative results": "results",
         "main results": "results",
+        "comparison": "results",
+        "comparison of properties": "results",
         "discussions": "discussion",
         "error analysis": "discussion",
         "limitations and future work": "discussion",
@@ -554,10 +603,10 @@ class CitationGraphService:
             "coherence_score": 0.10,
         },
         "mention_score": {
-            "semantic_similarity": 0.35,
-            "intent_score": 0.30,
-            "section_weight": 0.25,
-            "chunk_quality": 0.10,
+            "semantic_similarity": 0.10,
+            "intent_score": 0.45,
+            "section_weight": 0.35,
+            "chunk_quality": 0.20,
             "link_confidence_gate": "method_aware_blend",
         },
         "edge_score": {
@@ -566,7 +615,7 @@ class CitationGraphService:
             "diversity_score": 0.15,
             "intent_edge_score": 0.05,
             "diversity_divisor": 3,
-            "diversity_section_scope": "high_weight_only",
+            "diversity_section_scope": "all_content_sections",
         },
         "section_weights": SECTION_WEIGHTS,
         "intent_scores": INTENT_SCORES,
@@ -614,6 +663,19 @@ class CitationGraphService:
             if mention_rows:
                 self.db.add_all(mention_rows)
                 self.db.flush()
+
+            ingestion_warnings = self._build_post_ingestion_warnings(
+                source_docs=source_docs,
+                mention_rows=mention_rows,
+            )
+            if ingestion_warnings:
+                weights_json = copy.deepcopy(run.weights_json)
+                run_meta = weights_json.get("_run_meta")
+                if not isinstance(run_meta, dict):
+                    run_meta = {}
+                run_meta["ingestion_warnings"] = ingestion_warnings
+                weights_json["_run_meta"] = run_meta
+                run.weights_json = weights_json
 
             edge_rows = self._build_edges_from_mentions(
                 run_id=run.id,
@@ -1089,9 +1151,16 @@ class CitationGraphService:
                     end=candidate.span_end,
                 )
 
-                section_type = self._resolve_chunk_section_type(chunk)
+                section_type = self._resolve_chunk_section_type(
+                    chunk,
+                    context_snippet=context_snippet,
+                )
                 section_weight = self._section_weight(section_type)
-                intent_label, intent_score = self._infer_intent(context_snippet)
+                intent_label, intent_score = self._infer_intent(
+                    context_snippet,
+                    section_type=section_type,
+                    section_hint=self._resolve_chunk_section_hint(chunk),
+                )
                 chunk_quality = self._calculate_chunk_quality(context_snippet, candidate.kind)
 
                 for link in links:
@@ -1103,9 +1172,11 @@ class CitationGraphService:
                     )
 
                     if target_info is not None:
+                        semantic_left = self._normalize_similarity_text(context_snippet)
+                        semantic_right = self._build_target_similarity_text(target_info)
                         semantic_similarity = self._semantic_similarity(
-                            context_snippet,
-                            f"{target_info.title} {target_info.abstract}".strip(),
+                            semantic_left,
+                            semantic_right,
                         )
 
                         title_match = max(
@@ -1119,6 +1190,16 @@ class CitationGraphService:
                             author_year_match=link.author_year_match,
                             link_method=link.link_method,
                         )
+                        if (
+                            candidate.kind == "author_year"
+                            and candidate.grouped_citation_size > 1
+                            and "author_year" in (link.link_method or "")
+                        ):
+                            dilution_factor = 1 / candidate.grouped_citation_size
+                            link_confidence = self._clip01(link_confidence * dilution_factor)
+
+                            if semantic_similarity < 0.10:
+                                continue
 
                         is_internal = True
                     else:
@@ -1237,8 +1318,8 @@ class CitationGraphService:
 
             chunk_quality = self._calculate_chunk_quality(context_snippet, "author_year")
             semantic_similarity = self._semantic_similarity(
-                context_snippet,
-                f"{target.title} {target.abstract}".strip(),
+                self._normalize_similarity_text(context_snippet),
+                self._build_target_similarity_text(target),
             )
 
             title_match = max(
@@ -1401,8 +1482,8 @@ class CitationGraphService:
             intent_score = self.INTENT_SCORES[intent_label]
             chunk_quality = self._calculate_chunk_quality(context_snippet, "author_year")
             semantic_similarity = self._semantic_similarity(
-                context_snippet,
-                f"{target_info.title} {target_info.abstract}".strip(),
+                self._normalize_similarity_text(context_snippet),
+                self._build_target_similarity_text(target_info),
             )
 
             title_match = max(
@@ -1641,23 +1722,48 @@ class CitationGraphService:
                 return entry
 
         if entry.year and entry.author_surnames:
-            year_candidates = target_catalog.by_year.get(entry.year, [])
+            candidate_map: dict[UUID, TargetDocumentInfo] = {}
+            for candidate_year in (entry.year - 1, entry.year, entry.year + 1):
+                for target in target_catalog.by_year.get(candidate_year, []):
+                    candidate_map[target.canonical_id] = target
+
+            year_candidates = list(candidate_map.values())
             best_target: TargetDocumentInfo | None = None
+            best_score = 0.0
             best_overlap = 0.0
 
             for target in year_candidates:
                 if target.canonical_id == source_document_id:
                     continue
 
+                year_distance = (
+                    abs((target.publication_year or entry.year) - entry.year)
+                    if target.publication_year is not None
+                    else 1
+                )
+                if year_distance > 1:
+                    continue
+                year_proximity = 1.0 if year_distance == 0 else 0.75
+
                 overlap = self._surname_overlap(entry.author_surnames, target.author_surnames)
-                if overlap > best_overlap:
+                title_match = (
+                    self._title_similarity(entry.title, target.title)
+                    if entry.title
+                    else self._title_similarity(entry.raw_text, target.title)
+                )
+                score = (0.65 * overlap) + (0.20 * year_proximity) + (0.15 * title_match)
+                if year_distance == 1 and title_match < 0.15 and overlap < 0.60:
+                    continue
+
+                if score > best_score:
+                    best_score = score
                     best_overlap = overlap
                     best_target = target
 
-            if best_target and best_overlap >= 0.45:
+            if best_target and best_score >= 0.50:
                 entry.target_id = best_target.canonical_id
                 entry.link_method = "author_year"
-                entry.author_year_match = best_overlap
+                entry.author_year_match = self._author_year_match(entry, best_target)
 
         return entry
 
@@ -1693,6 +1799,7 @@ class CitationGraphService:
         for match in AUTHOR_YEAR_CITATION_REGEX.finditer(text):
             raw = (match.group(1) or "").strip()
             segments = self._split_author_year_segments(raw)
+            grouped_citation_size = self._estimate_grouped_citation_size(raw)
             for segment in segments:
                 candidates.append(
                     MentionCandidate(
@@ -1701,6 +1808,7 @@ class CitationGraphService:
                         span_start=match.start(),
                         span_end=match.end(),
                         author_year_text=segment,
+                        grouped_citation_size=grouped_citation_size,
                     )
                 )
 
@@ -1721,6 +1829,7 @@ class CitationGraphService:
                     span_start=match.start(),
                     span_end=match.end(),
                     author_year_text=author_year_text,
+                    grouped_citation_size=1,
                 )
             )
 
@@ -1770,6 +1879,22 @@ class CitationGraphService:
             return [cleaned]
 
         return []
+
+    def _estimate_grouped_citation_size(self, raw: str) -> int:
+        if not raw:
+            return 1
+
+        # Count author-year segments in grouped citations such as
+        # "(Lin et al., 2017; Bahdanau et al., 2014; Kim et al., 2017)".
+        year_mentions = re.findall(r"\b(?:19|20)\d{2}[a-z]?\b", raw)
+        if len(year_mentions) > 1:
+            return min(len(year_mentions), MAX_AUTHOR_YEAR_SEGMENTS)
+
+        semicolon_parts = [part for part in raw.split(";") if part.strip()]
+        if len(semicolon_parts) > 1:
+            return min(len(semicolon_parts), MAX_AUTHOR_YEAR_SEGMENTS)
+
+        return 1
 
     def _parse_reference_numbers(self, raw: str) -> list[int]:
         numbers: list[int] = []
@@ -1888,6 +2013,7 @@ class CitationGraphService:
                 author_year_text=candidate.author_year_text or "",
                 context_snippet=context,
                 target_catalog=target_catalog,
+                grouped_citation_size=candidate.grouped_citation_size,
             )
 
         return [MentionLink(target_id=None, link_method="unresolved")]
@@ -1898,24 +2024,42 @@ class CitationGraphService:
         author_year_text: str,
         context_snippet: str,
         target_catalog: TargetCatalog,
+        grouped_citation_size: int = 1,
     ) -> list[MentionLink]:
         year = self._extract_year(author_year_text)
         surnames = self._extract_surnames_from_author_year(author_year_text)
         primary_surname = self._extract_primary_surname_from_author_year(author_year_text)
 
         if year:
-            candidates = target_catalog.by_year.get(year, [])
+            candidate_map: dict[UUID, TargetDocumentInfo] = {}
+            for candidate_year in (year - 1, year, year + 1):
+                for target in target_catalog.by_year.get(candidate_year, []):
+                    candidate_map[target.canonical_id] = target
+            candidates = list(candidate_map.values())
         else:
             candidates = target_catalog.all_targets
 
         scored_candidates: list[tuple[TargetDocumentInfo, float, float, float, bool]] = []
+        normalized_context = self._normalize_similarity_text(context_snippet)
 
         for target in candidates:
             if target.canonical_id == source_document_id:
                 continue
 
+            year_proximity = 0.0
+            if year is not None and target.publication_year is not None:
+                year_distance = abs(target.publication_year - year)
+                if year_distance > 1:
+                    continue
+                year_proximity = 1.0 if year_distance == 0 else 0.75
+            elif year is not None and target.publication_year is None:
+                year_proximity = 0.35
+            else:
+                year_proximity = 0.60
+
             author_year_match = self._surname_overlap(surnames, target.author_surnames)
             title_match = self._title_similarity(context_snippet, target.title)
+            context_title_overlap = self._token_overlap_score(normalized_context, target.title)
 
             first_author_match = bool(
                 primary_surname
@@ -1931,9 +2075,18 @@ class CitationGraphService:
             elif first_author_match:
                 author_year_match = max(author_year_match, 0.80)
 
-            combined = self._clip01((0.55 * author_year_match) + (0.45 * title_match))
+            if year is not None and target.publication_year is not None and abs(target.publication_year - year) == 1:
+                # Require contextual hints for tolerant year matching.
+                if max(title_match, context_title_overlap) < 0.18 and author_year_match < 0.60:
+                    continue
+
+            combined = self._clip01(
+                (0.45 * author_year_match)
+                + (0.35 * title_match)
+                + (0.20 * year_proximity)
+            )
             if first_author_match:
-                combined = self._clip01(combined + 0.10)
+                combined = self._clip01(combined + 0.08)
 
             if combined >= 0.40:
                 scored_candidates.append(
@@ -1945,13 +2098,15 @@ class CitationGraphService:
 
         scored_candidates.sort(key=lambda item: item[1], reverse=True)
         top_score = scored_candidates[0][1]
-        adaptive_threshold = max(0.42, top_score - 0.10)
+        adaptive_threshold = max(0.46, top_score - 0.08)
+        if grouped_citation_size > 1:
+            adaptive_threshold = max(adaptive_threshold, 0.55)
 
         links: list[MentionLink] = []
         for target, combined, title_match, author_year_match, first_author_match in scored_candidates:
             if combined < adaptive_threshold:
                 continue
-            if not first_author_match and combined < 0.62:
+            if not first_author_match and combined < 0.66:
                 continue
 
             links.append(
@@ -1998,8 +2153,8 @@ class CitationGraphService:
         if sentence_index is None:
             return self._truncate_snippet(text[max(0, start - 120): end + 120])
 
-        left = max(0, sentence_index - 1)
-        right = min(len(sentence_matches), sentence_index + 2)
+        left = max(0, sentence_index - 2)
+        right = min(len(sentence_matches), sentence_index + 3)
         snippet = " ".join(m.group(0).strip() for m in sentence_matches[left:right])
         return self._truncate_snippet(snippet)
 
@@ -2033,8 +2188,15 @@ class CitationGraphService:
 
         return False
 
-    def _infer_intent(self, snippet: str) -> tuple[str, float]:
+    def _infer_intent(
+        self,
+        snippet: str,
+        section_type: str | None = None,
+        section_hint: str | None = None,
+    ) -> tuple[str, float]:
         normalized = self._normalize_phrase_for_match(snippet)
+        section_type_norm = self._normalize_section_type(section_type)
+        section_hint_norm = self._normalize_phrase_for_match(section_hint)
 
         has_table_signal = bool(re.search(r"\btable\s+\d+\b", normalized))
         has_table_layout = (
@@ -2049,12 +2211,42 @@ class CitationGraphService:
         has_compare_signal = self._contains_any_phrase(normalized, self.INTENT_COMPARE_PHRASES)
         has_baseline_signal = self._contains_any_phrase(normalized, self.INTENT_BASELINE_PHRASES)
         has_transformer_signal = bool(re.search(r"\btransformer\b", normalized))
+        has_compare_override = any(
+            pattern.search(snippet or "")
+            for pattern in self.COMPARE_OVERRIDE_REGEXES
+        )
+        has_section_compare_hint = (
+            self._contains_any_phrase(section_hint_norm, self.RESULTS_SECTION_HINTS)
+            or section_type_norm in {"results", "evaluation"}
+        )
+        has_section_method_hint = (
+            self._contains_any_phrase(section_hint_norm, self.METHOD_SECTION_HINTS)
+            or section_type_norm == "method"
+        )
+        has_vs_pattern = bool(
+            re.search(
+                r"\bour\s+(?:model|approach|method|system)\b.{0,40}\b(?:vs|versus)\b",
+                normalized,
+            )
+        )
 
         if has_table_layout and has_baseline_signal and not has_compare_signal:
             label = "baseline"
+        elif has_compare_override or has_vs_pattern:
+            label = "compare"
+        elif has_section_compare_hint and (has_compare_signal or has_result_metric):
+            label = "compare"
+        elif has_section_compare_hint and bool(
+            re.search(r"\b(?:report|reports|reported|achieves?|outperform)\b", normalized)
+        ):
+            label = "compare"
         elif has_table_layout and has_transformer_signal and (has_compare_signal or has_result_metric):
             label = "compare"
         elif has_table_signal and (has_compare_signal or has_result_metric):
+            label = "compare"
+        elif has_section_method_hint and self._contains_any_phrase(normalized, self.INTENT_USE_METHOD_PHRASES):
+            label = "use_method"
+        elif has_section_compare_hint and not has_baseline_signal and not has_table_layout:
             label = "compare"
         elif self._contains_any_phrase(normalized, self.INTENT_USE_METHOD_PHRASES):
             label = "use_method"
@@ -2178,12 +2370,12 @@ class CitationGraphService:
         link_confidence: float,
         link_method: str | None = None,
     ) -> float:
+        semantic_penalty = 0.85 + (0.15 * self._clip01(semantic_similarity))
         base_score = (
-            (0.35 * semantic_similarity)
-            + (0.30 * intent_score)
-            + (0.25 * section_weight)
-            + (0.10 * chunk_quality)
-        )
+            (0.45 * intent_score)
+            + (0.35 * section_weight)
+            + (0.20 * chunk_quality)
+        ) * semantic_penalty
 
         method = (link_method or "").lower()
         if method == "doi_exact":
@@ -2256,7 +2448,7 @@ class CitationGraphService:
                 self._normalize_section_type(item.section_type)
                 for item in sorted_mentions
                 if self._normalize_section_type(item.section_type)
-                in self.DIVERSITY_HIGH_WEIGHT_SECTIONS
+                in self.DIVERSITY_COUNTED_SECTIONS
             }
             diversity_score = min(1.0, len(section_keys) / 3)
 
@@ -2319,7 +2511,11 @@ class CitationGraphService:
         normalized = self._normalize_section_type(section_type)
         return self.SECTION_WEIGHTS.get(normalized, self.SECTION_WEIGHTS["other"])
 
-    def _resolve_chunk_section_type(self, chunk: Any) -> str:
+    def _resolve_chunk_section_type(
+        self,
+        chunk: Any,
+        context_snippet: str | None = None,
+    ) -> str:
         normalized = self._normalize_section_type(getattr(chunk, "section_type", None))
         if normalized != "other":
             return normalized
@@ -2333,7 +2529,72 @@ class CitationGraphService:
             if fallback != "other":
                 return fallback
 
+        heading_hint = self._resolve_chunk_section_hint(chunk)
+        if heading_hint:
+            inferred = self._infer_section_type_from_text(heading_hint, from_heading=True)
+            if inferred != "other":
+                return inferred
+
+        if context_snippet:
+            inferred = self._infer_section_type_from_text(context_snippet, from_heading=False)
+            if inferred != "other":
+                return inferred
+
         return normalized
+
+    def _resolve_chunk_section_hint(self, chunk: Any) -> str:
+        candidates: list[str] = []
+        for value in (
+            getattr(chunk, "section", None),
+            getattr(chunk, "section_full_path", None),
+        ):
+            if value and str(value).strip():
+                candidates.append(str(value).strip())
+
+        content = str(getattr(chunk, "content", "") or "")
+        first_line = content.splitlines()[0].strip() if content.splitlines() else ""
+        if first_line and len(first_line) <= 180:
+            candidates.append(first_line)
+        elif content:
+            candidates.append(content[:180])
+
+        return " ".join(candidates).strip()
+
+    def _infer_section_type_from_text(self, text: str, from_heading: bool) -> str:
+        normalized = self._normalize_text(text)
+        if not normalized:
+            return "other"
+
+        if any(term in normalized for term in ("related work", "prior work", "previous work")):
+            return "related_work"
+        if any(term in normalized for term in ("introduction", "motivation")):
+            return "introduction"
+        if "background" in normalized:
+            return "background"
+        if any(term in normalized for term in ("discussion", "limitations", "future work")):
+            return "discussion"
+        if "conclusion" in normalized or "concluding" in normalized:
+            return "conclusion"
+        if "reference" in normalized or "bibliography" in normalized:
+            return "references"
+        if "appendix" in normalized or "supplementary" in normalized:
+            return "appendix"
+
+        has_method_hint = (
+            self._contains_any_phrase(self._normalize_phrase_for_match(normalized), self.METHOD_SECTION_HINTS)
+            or bool(re.search(r"\bin this section we (?:present|propose|describe|introduce)\b", normalized))
+        )
+        if has_method_hint:
+            return "method"
+
+        has_result_hint = (
+            self._contains_any_phrase(self._normalize_phrase_for_match(normalized), self.RESULTS_SECTION_HINTS)
+            or bool(re.search(r"\b(?:report|reports|reported)\b.{0,35}\b(?:bleu|rouge|f1|accuracy|perplexity)\b", normalized))
+        )
+        if has_result_hint:
+            return "results" if from_heading else "evaluation"
+
+        return "other"
 
     def _normalize_section_type(self, section_type: str | None) -> str:
         raw = str(section_type or "").strip().lower()
@@ -2585,7 +2846,13 @@ class CitationGraphService:
         return surname
 
     def _author_year_match(self, entry: ReferenceEntry, target: TargetDocumentInfo) -> float:
-        year_match = 1.0 if entry.year and target.publication_year == entry.year else 0.0
+        year_match = 0.0
+        if entry.year and target.publication_year is not None:
+            year_distance = abs(target.publication_year - entry.year)
+            if year_distance == 0:
+                year_match = 1.0
+            elif year_distance == 1:
+                year_match = 0.75
         surname_overlap = self._surname_overlap(entry.author_surnames, target.author_surnames)
 
         if year_match > 0 and surname_overlap > 0:
@@ -2603,9 +2870,79 @@ class CitationGraphService:
         intersection = left & right
         return len(intersection) / max(1, len(left))
 
+    def _build_target_similarity_text(self, target: TargetDocumentInfo) -> str:
+        abstract = (target.abstract or "").strip()
+        first_sentence = ""
+        if abstract:
+            parts = re.split(r"(?<=[.!?])\s+", abstract, maxsplit=1)
+            first_sentence = parts[0].strip() if parts else abstract
+        return self._normalize_similarity_text(f"{target.title} {first_sentence}".strip())
+
+    def _token_overlap_score(self, left: str, right: str) -> float:
+        left_tokens = set(self._tokenize(left))
+        right_tokens = set(self._tokenize(self._normalize_text(right)))
+        if not left_tokens or not right_tokens:
+            return 0.0
+        return len(left_tokens & right_tokens) / max(1, len(left_tokens))
+
+    def _normalize_similarity_text(self, value: str | None) -> str:
+        text = self._normalize_text(value)
+        if not text:
+            return ""
+
+        # Remove formula-heavy symbols and standalone math tokens that distort lexical similarity.
+        text = re.sub(r"[=<>+\-*/^_~|\\{}\[\]()%$]", " ", text)
+        text = re.sub(r"\b(?:eq|fig|table)\s*\d+\b", " ", text)
+        text = re.sub(r"\b[a-z]\d*\b", " ", text)
+        text = re.sub(r"\d+(?:\.\d+)?", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    def _build_post_ingestion_warnings(
+        self,
+        source_docs: list[CanonicalDocument],
+        mention_rows: list[CitationMention],
+    ) -> list[dict[str, Any]]:
+        outgoing_mentions_by_source: dict[UUID, int] = defaultdict(int)
+        for mention in mention_rows:
+            if not mention.is_internal or not mention.target_canonical_id:
+                continue
+            outgoing_mentions_by_source[mention.source_canonical_id] += 1
+
+        warnings: list[dict[str, Any]] = []
+        for source_doc in source_docs:
+            reference_count = self._estimate_reference_count(source_doc.document_sections or [])
+            outgoing_count = outgoing_mentions_by_source.get(source_doc.id, 0)
+            if reference_count >= 5 and outgoing_count == 0:
+                warnings.append(
+                    {
+                        "canonical_document_id": str(source_doc.id),
+                        "reference_count": reference_count,
+                        "outgoing_internal_mentions": outgoing_count,
+                        "warning": "Possible ingestion/chunking issue: references exist but no outgoing internal mentions.",
+                    }
+                )
+
+        return warnings
+
+    def _estimate_reference_count(self, sections: list[DocumentSection]) -> int:
+        reference_lines: list[str] = []
+        for section in sorted(sections, key=lambda item: item.section_index):
+            if not self._is_reference_section(section):
+                continue
+            for line in (section.content or "").splitlines():
+                normalized = re.sub(r"\s+", " ", line).strip()
+                if normalized:
+                    reference_lines.append(normalized)
+
+        if not reference_lines:
+            return 0
+
+        return len(self._parse_reference_entries(reference_lines))
+
     def _semantic_similarity(self, left: str, right: str) -> float:
-        left_norm = self._normalize_text(left)
-        right_norm = self._normalize_text(right)
+        left_norm = self._normalize_similarity_text(left)
+        right_norm = self._normalize_similarity_text(right)
 
         if not left_norm or not right_norm:
             return 0.0
