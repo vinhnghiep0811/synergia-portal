@@ -65,6 +65,25 @@
   border-color: #cbd5e1;
 }
 
+.citation-control-group {
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.citation-control-group .form-label {
+  min-width: 160px;
+  margin: 0;
+}
+
+.citation-control-group .form-label input[type="number"],
+.citation-control-group .form-label select {
+  height: 42px;
+  box-sizing: border-box;
+  width: 100%;
+}
+
 .citation-controls__actions {
   display: flex;
   gap: 0.5rem;
@@ -454,6 +473,17 @@
 @media (max-width: 1100px) {
   .citation-layout {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .citation-control-group {
+    flex-direction: column;
+    gap: 0.75rem;
+    width: 100%;
+  }
+
+  .citation-control-group .form-label {
+    min-width: auto;
+    width: 100%;
   }
 
   .citation-controls__actions {

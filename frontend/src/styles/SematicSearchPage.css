@@ -1,14 +1,14 @@
 /* SemanticSearchPage responsive styles */
 .semantic-search-form {
   display: grid;
-  grid-template-columns: 1fr 120px auto;
+  grid-template-columns: 1fr 100px auto;
   gap: 1rem;
   align-items: end;
 }
 
 .semantic-search-input-group {
   flex: 1;
-  min-width: 300px;
+  min-width: 200px;
 }
 
 .semantic-search-label {
@@ -21,12 +21,14 @@
 
 .semantic-search-input {
   width: 100%;
+  height: 44px;
   padding: 0.75rem 1rem;
   font-size: 1rem;
   border: 1px solid #d1d5db;
   border-radius: 8px;
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
 }
 
 .semantic-search-input:focus {
@@ -35,7 +37,8 @@
 }
 
 .semantic-search-topk-group {
-  width: 100px;
+  width: 90px;
+  margin: 0 0.5rem;
 }
 
 .semantic-search-buttons {
@@ -51,11 +54,13 @@
   cursor: pointer;
   font-weight: 500;
   transition: all 0.2s;
+  height: 44px;
   min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
+  box-sizing: border-box;
 }
 
 .semantic-search-button--primary {
@@ -63,6 +68,7 @@
   color: white;
   border-color: transparent;
   box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+  min-height: 44px;
 }
 
 .semantic-search-button--primary:hover:not(:disabled) {
@@ -199,6 +205,31 @@
   background-color: #f9fafb;
 }
 
+/* Table wrapper scrollable */
+.table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+
+
+.paper-title-cell {
+  max-width: 290px;
+}
+
+.paper-title-main {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.semantic-search-evidence {
+  max-width: none;        /* Bỏ giới hạn cũ */
+  width: 100%;
+}
+
 .semantic-search-rank-badge {
   display: inline-flex;
   align-items: center;
@@ -316,6 +347,23 @@
   100% { transform: rotate(360deg); }
 }
 
+/* Tablet responsive styles */
+@media (max-width: 1024px) {
+  .paper-table th:nth-child(3),
+  .paper-table td:nth-child(3) {
+    width: 400px;
+    min-width: 400px;
+  }
+
+  .paper-title-cell {
+    max-width: 250px;
+  }
+
+  .paper-title-main {
+    max-width: 240px;
+  }
+}
+
 /* Mobile responsive styles */
 @media (max-width: 768px) {
   .semantic-search-form {
@@ -331,6 +379,11 @@
 
   .semantic-search-topk-group {
     width: 100%;
+    margin: 0;
+  }
+
+  .semantic-search-input {
+    height: 44px;
   }
 
   .semantic-search-buttons {
@@ -342,7 +395,8 @@
 
   .semantic-search-button {
     flex: 1;
-    min-height: 48px;
+    height: 44px;
+    min-height: 44px;
   }
 
   .semantic-search-results-table {
@@ -361,6 +415,21 @@
   .semantic-search-legend {
     flex-direction: column;
     gap: 0.5rem;
+  }
+
+  /* Responsive table columns for tablet */
+  .paper-table th:nth-child(3),
+  .paper-table td:nth-child(3) {
+    width: 350px;
+    min-width: 350px;
+  }
+
+  .paper-title-cell {
+    max-width: 200px;
+  }
+
+  .paper-title-main {
+    max-width: 190px;
   }
 
   .semantic-search-empty {
@@ -385,11 +454,14 @@
   }
 
   .semantic-search-input {
+    height: 40px;
     padding: 0.6rem 0.8rem;
     font-size: 0.9rem;
   }
 
   .semantic-search-button {
+    height: 40px;
+    min-height: 40px;
     padding: 0.6rem 1rem;
     font-size: 0.9rem;
   }
@@ -405,6 +477,26 @@
 
   .semantic-search-title-cell {
     max-width: 200px;
+  }
+
+  /* Mobile: further reduce column widths */
+  .paper-table th:nth-child(2),
+  .paper-table td:nth-child(2) {
+    width: 200px;
+  }
+
+  .paper-table th:nth-child(3),
+  .paper-table td:nth-child(3) {
+    width: 250px;
+    min-width: 250px;
+  }
+
+  .paper-title-cell {
+    max-width: 150px;
+  }
+
+  .paper-title-main {
+    max-width: 140px;
   }
 
   .semantic-search-rank-badge {
@@ -432,10 +524,34 @@
   .semantic-search-empty-text {
     font-size: 0.85rem;
   }
+
+  /* Evidence responsive */
+  .semantic-search-evidence-section {
+    font-size: 0.7rem;
+    padding: 0.25rem 0.5rem;
+  }
+
+  .semantic-search-evidence-content {
+    font-size: 0.8rem;
+    padding: 0.5rem;
+  }
 }
 /* === EVIDENCE SECTION === */
 .semantic-search-evidence {
-  max-width: 450px;
+  max-width: 400px;
+}
+
+.semantic-search-evidence-section {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #4f46e5;
+  background: #e0e7ff;
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  display: inline-block;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .semantic-search-evidence-content {

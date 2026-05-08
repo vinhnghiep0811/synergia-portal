@@ -50,6 +50,20 @@ export function SemanticSearchPage() {
     }));
   };
 
+  const getEvidenceContent = (content) => {
+    if (!content) return "Không có evidence";
+    const newlineIndex = content.indexOf('\n');
+    if (newlineIndex === -1) return content;
+    return content.slice(newlineIndex + 1).trim();
+  };
+
+  const getEvidenceSection = (content) => {
+    if (!content) return null;
+    const newlineIndex = content.indexOf('\n');
+    if (newlineIndex === -1) return null;
+    return content.slice(0, newlineIndex).trim();
+  };
+
   return (
     <div className="app-shell">
       <AppHeader
@@ -104,7 +118,7 @@ export function SemanticSearchPage() {
                   className="semantic-search-button semantic-search-button--primary"
                   disabled={loading || !query.trim()}
                 >
-                  {loading ? "Đang tìm..." : "🔍 Tìm kiếm"}
+                  {loading ? "Đang tìm..." : "Tìm kiếm"}
                 </button>
 
                 {hasSearched && (
@@ -235,16 +249,21 @@ export function SemanticSearchPage() {
                               </td>
                               <td>
                                 <div className="semantic-search-evidence">
+                                  {getEvidenceSection(result.content) && (
+                                    <div className="semantic-search-evidence-section">
+                                      {getEvidenceSection(result.content)}
+                                    </div>
+                                  )}
                                   <div
                                     className={`semantic-search-evidence-content ${
                                       expandedEvidence[index] ? 'expanded' : ''
                                     }`}
-                                    title={result.content || "Không có evidence"}
+                                    title={getEvidenceContent(result.content)}
                                   >
-                                    {result.content || "Không có evidence"}
+                                    {getEvidenceContent(result.content)}
                                   </div>
 
-                                  {result.content && result.content.length > 180 && (
+                                  {getEvidenceContent(result.content).length > 180 && (
                                     <button
                                       onClick={() => toggleEvidence(index)}
                                       className={`semantic-search-evidence-toggle ${
@@ -308,7 +327,7 @@ export function SemanticSearchPage() {
                                     padding: 0,
                                   }}
                                   onClick={() =>
-                                    navigate(`/canonical/${result.canonical_document_id}`)
+                                    window.open(`/canonical/${result.canonical_document_id}`, '_blank', 'noopener,noreferrer')
                                   }
                                   disabled={!result.canonical_document_id}
                                 >
