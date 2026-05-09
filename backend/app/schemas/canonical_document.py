@@ -79,3 +79,16 @@ class PaginationMetaResponse(BaseModel):
 class CanonicalDocumentListPaginatedResponse(BaseModel):
     items: list[CanonicalDocumentListItemResponse]
     pagination: PaginationMetaResponse
+
+
+class CanonicalDocumentDeleteResponse(BaseModel):
+    id: UUID
+    deleted: bool
+    deleted_papers_count: int
+    deleted_extraction_runs_count: int
+    deleted_document_sections_count: int
+    deleted_document_chunks_count: int
+    deleted_citation_edges_count: int
+    deleted_citation_mentions_count: int
+    storage_objects_deleted: int
+    storage_delete_errors: list[str]

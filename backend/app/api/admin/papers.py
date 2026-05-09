@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func, or_
 from typing import Optional
@@ -11,7 +11,9 @@ from app.models.paper_record import PaperRecord
 from app.schemas.paper import (
     AdminPaperDetailResponse,
     AdminPaperListPaginatedResponse,
+    PaperDeleteResponse,
 )
+from app.services.delete_service import DeleteService
 
 router = APIRouter()
 
@@ -108,3 +110,25 @@ def get_admin_paper_detail(
         raise HTTPException(status_code=404, detail="Paper not found")
 
     return paper
+
+
+@router.delete(
+    "/papers/{paper_id}",
+    response_model=PaperDeleteResponse,
+    summary="Delete a paper record",
+    status_code=status.HTTP_200_OK,
+)
+def delete_admin_paper(
+    paper_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    service = DeleteService(db)
+
+    try:
+        return service.delete_paper_record(
+            paper_id,
+            actor_user_id=current_user.id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))

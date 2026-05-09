@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func, or_
 from typing import Optional
@@ -9,7 +9,13 @@ from app.core.security import require_admin
 from app.models.user import User
 from app.models.paper_record import PaperRecord
 from app.models.canonical_document import CanonicalDocument
-from app.schemas.canonical_document import CanonicalDocumentListItemResponse, CanonicalDocumentListPaginatedResponse, CanonicalDocumentResponse
+from app.schemas.canonical_document import (
+    CanonicalDocumentDeleteResponse,
+    CanonicalDocumentListItemResponse,
+    CanonicalDocumentListPaginatedResponse,
+    CanonicalDocumentResponse,
+)
+from app.services.delete_service import DeleteConflictError, DeleteService
 
 router = APIRouter()
 
@@ -126,3 +132,35 @@ def get_admin_canonical_document_detail(
         raise HTTPException(status_code=404, detail="Canonical document not found")
 
     return canonical
+
+
+@router.delete(
+    "/canonical-documents/{canonical_id}",
+    response_model=CanonicalDocumentDeleteResponse,
+    summary="Delete a canonical document",
+    status_code=status.HTTP_200_OK,
+)
+def delete_admin_canonical_document(
+    canonical_id: UUID,
+    delete_papers: bool = Query(
+        False,
+        description=(
+            "When true, delete all PaperRecord rows linked to this canonical "
+            "document before deleting the canonical document."
+        ),
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    service = DeleteService(db)
+
+    try:
+        return service.delete_canonical_document(
+            canonical_id,
+            delete_papers=delete_papers,
+            actor_user_id=current_user.id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except DeleteConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))

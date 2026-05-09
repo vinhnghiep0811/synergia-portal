@@ -37,6 +37,7 @@ class ActivityEventType:
     # canonicalization / duplicate
     CANONICAL_CREATED = "canonical_created"
     CANONICAL_LINKED = "canonical_linked"
+    CANONICAL_DELETED = "canonical_deleted"
     DUPLICATE_DETECTED = "duplicate_detected"
 
     # semantic scholar enrichment

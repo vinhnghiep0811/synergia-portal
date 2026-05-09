@@ -114,6 +114,24 @@ class StorageService:
             response.close()
             response.release_conn()
 
+    def delete_object(self, object_name: str, bucket_name: str | None = None) -> bool:
+        target_bucket = bucket_name or self.bucket_name
+
+        try:
+            self.internal_client.remove_object(
+                bucket_name=target_bucket,
+                object_name=object_name,
+            )
+            return True
+        except S3Error as exc:
+            if exc.code in {"NoSuchKey", "NoSuchBucket", "NoSuchObject"}:
+                return False
+            raise
+
+    def delete_by_storage_path(self, storage_path: str) -> bool:
+        bucket_name, object_name = self.parse_s3_uri(storage_path)
+        return self.delete_object(object_name=object_name, bucket_name=bucket_name)
+
     def generate_presigned_get_url(
         self,
         storage_path: str,

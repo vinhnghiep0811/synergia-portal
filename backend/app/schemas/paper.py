@@ -163,3 +163,12 @@ class PaginationMetaResponse(BaseModel):
 class AdminPaperListPaginatedResponse(BaseModel):
     items: list[AdminPaperListItemResponse]
     pagination: PaginationMetaResponse
+
+
+class PaperDeleteResponse(BaseModel):
+    id: UUID
+    deleted: bool
+    canonical_document_id: Optional[UUID] = None
+    deleted_publish_versions_count: int
+    storage_objects_deleted: int
+    storage_delete_errors: list[str]
