@@ -1,7 +1,9 @@
 import hashlib
 import os
+from io import BytesIO
 from uuid import UUID, uuid4
 
+import pdfplumber
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
@@ -49,7 +51,7 @@ class PaperService:
 
         if len(content) > MAX_UPLOAD_SIZE_BYTES:
             raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail=f"File exceeds max size of {MAX_UPLOAD_SIZE_BYTES} bytes.",
             )
 
@@ -58,6 +60,8 @@ class PaperService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid PDF file signature.",
             )
+
+        self._validate_pdf_content(content)
 
         file_hash_sha256 = hashlib.sha256(content).hexdigest()
         paper_id = uuid4()
@@ -148,6 +152,19 @@ class PaperService:
                 raise
 
         return paper
+
+    @staticmethod
+    def _validate_pdf_content(content: bytes) -> None:
+        try:
+            with pdfplumber.open(BytesIO(content)) as pdf:
+                if not pdf.pages:
+                    raise ValueError("PDF has no pages.")
+                _ = pdf.pages[0]
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Corrupted or unreadable PDF file.",
+            ) from exc
 
     def list_papers(self, skip: int = 0, limit: int = 20):
         return self.repo.list_papers(skip=skip, limit=limit)
