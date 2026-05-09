@@ -3,12 +3,13 @@ from typing import Any
 
 import numpy as np
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, cast, Text as SQLText
 
 from app.models.document_chunk import DocumentChunk
 from app.models.canonical_document import CanonicalDocument
 from app.services.embedding_service import EmbeddingService
 from app.schemas.search import SearchResultItem
-
+from app.models.paper_record import PaperRecord
 logger = logging.getLogger(__name__)
 
 EMBEDDING_DIM = 384
@@ -438,3 +439,237 @@ class SearchService:
             return 0.0
 
         return float(np.dot(a, b) / (norm_a * norm_b))
+    
+    def keyword_search(self, query: str, limit: int = 20) -> list[SearchResultItem]:
+        if not query or not query.strip():
+            return []
+
+        raw_query = query.strip()
+        q_lower = raw_query.lower()
+        pattern = f"%{raw_query}%"
+        limit = max(1, min(limit, 50))
+
+        results: list[SearchResultItem] = []
+        seen: set[tuple[str, str]] = set()
+
+        # 1) Search metadata: filename, detected title, DOI, canonical title, abstract, venue, authors
+        metadata_rows = (
+            self.db.query(PaperRecord, CanonicalDocument)
+            .outerjoin(
+                CanonicalDocument,
+                PaperRecord.canonical_document_id == CanonicalDocument.id,
+            )
+            .filter(
+                or_(
+                    PaperRecord.original_filename.ilike(pattern),
+                    PaperRecord.detected_title.ilike(pattern),
+                    PaperRecord.detected_doi.ilike(pattern),
+                    PaperRecord.detected_fingerprint.ilike(pattern),
+                    CanonicalDocument.title.ilike(pattern),
+                    CanonicalDocument.title_candidate.ilike(pattern),
+                    CanonicalDocument.normalized_title.ilike(pattern),
+                    CanonicalDocument.abstract.ilike(pattern),
+                    CanonicalDocument.venue.ilike(pattern),
+                    CanonicalDocument.doi.ilike(pattern),
+                    cast(CanonicalDocument.authors_json, SQLText).ilike(pattern),
+                )
+            )
+            .order_by(PaperRecord.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+        for paper, canonical in metadata_rows:
+            title = (
+                getattr(canonical, "title", None)
+                or getattr(canonical, "title_candidate", None)
+                or paper.detected_title
+                or paper.original_filename
+            )
+
+            content_parts = [
+                f"Metadata match",
+                f"Filename: {paper.original_filename}",
+            ]
+
+            if paper.detected_title:
+                content_parts.append(f"Detected title: {paper.detected_title}")
+            if paper.detected_doi:
+                content_parts.append(f"DOI: {paper.detected_doi}")
+            if canonical:
+                if canonical.title:
+                    content_parts.append(f"Title: {canonical.title}")
+                if canonical.venue:
+                    content_parts.append(f"Venue: {canonical.venue}")
+                if canonical.publication_year:
+                    content_parts.append(f"Year: {canonical.publication_year}")
+                if canonical.abstract:
+                    content_parts.append(
+                        f"Abstract: {self._keyword_snippet(canonical.abstract, raw_query)}"
+                    )
+
+            score = self._keyword_score(
+                q_lower=q_lower,
+                title=title,
+                filename=paper.original_filename,
+                doi=paper.detected_doi or (canonical.doi if canonical else None),
+                content="\n".join(content_parts),
+            )
+
+            key = ("metadata", str(paper.id))
+            if key not in seen:
+                seen.add(key)
+                results.append(
+                    SearchResultItem(
+                        chunk_id=None,
+                        canonical_document_id=paper.canonical_document_id,
+                        paper_id=paper.id,
+                        title=title,
+                        content="\n".join(content_parts),
+                        similarity_score=score,
+                        source="metadata",
+                    )
+                )
+
+        # 2) Search full text chunks
+        remaining = max(limit - len(results), 0)
+        if remaining > 0:
+            chunk_rows = (
+                self.db.query(DocumentChunk, CanonicalDocument)
+                .join(
+                    CanonicalDocument,
+                    DocumentChunk.canonical_document_id == CanonicalDocument.id,
+                )
+                .filter(DocumentChunk.is_retrievable == True)
+                .filter(DocumentChunk.content.ilike(pattern))
+                .order_by(DocumentChunk.created_at.desc())
+                .limit(remaining * 3)
+                .all()
+            )
+
+            for chunk, canonical in chunk_rows:
+                snippet = self._keyword_snippet(chunk.content, raw_query)
+                title = canonical.title or canonical.title_candidate
+
+                key = ("chunk", str(chunk.id))
+                if key in seen:
+                    continue
+
+                seen.add(key)
+                results.append(
+                    SearchResultItem(
+                        chunk_id=chunk.id,
+                        canonical_document_id=chunk.canonical_document_id,
+                        paper_id=None,
+                        title=title,
+                        content=f"{chunk.section or 'Content match'}\n{snippet}",
+                        similarity_score=self._chunk_keyword_score(
+                            query=raw_query,
+                            title=title,
+                            section=chunk.section,
+                            content=chunk.content,
+                        ),
+                        source="chunk",
+                    )
+                )
+
+                if len(results) >= limit:
+                    break
+
+        results.sort(key=lambda item: item.similarity_score, reverse=True)
+        deduped = []
+        seen_docs = set()
+
+        for item in results:
+            doc_key = str(item.canonical_document_id or item.paper_id or item.chunk_id)
+
+            if doc_key in seen_docs:
+                continue
+
+            seen_docs.add(doc_key)
+            deduped.append(item)
+
+            if len(deduped) >= limit:
+                break
+
+        return deduped
+
+    def _keyword_snippet(self, content: str | None, query: str, window: int = 260) -> str:
+        if not content:
+            return ""
+
+        content_clean = " ".join(content.split())
+        content_lower = content_clean.lower()
+        query_lower = query.lower()
+
+        index = content_lower.find(query_lower)
+        if index < 0:
+            return content_clean[:window] + ("..." if len(content_clean) > window else "")
+
+        start = max(0, index - window // 2)
+        end = min(len(content_clean), index + len(query) + window // 2)
+
+        prefix = "..." if start > 0 else ""
+        suffix = "..." if end < len(content_clean) else ""
+
+        return prefix + content_clean[start:end] + suffix
+
+    def _keyword_score(
+        self,
+        q_lower: str,
+        title: str | None,
+        filename: str | None,
+        doi: str | None,
+        content: str | None,
+    ) -> float:
+        title_lower = (title or "").lower()
+        filename_lower = (filename or "").lower()
+        doi_lower = (doi or "").lower()
+        content_lower = (content or "").lower()
+
+        if q_lower in title_lower:
+            return 1.0
+        if q_lower in doi_lower:
+            return 0.95
+        if q_lower in filename_lower:
+            return 0.9
+        if q_lower in content_lower:
+            return 0.75
+        return 0.5
+    
+    def _chunk_keyword_score(
+        self,
+        query: str,
+        title: str | None,
+        section: str | None,
+        content: str | None,
+    ) -> float:
+        query = query.strip().lower()
+        title_lower = (title or "").lower()
+        section_lower = (section or "").lower()
+        content_lower = (content or "").lower()
+
+        if not query or not content_lower:
+            return 0.0
+
+        terms = [term for term in query.split() if term]
+        exact_count = content_lower.count(query)
+
+        term_hits = sum(1 for term in terms if term in content_lower)
+        term_coverage = term_hits / max(len(terms), 1)
+
+        score = 0.4
+
+        if query in title_lower:
+            score += 0.35
+
+        if query in section_lower:
+            score += 0.15
+
+        if exact_count > 0:
+            score += 0.25
+
+        score += min(exact_count * 0.03, 0.15)
+        score += term_coverage * 0.2
+
+        return round(min(score, 1.0), 4)
