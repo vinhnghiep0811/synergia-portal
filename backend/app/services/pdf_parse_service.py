@@ -276,17 +276,42 @@ def _looks_broken(lines: list[dict]) -> bool:
 
 
 def _is_non_title_text(text: str) -> bool:
-    t = text.lower()
+    t = text.lower().strip()
     return (
         "doi:" in t
-        or "abstract" in t
-        or "keywords" in t
+        or re.match(r"^abstract\b", t) is not None
+        or re.match(r"^keywords?\b", t) is not None
         or "downloaded from" in t
         or "creative commons" in t
         or "open access" in t
         or "published by" in t
         or "@" in t
+        or _looks_like_author_line(text)
     )
+
+
+def _looks_like_author_line(text: str) -> bool:
+    normalized = normalize_space(text)
+    if not normalized or ("," not in normalized and " and " not in normalized):
+        return False
+
+    chunks = [chunk.strip(" .;:()[]{}") for chunk in re.split(r"\s*(?:,| and )\s*", normalized) if chunk.strip()]
+    if len(chunks) < 2:
+        return False
+
+    def is_name_chunk(chunk: str) -> bool:
+        words = [w for w in chunk.split(" ") if w]
+
+        if len(words) in (2, 3):
+            if all(re.fullmatch(r"[A-Z][a-z]+(?:-[A-Z][a-z]+)?", w) for w in words):
+                return True
+
+        if re.fullmatch(r"[A-Z][a-z]+[A-Z][a-z]+", chunk):
+            return True
+
+        return False
+
+    return all(is_name_chunk(chunk) for chunk in chunks)
 
 
 def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[str]:
