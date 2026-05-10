@@ -1802,7 +1802,7 @@ class CitationGraphService:
                     else self._title_similarity(entry.raw_text, target.title)
                 )
                 score = (0.65 * overlap) + (0.20 * year_proximity) + (0.15 * title_match)
-                if year_distance == 1 and title_match < 0.15 and overlap < 0.60:
+                if year_distance == 1 and title_match < 0.55:
                     continue
 
                 if score > best_score:
@@ -2135,8 +2135,11 @@ class CitationGraphService:
                 author_year_match = max(author_year_match, 0.80)
 
             if year is not None and target.publication_year is not None and abs(target.publication_year - year) == 1:
-                # Require contextual hints for tolerant year matching.
-                if max(title_match, context_title_overlap) < 0.18 and author_year_match < 0.60:
+                # Off-by-one year is allowed only when there is strong title/context evidence.
+                contextual_signal = max(title_match, context_title_overlap)
+                if contextual_signal < 0.22:
+                    continue
+                if not first_author_match and contextual_signal < 0.30:
                     continue
 
             combined = self._clip01(
