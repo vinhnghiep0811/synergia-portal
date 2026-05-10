@@ -19,3 +19,19 @@ export async function semanticSearch(query, top_k = 5) {
     throw new Error(message);
   }
 }
+
+/**
+ * Tìm kiếm theo từ khóa các tài liệu
+ * @param {string} query - Từ khóa tìm kiếm
+ * @param {number} [limit=10] - Số kết quả trả về
+ * @returns {Promise<Object>} Kết quả tìm kiếm
+ */
+export async function keywordSearch(query, limit = 10) {
+  try {
+    const response = await apiClient.get(`/api/search/keyword?query=${encodeURIComponent(query)}&limit=${limit}`);
+    return response.data;
+  } catch (error) {
+    const message = await parseApiError(error);
+    throw new Error(message);
+  }
+}
