@@ -1114,6 +1114,11 @@ class CitationGraphService:
             if self._is_reference_section(section)
         ]
         fallback_reference_section = reference_sections[0] if reference_sections else None
+        source_publication_year = (
+            source_document.publication_year
+            if isinstance(source_document.publication_year, int)
+            else None
+        )
 
         reference_map, mapped_reference_entries = self._build_reference_map(
             sections=source_sections,
@@ -1138,6 +1143,7 @@ class CitationGraphService:
                     candidate=candidate,
                     chunk_text=chunk_text,
                     source_document_id=source_document.id,
+                    source_publication_year=source_publication_year,
                     reference_map=reference_map,
                     target_catalog=target_catalog,
                 )
@@ -1172,6 +1178,12 @@ class CitationGraphService:
                     )
 
                     if target_info is not None:
+                        if not self._is_temporally_valid_citation(
+                            source_publication_year=source_publication_year,
+                            target_publication_year=target_info.publication_year,
+                        ):
+                            continue
+
                         semantic_left = self._normalize_similarity_text(context_snippet)
                         semantic_right = self._build_target_similarity_text(target_info)
                         semantic_similarity = self._semantic_similarity(
@@ -1246,6 +1258,7 @@ class CitationGraphService:
         fallback_mentions = self._build_reference_fallback_mentions(
             run_id=run_id,
             source_document_id=source_document.id,
+            source_publication_year=source_publication_year,
             target_catalog=target_catalog,
             reference_map=reference_map,
             resolved_target_ids=resolved_target_ids,
@@ -1257,6 +1270,7 @@ class CitationGraphService:
         pairwise_mentions = self._build_pairwise_reference_mentions(
             run_id=run_id,
             source_document_id=source_document.id,
+            source_publication_year=source_publication_year,
             target_catalog=target_catalog,
             reference_entries=mapped_reference_entries,
             resolved_target_ids=resolved_target_ids,
@@ -1271,6 +1285,7 @@ class CitationGraphService:
         self,
         run_id: UUID,
         source_document_id: UUID,
+        source_publication_year: int | None,
         target_catalog: TargetCatalog,
         reference_entries: list[ReferenceEntry],
         resolved_target_ids: set[UUID],
@@ -1286,6 +1301,12 @@ class CitationGraphService:
         for target in target_catalog.all_targets:
             target_id = target.canonical_id
             if target_id == source_document_id or target_id in resolved_target_ids:
+                continue
+
+            if not self._is_temporally_valid_citation(
+                source_publication_year=source_publication_year,
+                target_publication_year=target.publication_year,
+            ):
                 continue
 
             (
@@ -1451,6 +1472,7 @@ class CitationGraphService:
         self,
         run_id: UUID,
         source_document_id: UUID,
+        source_publication_year: int | None,
         target_catalog: TargetCatalog,
         reference_map: dict[int, ReferenceEntry],
         resolved_target_ids: set[UUID],
@@ -1472,6 +1494,12 @@ class CitationGraphService:
 
             target_info = target_catalog.by_id.get(target_id)
             if target_info is None:
+                continue
+
+            if not self._is_temporally_valid_citation(
+                source_publication_year=source_publication_year,
+                target_publication_year=target_info.publication_year,
+            ):
                 continue
 
             context_snippet = self._truncate_snippet(ref.raw_text)
@@ -1684,9 +1712,19 @@ class CitationGraphService:
         source_document_id: UUID,
         target_catalog: TargetCatalog,
     ) -> ReferenceEntry:
+        source_info = target_catalog.by_id.get(source_document_id)
+        source_publication_year = source_info.publication_year if source_info else None
+
         if entry.doi:
             by_doi = target_catalog.by_doi.get(entry.doi)
-            if by_doi and by_doi.canonical_id != source_document_id:
+            if (
+                by_doi
+                and by_doi.canonical_id != source_document_id
+                and self._is_temporally_valid_citation(
+                    source_publication_year=source_publication_year,
+                    target_publication_year=by_doi.publication_year,
+                )
+            ):
                 entry.target_id = by_doi.canonical_id
                 entry.link_method = "doi_exact"
                 entry.doi_match = 1.0
@@ -1702,6 +1740,12 @@ class CitationGraphService:
 
             for target in target_catalog.all_targets:
                 if target.canonical_id == source_document_id:
+                    continue
+
+                if not self._is_temporally_valid_citation(
+                    source_publication_year=source_publication_year,
+                    target_publication_year=target.publication_year,
+                ):
                     continue
 
                 title_match = self._title_similarity(entry.title, target.title)
@@ -1734,6 +1778,12 @@ class CitationGraphService:
 
             for target in year_candidates:
                 if target.canonical_id == source_document_id:
+                    continue
+
+                if not self._is_temporally_valid_citation(
+                    source_publication_year=source_publication_year,
+                    target_publication_year=target.publication_year,
+                ):
                     continue
 
                 year_distance = (
@@ -1951,6 +2001,7 @@ class CitationGraphService:
         candidate: MentionCandidate,
         chunk_text: str,
         source_document_id: UUID,
+        source_publication_year: int | None,
         reference_map: dict[int, ReferenceEntry],
         target_catalog: TargetCatalog,
     ) -> list[MentionLink]:
@@ -2010,6 +2061,7 @@ class CitationGraphService:
             )
             return self._resolve_author_year_link(
                 source_document_id=source_document_id,
+                source_publication_year=source_publication_year,
                 author_year_text=candidate.author_year_text or "",
                 context_snippet=context,
                 target_catalog=target_catalog,
@@ -2021,6 +2073,7 @@ class CitationGraphService:
     def _resolve_author_year_link(
         self,
         source_document_id: UUID,
+        source_publication_year: int | None,
         author_year_text: str,
         context_snippet: str,
         target_catalog: TargetCatalog,
@@ -2044,6 +2097,12 @@ class CitationGraphService:
 
         for target in candidates:
             if target.canonical_id == source_document_id:
+                continue
+
+            if not self._is_temporally_valid_citation(
+                source_publication_year=source_publication_year,
+                target_publication_year=target.publication_year,
+            ):
                 continue
 
             year_proximity = 0.0
@@ -2862,6 +2921,15 @@ class CitationGraphService:
         if surname_overlap > 0:
             return 0.40 * surname_overlap
         return 0.0
+
+    def _is_temporally_valid_citation(
+        self,
+        source_publication_year: int | None,
+        target_publication_year: int | None,
+    ) -> bool:
+        if source_publication_year is None or target_publication_year is None:
+            return True
+        return target_publication_year <= source_publication_year
 
     def _surname_overlap(self, left: set[str], right: set[str]) -> float:
         if not left or not right:
