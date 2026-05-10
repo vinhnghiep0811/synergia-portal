@@ -22,7 +22,7 @@ def main() -> None:
     # --- worker init ---
     redis_conn = Redis.from_url(REDIS_URL)
 
-    use_simple_worker = os.getenv("RQ_USE_FORK", "1") != "1"
+    use_simple_worker = os.getenv("RQ_USE_FORK", "1") == "1"
     worker_cls = SimpleWorker if use_simple_worker else Worker
 
     worker = worker_cls([RQ_DOCLING_QUEUE], connection=redis_conn)
