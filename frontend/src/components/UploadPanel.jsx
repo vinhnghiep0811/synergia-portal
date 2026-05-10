@@ -60,8 +60,7 @@ export function UploadPanel({ onUpload, isUploading = false, uploadError = "" })
             />
           </label>
           <p className="form-help">
-            Hỗ trợ PDF text-based, tối đa ~20MB (giới hạn thật sẽ kiểm ở
-            backend).
+            Hỗ trợ PDF text-based
           </p>
         </div>
         {files.length > 0 && (
