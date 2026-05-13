@@ -6,6 +6,8 @@ from pathlib import Path
 from uuid import uuid4
 from unittest.mock import Mock, patch
 
+from sqlalchemy.exc import IntegrityError
+
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -309,6 +311,118 @@ class PdfParseCanonicalMappingTests(unittest.TestCase):
         self.assertFalse(paper.is_duplicate)
         self.assertIsNone(paper.duplicate_of_paper_id)
         self.assertEqual(len(docling_queue.calls), 1)
+
+    def test_pdf_parse_recovers_when_canonical_insert_hits_integrity_error(self) -> None:
+        paper = self._make_paper()
+        existing_canonical = CanonicalDocument(
+            id=uuid4(),
+            canonical_key="10.3000/race-doi",
+            canonical_type="doi",
+            doi="10.3000/race-doi",
+            title_candidate="Canonical From Concurrent Insert",
+        )
+        fake_db = FakeDB(
+            first_results={
+                "PaperRecord": [paper, paper],
+                "CanonicalDocument": [None, existing_canonical],
+            }
+        )
+
+        parse_queue = DummyQueue()
+        docling_queue = DummyQueue()
+        fake_queue_module = types.ModuleType("app.core.queue")
+        fake_queue_module.parse_queue = parse_queue
+        fake_queue_module.docling_queue = docling_queue
+
+        commit_attempts = {"count": 0}
+
+        def commit_side_effect() -> None:
+            commit_attempts["count"] += 1
+            if commit_attempts["count"] == 2:
+                raise IntegrityError("INSERT", {}, Exception("duplicate key"))
+            fake_db.commits += 1
+
+        with (
+            patch.object(pdf_parse_task, "SessionLocal", return_value=fake_db),
+            patch.object(pdf_parse_task, "StorageService", return_value=FakeStorageService()),
+            patch.object(pdf_parse_task, "ActivityLogService", return_value=Mock()),
+            patch.object(
+                pdf_parse_task,
+                "extract_pdf_text_and_preview",
+                return_value=("full text body", "preview"),
+            ),
+            patch.object(
+                pdf_parse_task,
+                "extract_pdf_text_for_llm",
+                return_value=("llm full text", "llm preview", [{"page": 1, "text": "sample"}]),
+            ),
+            patch.object(pdf_parse_task, "detect_doi", return_value="10.3000/race-doi"),
+            patch.object(pdf_parse_task, "detect_title", return_value="Title"),
+            patch.object(pdf_parse_task, "build_fingerprint") as build_fingerprint_mock,
+            patch.object(fake_db, "commit", side_effect=commit_side_effect),
+            patch.dict(sys.modules, {"app.core.queue": fake_queue_module}),
+        ):
+            pdf_parse_task.pdf_parse(str(paper.id))
+
+        self.assertEqual(paper.canonical_document_id, existing_canonical.id)
+        self.assertEqual(fake_db.rollbacks, 1)
+        self.assertEqual(commit_attempts["count"], 3)
+        self.assertFalse(paper.is_duplicate)
+        self.assertEqual(len(parse_queue.calls), 1)
+        self.assertEqual(len(docling_queue.calls), 1)
+        build_fingerprint_mock.assert_not_called()
+
+    def test_pdf_parse_marks_non_duplicate_when_canonical_has_no_prior_paper(self) -> None:
+        paper = self._make_paper()
+        existing_canonical = CanonicalDocument(
+            id=uuid4(),
+            canonical_key="10.4000/no-prior",
+            canonical_type="doi",
+            doi="10.4000/no-prior",
+            title_candidate="Existing Canonical",
+        )
+        fake_db = FakeDB(
+            first_results={
+                "PaperRecord": [paper, None],
+                "CanonicalDocument": [existing_canonical],
+            }
+        )
+
+        parse_queue = DummyQueue()
+        docling_queue = DummyQueue()
+        fake_queue_module = types.ModuleType("app.core.queue")
+        fake_queue_module.parse_queue = parse_queue
+        fake_queue_module.docling_queue = docling_queue
+        activity_service = Mock()
+
+        with (
+            patch.object(pdf_parse_task, "SessionLocal", return_value=fake_db),
+            patch.object(pdf_parse_task, "StorageService", return_value=FakeStorageService()),
+            patch.object(pdf_parse_task, "ActivityLogService", return_value=activity_service),
+            patch.object(
+                pdf_parse_task,
+                "extract_pdf_text_and_preview",
+                return_value=("full text body", "preview"),
+            ),
+            patch.object(
+                pdf_parse_task,
+                "extract_pdf_text_for_llm",
+                return_value=("llm full text", "llm preview", [{"page": 1, "text": "sample"}]),
+            ),
+            patch.object(pdf_parse_task, "detect_doi", return_value="10.4000/no-prior"),
+            patch.object(pdf_parse_task, "detect_title", return_value="Title"),
+            patch.object(pdf_parse_task, "build_fingerprint") as build_fingerprint_mock,
+            patch.dict(sys.modules, {"app.core.queue": fake_queue_module}),
+        ):
+            pdf_parse_task.pdf_parse(str(paper.id))
+
+        self.assertFalse(paper.is_duplicate)
+        self.assertIsNone(paper.duplicate_of_paper_id)
+        self.assertEqual(paper.canonical_document_id, existing_canonical.id)
+        self.assertEqual(len(parse_queue.calls), 1)
+        self.assertEqual(len(docling_queue.calls), 1)
+        activity_service.log_duplicate_detected.assert_not_called()
+        build_fingerprint_mock.assert_not_called()
 
 
 if __name__ == "__main__":

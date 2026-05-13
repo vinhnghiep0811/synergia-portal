@@ -1,5 +1,6 @@
 import argparse
 import dis
+import io
 import logging
 import sys
 import trace
@@ -10,9 +11,11 @@ from types import CodeType
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = ROOT_DIR.parent
 TESTS_DIR = ROOT_DIR / "tests"
 UNIT_TESTS_DIR = TESTS_DIR / "services"
 APP_DIR = ROOT_DIR / "app"
+WORKER_APP_DIR = ROOT_DIR.parent / "worker" / "worker_app"
 
 CRITERIA_ORDER = [
     "File validation",
@@ -33,6 +36,18 @@ MODULE_TO_CRITERIA = {
 
 CLASS_TO_CRITERIA = {
     "CacheDecisionTests": "Cache decision",
+}
+
+CRITERIA_TO_FILES = {
+    "File validation": [APP_DIR / "services" / "paper_service.py"],
+    "DOI và fingerprint": [APP_DIR / "services" / "pdf_parse_service.py"],
+    "Canonical mapping": [WORKER_APP_DIR / "tasks" / "pdf_parse.py"],
+    "LLM output schema": [
+        APP_DIR / "services" / "llm_extraction_service.py",
+        APP_DIR / "schemas" / "extraction_result.py",
+    ],
+    "Cache decision": [APP_DIR / "services" / "llm_extraction_service.py"],
+    "Search ranking helpers": [APP_DIR / "services" / "search_service.py"],
 }
 
 if str(ROOT_DIR) not in sys.path:
@@ -69,13 +84,7 @@ class SummaryTestResult(unittest.TextTestResult):
         return test.__class__.__module__
 
     def _criterion_name(self, test: unittest.case.TestCase) -> str:
-        module = self._module_name(test)
-        class_name = test.__class__.__name__
-
-        if module == "tests.services.test_llm_extraction_service":
-            return CLASS_TO_CRITERIA.get(class_name, "LLM output schema")
-
-        return MODULE_TO_CRITERIA.get(module, "Other")
+        return criterion_for_test(test)
 
     def startTest(self, test):
         self.module_stats[self._module_name(test)]["total"] += 1
@@ -144,6 +153,34 @@ def build_test_suite(pattern: str) -> unittest.TestSuite:
     )
 
 
+def criterion_for_test(test: unittest.case.TestCase) -> str:
+    module = test.__class__.__module__
+    class_name = test.__class__.__name__
+
+    if module == "tests.services.test_llm_extraction_service":
+        return CLASS_TO_CRITERIA.get(class_name, "LLM output schema")
+
+    return MODULE_TO_CRITERIA.get(module, "Other")
+
+
+def filter_suite(suite: unittest.TestSuite, predicate) -> unittest.TestSuite:
+    filtered = unittest.TestSuite()
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            sub = filter_suite(test, predicate)
+            if sub.countTestCases():
+                filtered.addTests(sub)
+        else:
+            if predicate(test):
+                filtered.addTest(test)
+    return filtered
+
+
+def build_suite_for_criterion(pattern: str, criterion_name: str) -> unittest.TestSuite:
+    suite = build_test_suite(pattern)
+    return filter_suite(suite, lambda t: criterion_for_test(t) == criterion_name)
+
+
 def run_suite(pattern: str) -> SummaryTestResult:
     suite = build_test_suite(pattern)
     runner = unittest.TextTestRunner(
@@ -197,7 +234,120 @@ def collect_coverage(counts: dict[tuple[str, int], int]) -> tuple[list[dict[str,
     return file_reports, total_executed, total_executable
 
 
-def print_summary(result: SummaryTestResult, file_reports: list[dict[str, object]], total_executed: int, total_executable: int) -> None:
+def collect_coverage_for_files(
+    counts: dict[tuple[str, int], int],
+    file_paths: list[Path],
+) -> tuple[list[dict[str, object]], int, int]:
+    executed_by_file: dict[Path, set[int]] = defaultdict(set)
+
+    for (filename, lineno), hit_count in counts.items():
+        if hit_count <= 0:
+            continue
+        executed_by_file[Path(filename).resolve()].add(lineno)
+
+    file_reports: list[dict[str, object]] = []
+    total_executable = 0
+    total_executed = 0
+
+    def _format_path(path: Path) -> str:
+        try:
+            return path.relative_to(ROOT_DIR).as_posix()
+        except ValueError:
+            try:
+                return path.relative_to(REPO_ROOT).as_posix()
+            except ValueError:
+                return path.as_posix()
+
+    for file_path in file_paths:
+        resolved = file_path.resolve()
+        if not resolved.exists():
+            file_reports.append({
+                "path": _format_path(file_path),
+                "executed": 0,
+                "executable": 0,
+                "coverage_pct": 0.0,
+            })
+            continue
+
+        executable_lines = executable_lines_for_file(resolved)
+        if not executable_lines:
+            file_reports.append({
+                "path": _format_path(resolved),
+                "executed": 0,
+                "executable": 0,
+                "coverage_pct": 0.0,
+            })
+            continue
+
+        executed_lines = executed_by_file.get(resolved, set()) & executable_lines
+        executable_count = len(executable_lines)
+        executed_count = len(executed_lines)
+        coverage_pct = (executed_count / executable_count * 100) if executable_count else 100.0
+
+        file_reports.append(
+            {
+                "path": _format_path(resolved),
+                "executed": executed_count,
+                "executable": executable_count,
+                "coverage_pct": coverage_pct,
+            }
+        )
+
+        total_executable += executable_count
+        total_executed += executed_count
+
+    return file_reports, total_executed, total_executable
+
+
+def run_suite_for_coverage(suite: unittest.TestSuite) -> trace.CoverageResults:
+    ignoredirs = {
+        str(TESTS_DIR.resolve()),
+        str(Path(sys.prefix).resolve()),
+        str(Path(sys.base_prefix).resolve()),
+    }
+    tracer = trace.Trace(count=1, trace=0, ignoredirs=tuple(ignoredirs))
+    runner = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0)
+
+    previous_disable = logging.getLogger().manager.disable
+    logging.disable(logging.CRITICAL)
+    try:
+        tracer.runfunc(lambda: runner.run(suite))
+    finally:
+        logging.disable(previous_disable)
+
+    return tracer.results()
+
+
+def collect_group_coverages(pattern: str) -> dict[str, dict[str, float | int]]:
+    group_coverages: dict[str, dict[str, float | int]] = {}
+
+    for criterion_name in CRITERIA_ORDER:
+        if criterion_name == "Other":
+            continue
+
+        files = CRITERIA_TO_FILES.get(criterion_name, [])
+        suite = build_suite_for_criterion(pattern, criterion_name)
+        if suite.countTestCases() == 0 or not files:
+            group_coverages[criterion_name] = {
+                "executed": 0,
+                "executable": 0,
+                "coverage_pct": 0.0,
+            }
+            continue
+
+        results = run_suite_for_coverage(suite)
+        _, total_executed, total_executable = collect_coverage_for_files(results.counts, files)
+        coverage_pct = (total_executed / total_executable * 100) if total_executable else 100.0
+        group_coverages[criterion_name] = {
+            "executed": total_executed,
+            "executable": total_executable,
+            "coverage_pct": coverage_pct,
+        }
+
+    return group_coverages
+
+
+def print_summary(result: SummaryTestResult, group_coverages: dict[str, dict[str, float | int]]) -> None:
     print("\n=== Test Summary ===")
 
     print("\nBy testing criteria:")
@@ -233,27 +383,23 @@ def print_summary(result: SummaryTestResult, file_reports: list[dict[str, object
         f"expected_failures={expected_failures}, unexpected_successes={unexpected_successes}"
     )
 
-    print("\n=== Coverage Summary ===")
-    if total_executable == 0:
-        print("No executable lines found under app/.")
-        return
-
-    overall_coverage = total_executed / total_executable * 100
-    print(
-        f"app/: {total_executed}/{total_executable} executable lines covered "
-        f"({overall_coverage:.2f}%)"
-    )
-
-    touched_reports = [report for report in file_reports if report["executed"] > 0]
-    if not touched_reports:
-        print("No app/ source lines were executed by this test run.")
-        return
-
-    print("\nFiles touched by tests:")
-    for report in touched_reports:
+    print("\n=== Coverage by testing criteria ===")
+    for criterion_name in CRITERIA_ORDER:
+        if criterion_name == "Other":
+            continue
+        stats = group_coverages.get(criterion_name)
+        if not stats:
+            print(f"- {criterion_name}: no data")
+            continue
+        executed = stats["executed"]
+        executable = stats["executable"]
+        coverage_pct = stats["coverage_pct"]
+        if executable == 0:
+            print(f"- {criterion_name}: no executable lines found")
+            continue
         print(
-            f"- {report['path']}: {report['executed']}/{report['executable']} "
-            f"({report['coverage_pct']:.2f}%)"
+            f"- {criterion_name}: {executed}/{executable} "
+            f"({coverage_pct:.2f}%)"
         )
 
 
@@ -281,10 +427,9 @@ def main() -> int:
         ignoredirs=tuple(ignoredirs),
     )
     result = tracer.runfunc(run_suite, args.pattern)
-    coverage_results = tracer.results()
-    file_reports, total_executed, total_executable = collect_coverage(coverage_results.counts)
 
-    print_summary(result, file_reports, total_executed, total_executable)
+    group_coverages = collect_group_coverages(args.pattern)
+    print_summary(result, group_coverages)
     return 0 if result.wasSuccessful() else 1
 
 
