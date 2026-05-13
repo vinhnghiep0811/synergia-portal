@@ -152,7 +152,7 @@ class LLMExtractionService:
         normalized = text.lower()
         metrics: list[str] = []
         for needle, label in keywords:
-            if re.search(rf"\\b{re.escape(needle)}\\b", normalized):
+            if re.search(rf"\b{re.escape(needle)}\b", normalized):
                 metrics.append(label)
 
         deduped: list[str] = []

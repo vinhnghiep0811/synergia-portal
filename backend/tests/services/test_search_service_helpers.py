@@ -59,6 +59,10 @@ class SearchHelperTests(unittest.TestCase):
         self.assertEqual(self.service._section_boost("unknown-section"), 0.0)
         self.assertEqual(self.service._section_boost(None), 0.0)
 
+    def test_section_penalty_applies_for_soft_excluded_keywords(self) -> None:
+        self.assertEqual(self.service._section_penalty("Ablation qualitative result"), -0.04)
+        self.assertEqual(self.service._section_penalty("Main results"), 0.0)
+
     def test_query_aware_boost_process_query_boosts_method_section(self) -> None:
         chunk = make_chunk(
             section_type="method",
@@ -82,6 +86,30 @@ class SearchHelperTests(unittest.TestCase):
         boost = self.service._query_aware_boost("need a plan", chunk)
 
         self.assertEqual(boost, 0.06)
+
+    def test_is_hard_excluded_section_by_type_or_keyword(self) -> None:
+        excluded_by_type = make_chunk(
+            section_type="references",
+            section="References",
+            section_full_path="Back Matter > References",
+            embedding=[1.0, 0.0],
+        )
+        excluded_by_keyword = make_chunk(
+            section_type="other",
+            section="Appendix A",
+            section_full_path="Supplement > Appendix",
+            embedding=[1.0, 0.0],
+        )
+        allowed = make_chunk(
+            section_type="method",
+            section="Method",
+            section_full_path="Main > Method",
+            embedding=[1.0, 0.0],
+        )
+
+        self.assertTrue(self.service._is_hard_excluded_section(excluded_by_type))
+        self.assertTrue(self.service._is_hard_excluded_section(excluded_by_keyword))
+        self.assertFalse(self.service._is_hard_excluded_section(allowed))
 
     def test_mmr_select_filters_near_duplicate_embeddings(self) -> None:
         doc_1 = uuid4()
@@ -176,6 +204,72 @@ class SearchHelperTests(unittest.TestCase):
 
         self.assertEqual(selected[0]["chunk"].id, candidate_a["chunk"].id)
         self.assertEqual(selected[1]["chunk"].id, candidate_c["chunk"].id)
+
+    def test_ensure_multi_document_injects_missing_document(self) -> None:
+        doc_1 = uuid4()
+        doc_2 = uuid4()
+        selected = [
+            {
+                "chunk": make_chunk(
+                    section_type="method",
+                    section="Method",
+                    section_full_path="Method > Main",
+                    embedding=[1.0, 0.0],
+                    canonical_document_id=doc_1,
+                ),
+                "relevance": 0.95,
+                "embedding": [1.0, 0.0],
+            }
+        ]
+        candidates = selected + [
+            {
+                "chunk": make_chunk(
+                    section_type="results",
+                    section="Results",
+                    section_full_path="Results > Main",
+                    embedding=[0.0, 1.0],
+                    canonical_document_id=doc_2,
+                ),
+                "relevance": 0.90,
+                "embedding": [0.0, 1.0],
+            }
+        ]
+
+        final = self.service._ensure_multi_document(selected=selected, candidates=candidates, top_k=2)
+        final_doc_ids = {item["chunk"].canonical_document_id for item in final}
+
+        self.assertEqual(len(final), 2)
+        self.assertIn(doc_1, final_doc_ids)
+        self.assertIn(doc_2, final_doc_ids)
+
+    def test_keyword_score_priority_prefers_title_then_doi(self) -> None:
+        in_title = self.service._keyword_score(
+            q_lower="graph",
+            title="Graph Retrieval",
+            filename="paper.pdf",
+            doi="10.1000/graph",
+            content="content",
+        )
+        in_doi = self.service._keyword_score(
+            q_lower="10.1000/graph",
+            title="Retrieval",
+            filename="paper.pdf",
+            doi="10.1000/graph",
+            content="content",
+        )
+
+        self.assertEqual(in_title, 1.0)
+        self.assertEqual(in_doi, 0.95)
+
+    def test_chunk_keyword_score_handles_empty_content(self) -> None:
+        score = self.service._chunk_keyword_score(
+            query="graph retrieval",
+            title="Graph paper",
+            section="Method",
+            content=None,
+        )
+
+        self.assertEqual(score, 0.0)
 
 
 if __name__ == "__main__":

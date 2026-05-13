@@ -13,6 +13,27 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 TESTS_DIR = ROOT_DIR / "tests"
 APP_DIR = ROOT_DIR / "app"
 
+CRITERIA_ORDER = [
+    "File validation",
+    "DOI và fingerprint",
+    "Canonical mapping",
+    "LLM output schema",
+    "Cache decision",
+    "Search ranking helpers",
+    "Other",
+]
+
+MODULE_TO_CRITERIA = {
+    "tests.services.test_paper_service": "File validation",
+    "tests.services.test_pdf_parse_service": "DOI và fingerprint",
+    "tests.services.test_pdf_parse_task_canonical_mapping": "Canonical mapping",
+    "tests.services.test_search_service_helpers": "Search ranking helpers",
+}
+
+CLASS_TO_CRITERIA = {
+    "CacheDecisionTests": "Cache decision",
+}
+
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
@@ -20,6 +41,17 @@ if str(ROOT_DIR) not in sys.path:
 class SummaryTestResult(unittest.TextTestResult):
     def __init__(self, stream, descriptions, verbosity):
         super().__init__(stream, descriptions, verbosity)
+        self.criterion_stats: dict[str, dict[str, int]] = defaultdict(
+            lambda: {
+                "total": 0,
+                "passed": 0,
+                "failed": 0,
+                "errors": 0,
+                "skipped": 0,
+                "expected_failures": 0,
+                "unexpected_successes": 0,
+            }
+        )
         self.module_stats: dict[str, dict[str, int]] = defaultdict(
             lambda: {
                 "total": 0,
@@ -35,32 +67,48 @@ class SummaryTestResult(unittest.TextTestResult):
     def _module_name(self, test: unittest.case.TestCase) -> str:
         return test.__class__.__module__
 
+    def _criterion_name(self, test: unittest.case.TestCase) -> str:
+        module = self._module_name(test)
+        class_name = test.__class__.__name__
+
+        if module == "tests.services.test_llm_extraction_service":
+            return CLASS_TO_CRITERIA.get(class_name, "LLM output schema")
+
+        return MODULE_TO_CRITERIA.get(module, "Other")
+
     def startTest(self, test):
         self.module_stats[self._module_name(test)]["total"] += 1
+        self.criterion_stats[self._criterion_name(test)]["total"] += 1
         super().startTest(test)
 
     def addSuccess(self, test):
         self.module_stats[self._module_name(test)]["passed"] += 1
+        self.criterion_stats[self._criterion_name(test)]["passed"] += 1
         super().addSuccess(test)
 
     def addFailure(self, test, err):
         self.module_stats[self._module_name(test)]["failed"] += 1
+        self.criterion_stats[self._criterion_name(test)]["failed"] += 1
         super().addFailure(test, err)
 
     def addError(self, test, err):
         self.module_stats[self._module_name(test)]["errors"] += 1
+        self.criterion_stats[self._criterion_name(test)]["errors"] += 1
         super().addError(test, err)
 
     def addSkip(self, test, reason):
         self.module_stats[self._module_name(test)]["skipped"] += 1
+        self.criterion_stats[self._criterion_name(test)]["skipped"] += 1
         super().addSkip(test, reason)
 
     def addExpectedFailure(self, test, err):
         self.module_stats[self._module_name(test)]["expected_failures"] += 1
+        self.criterion_stats[self._criterion_name(test)]["expected_failures"] += 1
         super().addExpectedFailure(test, err)
 
     def addUnexpectedSuccess(self, test):
         self.module_stats[self._module_name(test)]["unexpected_successes"] += 1
+        self.criterion_stats[self._criterion_name(test)]["unexpected_successes"] += 1
         super().addUnexpectedSuccess(test)
 
 
@@ -151,6 +199,18 @@ def collect_coverage(counts: dict[tuple[str, int], int]) -> tuple[list[dict[str,
 def print_summary(result: SummaryTestResult, file_reports: list[dict[str, object]], total_executed: int, total_executable: int) -> None:
     print("\n=== Test Summary ===")
 
+    print("\nBy testing criteria:")
+    criteria_names = list(CRITERIA_ORDER)
+    extra_criteria = sorted(name for name in result.criterion_stats if name not in CRITERIA_ORDER)
+    for criterion_name in criteria_names + extra_criteria:
+        stats = result.criterion_stats[criterion_name]
+        print(
+            f"- {criterion_name}: total={stats['total']}, "
+            f"passed={stats['passed']}, failed={stats['failed']}, "
+            f"errors={stats['errors']}, skipped={stats['skipped']}"
+        )
+
+    print("\nBy test module:")
     for module_name in sorted(result.module_stats):
         stats = result.module_stats[module_name]
         print(

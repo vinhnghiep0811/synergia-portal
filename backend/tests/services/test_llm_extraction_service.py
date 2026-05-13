@@ -41,6 +41,13 @@ class ExpectedSchemaTests(unittest.TestCase):
 
         self.assertFalse(result)
 
+    def test_schema_keys_for_log_sorts_keys_for_dict(self) -> None:
+        raw = {"z": 1, "a": 2, "m": 3}
+
+        result = self.service._schema_keys_for_log(raw)
+
+        self.assertEqual(result, "a,m,z")
+
 
 class NormalizeFreeTextTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -61,6 +68,23 @@ class NormalizeFreeTextTests(unittest.TestCase):
             self.fail("Expected normalized text, got None")
         self.assertLessEqual(len(result), 90)
         self.assertNotIn("  ", result)
+
+    def test_to_string_list_deduplicates_and_limits_items(self) -> None:
+        value = ["Alpha", "alpha", "Beta", "Gamma", "Delta"]
+
+        result = self.service._to_string_list(value, max_items=3)
+
+        self.assertEqual(result, ["Alpha", "Beta", "Gamma"])
+
+    def test_extract_metrics_from_text_detects_supported_metrics(self) -> None:
+        text = "We report BLEU, F1, precision and recall on experiments."
+
+        result = self.service._extract_metrics_from_text(text)
+
+        self.assertIn("BLEU", result)
+        self.assertIn("F1", result)
+        self.assertIn("precision", result)
+        self.assertIn("recall", result)
 
 
 class CoerceUnexpectedSchemaTests(unittest.TestCase):
@@ -154,6 +178,55 @@ class NormalizeResultTests(unittest.TestCase):
         self.assertEqual(normalized["evaluation_setup"]["value"]["datasets"], ["ImageNet"])
         self.assertGreater(len(normalized["evaluation_setup"]["evidence"]), 0)
 
+    def test_normalize_list_field_drops_placeholder_and_dedupes(self) -> None:
+        raw = [
+            "First contribution",
+            "N/A",
+            "first contribution",
+            {"value": "Second contribution", "evidence": []},
+        ]
+
+        result = self.service._normalize_list_field(raw, max_items=5)
+
+        values = [item["value"] for item in result]
+        self.assertEqual(values, ["First contribution", "Second contribution"])
+
+    def test_normalize_evaluation_setup_drops_content_when_missing_evidence(self) -> None:
+        raw = {
+            "value": {
+                "datasets": ["ImageNet"],
+                "metrics": ["F1"],
+                "benchmarks": [],
+            },
+            "evidence": [],
+        }
+
+        result = self.service._normalize_evaluation_setup(raw, pages=[])
+
+        self.assertEqual(result["value"]["datasets"], [])
+        self.assertEqual(result["value"]["metrics"], [])
+        self.assertEqual(result["value"]["benchmarks"], [])
+        self.assertEqual(result["evidence"], [])
+
+    def test_normalize_evidence_filters_numeric_dump(self) -> None:
+        raw_evidence = [
+            {
+                "snippet": "12345 67890 11111 22222 33333 44444 55555 66666",
+                "page": 2,
+                "section": "Table 1",
+            },
+            {
+                "snippet": "We propose a practical method with robust performance.",
+                "page": 1,
+                "section": "Method",
+            },
+        ]
+
+        result = self.service._normalize_evidence(raw_evidence)
+
+        self.assertEqual(len(result), 1)
+        self.assertIn("practical method", result[0]["snippet"].lower())
+
 
 class CacheDecisionTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -177,6 +250,23 @@ class CacheDecisionTests(unittest.TestCase):
         self.assertTrue(getattr(result, "cache_hit", False))
         self.service._get_canonical_or_raise.assert_called_once_with(canonical_id)
         self.service.repo.get_latest_completed_by_canonical_document_id.assert_called_once_with(canonical_id)
+
+    def test_run_for_canonical_document_uses_resolved_canonical_id_for_cache_lookup(self) -> None:
+        requested_id = uuid4()
+        resolved_id = uuid4()
+        canonical = Mock(id=resolved_id)
+        cached_run = Mock()
+
+        self.service.repo = Mock()
+        self.service.repo.get_latest_completed_by_canonical_document_id.return_value = cached_run
+        self.service._get_canonical_or_raise = Mock(return_value=canonical)
+        self.service._create_running_extraction_run = Mock(
+            side_effect=AssertionError("Cache hit should return before creating a new run.")
+        )
+
+        self.service.run_for_canonical_document(requested_id)
+
+        self.service.repo.get_latest_completed_by_canonical_document_id.assert_called_once_with(resolved_id)
 
 
 if __name__ == "__main__":

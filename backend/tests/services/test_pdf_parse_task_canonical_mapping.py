@@ -101,6 +101,11 @@ class PdfParseCanonicalMappingTests(unittest.TestCase):
             publication_status="draft",
         )
 
+    def test_parse_storage_path_extracts_object_name(self) -> None:
+        result = pdf_parse_task.parse_storage_path("s3://papers/papers/my-file.pdf")
+
+        self.assertEqual(result, "papers/my-file.pdf")
+
     def test_pdf_parse_uses_doi_for_canonical_and_non_duplicate(self) -> None:
         paper = self._make_paper()
         fake_db = FakeDB(
@@ -152,6 +157,55 @@ class PdfParseCanonicalMappingTests(unittest.TestCase):
         self.assertEqual(created_canonical.title_candidate, "Sample Title")
 
         self.assertEqual(len(parse_queue.calls), 1)
+        self.assertEqual(len(docling_queue.calls), 1)
+
+    def test_pdf_parse_reuses_existing_doi_canonical(self) -> None:
+        paper = self._make_paper()
+        existing_canonical = CanonicalDocument(
+            id=uuid4(),
+            canonical_key="10.1234/existing-doi",
+            canonical_type="doi",
+            doi="10.1234/existing-doi",
+            title_candidate="Existing DOI Canonical",
+        )
+        fake_db = FakeDB(
+            first_results={
+                "PaperRecord": [paper, paper],
+                "CanonicalDocument": [existing_canonical],
+            }
+        )
+
+        parse_queue = DummyQueue()
+        docling_queue = DummyQueue()
+        fake_queue_module = types.ModuleType("app.core.queue")
+        fake_queue_module.parse_queue = parse_queue
+        fake_queue_module.docling_queue = docling_queue
+
+        with (
+            patch.object(pdf_parse_task, "SessionLocal", return_value=fake_db),
+            patch.object(pdf_parse_task, "StorageService", return_value=FakeStorageService()),
+            patch.object(pdf_parse_task, "ActivityLogService", return_value=Mock()),
+            patch.object(
+                pdf_parse_task,
+                "extract_pdf_text_and_preview",
+                return_value=("full text body", "preview"),
+            ),
+            patch.object(
+                pdf_parse_task,
+                "extract_pdf_text_for_llm",
+                return_value=("llm full text", "llm preview", [{"page": 1, "text": "sample"}]),
+            ),
+            patch.object(pdf_parse_task, "detect_doi", return_value="10.1234/existing-doi"),
+            patch.object(pdf_parse_task, "detect_title", return_value="Title"),
+            patch.object(pdf_parse_task, "build_fingerprint") as build_fingerprint_mock,
+            patch.dict(sys.modules, {"app.core.queue": fake_queue_module}),
+        ):
+            pdf_parse_task.pdf_parse(str(paper.id))
+
+        self.assertEqual(paper.canonical_document_id, existing_canonical.id)
+        self.assertEqual(len(fake_db.added), 0)
+        build_fingerprint_mock.assert_not_called()
+        self.assertFalse(paper.is_duplicate)
         self.assertEqual(len(docling_queue.calls), 1)
 
     def test_pdf_parse_uses_fingerprint_and_marks_duplicate(self) -> None:
@@ -210,6 +264,51 @@ class PdfParseCanonicalMappingTests(unittest.TestCase):
         self.assertEqual(len(fake_db.added), 0)
         self.assertEqual(len(parse_queue.calls), 1)
         self.assertEqual(len(docling_queue.calls), 0)
+
+    def test_pdf_parse_creates_fingerprint_canonical_when_missing_and_non_duplicate(self) -> None:
+        paper = self._make_paper()
+        fake_db = FakeDB(
+            first_results={
+                "PaperRecord": [paper, paper],
+                "CanonicalDocument": [None],
+            }
+        )
+
+        parse_queue = DummyQueue()
+        docling_queue = DummyQueue()
+        fake_queue_module = types.ModuleType("app.core.queue")
+        fake_queue_module.parse_queue = parse_queue
+        fake_queue_module.docling_queue = docling_queue
+
+        with (
+            patch.object(pdf_parse_task, "SessionLocal", return_value=fake_db),
+            patch.object(pdf_parse_task, "StorageService", return_value=FakeStorageService()),
+            patch.object(pdf_parse_task, "ActivityLogService", return_value=Mock()),
+            patch.object(
+                pdf_parse_task,
+                "extract_pdf_text_and_preview",
+                return_value=("full text body", "preview"),
+            ),
+            patch.object(
+                pdf_parse_task,
+                "extract_pdf_text_for_llm",
+                return_value=("llm full text", "llm preview", [{"page": 1, "text": "sample"}]),
+            ),
+            patch.object(pdf_parse_task, "detect_doi", return_value=None),
+            patch.object(pdf_parse_task, "detect_title", return_value="Generated title"),
+            patch.object(pdf_parse_task, "build_fingerprint", return_value="new-fp-xyz"),
+            patch.dict(sys.modules, {"app.core.queue": fake_queue_module}),
+        ):
+            pdf_parse_task.pdf_parse(str(paper.id))
+
+        self.assertEqual(len(fake_db.added), 1)
+        created_canonical = fake_db.added[0]
+        self.assertEqual(created_canonical.canonical_key, "new-fp-xyz")
+        self.assertEqual(created_canonical.canonical_type, "fingerprint")
+        self.assertEqual(created_canonical.fingerprint, "new-fp-xyz")
+        self.assertFalse(paper.is_duplicate)
+        self.assertIsNone(paper.duplicate_of_paper_id)
+        self.assertEqual(len(docling_queue.calls), 1)
 
 
 if __name__ == "__main__":
