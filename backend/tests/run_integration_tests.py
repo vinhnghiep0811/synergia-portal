@@ -11,28 +11,29 @@ from types import CodeType
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 TESTS_DIR = ROOT_DIR / "tests"
-UNIT_TESTS_DIR = TESTS_DIR / "services"
 APP_DIR = ROOT_DIR / "app"
 
 CRITERIA_ORDER = [
-    "File validation",
-    "DOI và fingerprint",
-    "Canonical mapping",
-    "LLM output schema",
-    "Cache decision",
-    "Search ranking helpers",
+    "Upload và lưu trữ file",
+    "Queue và worker",
+    "Parse và canonical mapping",
+    "Docling và build structure",
+    "LLM extraction",
+    "Embedding và semantic search",
+    "Citation graph scoring",
+    "Duplicate và canonical caching",
     "Other",
 ]
 
 MODULE_TO_CRITERIA = {
-    "tests.services.test_paper_service": "File validation",
-    "tests.services.test_pdf_parse_service": "DOI và fingerprint",
-    "tests.services.test_pdf_parse_task_canonical_mapping": "Canonical mapping",
-    "tests.services.test_search_service_helpers": "Search ranking helpers",
-}
-
-CLASS_TO_CRITERIA = {
-    "CacheDecisionTests": "Cache decision",
+    "tests.integration.test_upload_and_storage_integration": "Upload và lưu trữ file",
+    "tests.integration.test_queue_and_worker_integration": "Queue và worker",
+    "tests.integration.test_parse_and_canonical_mapping_integration": "Parse và canonical mapping",
+    "tests.integration.test_docling_and_build_structure_integration": "Docling và build structure",
+    "tests.integration.test_llm_extraction_integration": "LLM extraction",
+    "tests.integration.test_embedding_and_semantic_search_integration": "Embedding và semantic search",
+    "tests.integration.test_citation_graph_scoring_integration": "Citation graph scoring",
+    "tests.integration.test_duplicate_and_canonical_caching_integration": "Duplicate và canonical caching",
 }
 
 if str(ROOT_DIR) not in sys.path:
@@ -70,11 +71,6 @@ class SummaryTestResult(unittest.TextTestResult):
 
     def _criterion_name(self, test: unittest.case.TestCase) -> str:
         module = self._module_name(test)
-        class_name = test.__class__.__name__
-
-        if module == "tests.services.test_llm_extraction_service":
-            return CLASS_TO_CRITERIA.get(class_name, "LLM output schema")
-
         return MODULE_TO_CRITERIA.get(module, "Other")
 
     def startTest(self, test):
@@ -138,7 +134,7 @@ def executable_lines_for_file(file_path: Path) -> set[int]:
 def build_test_suite(pattern: str) -> unittest.TestSuite:
     loader = unittest.defaultTestLoader
     return loader.discover(
-        start_dir=str(UNIT_TESTS_DIR),
+        start_dir=str(TESTS_DIR / "integration"),
         pattern=pattern,
         top_level_dir=str(ROOT_DIR),
     )
@@ -198,9 +194,9 @@ def collect_coverage(counts: dict[tuple[str, int], int]) -> tuple[list[dict[str,
 
 
 def print_summary(result: SummaryTestResult, file_reports: list[dict[str, object]], total_executed: int, total_executable: int) -> None:
-    print("\n=== Test Summary ===")
+    print("\n=== Integration Test Summary ===")
 
-    print("\nBy testing criteria:")
+    print("\nBy integration testing criteria:")
     criteria_names = list(CRITERIA_ORDER)
     extra_criteria = sorted(name for name in result.criterion_stats if name not in CRITERIA_ORDER)
     for criterion_name in criteria_names + extra_criteria:
@@ -233,7 +229,7 @@ def print_summary(result: SummaryTestResult, file_reports: list[dict[str, object
         f"expected_failures={expected_failures}, unexpected_successes={unexpected_successes}"
     )
 
-    print("\n=== Coverage Summary ===")
+    print("\n=== Coverage Summary (Integration Tests) ===")
     if total_executable == 0:
         print("No executable lines found under app/.")
         return
@@ -258,7 +254,7 @@ def print_summary(result: SummaryTestResult, file_reports: list[dict[str, object
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run all backend unit tests with summary and coverage.")
+    parser = argparse.ArgumentParser(description="Run all backend integration tests with summary and coverage.")
     parser.add_argument(
         "--pattern",
         default="test_*.py",
