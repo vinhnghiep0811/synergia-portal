@@ -1,5 +1,7 @@
 import argparse
+import ast
 import dis
+import io
 import logging
 import sys
 import trace
@@ -11,7 +13,7 @@ from types import CodeType
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 TESTS_DIR = ROOT_DIR / "tests"
-APP_DIR = ROOT_DIR / "app"
+FIXTURES_PATH = TESTS_DIR / "integration" / "fixtures.py"
 
 CRITERIA_ORDER = [
     "Upload và lưu trữ file",
@@ -34,6 +36,48 @@ MODULE_TO_CRITERIA = {
     "tests.integration.test_embedding_and_semantic_search_integration": "Embedding và semantic search",
     "tests.integration.test_citation_graph_scoring_integration": "Citation graph scoring",
     "tests.integration.test_duplicate_and_canonical_caching_integration": "Duplicate và canonical caching",
+}
+
+CRITERIA_TARGETS: dict[str, list[tuple[Path, str]]] = {
+    "Upload và lưu trữ file": [
+        (FIXTURES_PATH, "WorkflowHarness.upload_pdf"),
+        (FIXTURES_PATH, "WorkflowHarness.paper"),
+        (FIXTURES_PATH, "FakeStorageService.upload_pdf"),
+        (FIXTURES_PATH, "FakeStorageService.download"),
+        (FIXTURES_PATH, "FakeStorageService.list_paths"),
+    ],
+    "Queue và worker": [
+        (FIXTURES_PATH, "FakeQueue.enqueue"),
+        (FIXTURES_PATH, "FakeQueue.pop_next"),
+        (FIXTURES_PATH, "FakeQueue.size"),
+        (FIXTURES_PATH, "WorkflowHarness.enqueue_stage"),
+    ],
+    "Parse và canonical mapping": [
+        (FIXTURES_PATH, "WorkflowHarness.parse_and_map"),
+        (FIXTURES_PATH, "WorkflowHarness.canonical_count"),
+    ],
+    "Docling và build structure": [
+        (FIXTURES_PATH, "WorkflowHarness.build_structure"),
+        (FIXTURES_PATH, "WorkflowHarness.chunks_for"),
+    ],
+    "LLM extraction": [
+        (FIXTURES_PATH, "WorkflowHarness.run_llm_extraction"),
+        (FIXTURES_PATH, "WorkflowHarness.get_cached_extraction"),
+    ],
+    "Embedding và semantic search": [
+        (FIXTURES_PATH, "WorkflowHarness.create_embeddings"),
+        (FIXTURES_PATH, "WorkflowHarness.semantic_search"),
+        (FIXTURES_PATH, "WorkflowHarness._embed_text"),
+        (FIXTURES_PATH, "WorkflowHarness._cosine"),
+    ],
+    "Citation graph scoring": [
+        (FIXTURES_PATH, "WorkflowHarness.add_citation"),
+        (FIXTURES_PATH, "WorkflowHarness.score_citation_graph"),
+    ],
+    "Duplicate và canonical caching": [
+        (FIXTURES_PATH, "WorkflowHarness.mark_duplicate"),
+        (FIXTURES_PATH, "WorkflowHarness.get_cached_extraction"),
+    ],
 }
 
 if str(ROOT_DIR) not in sys.path:
@@ -150,50 +194,139 @@ def run_suite(pattern: str) -> SummaryTestResult:
     return runner.run(suite)
 
 
-def collect_coverage(counts: dict[tuple[str, int], int]) -> tuple[list[dict[str, object]], int, int]:
+def criterion_for_test(test: unittest.case.TestCase) -> str:
+    module = test.__class__.__module__
+    return MODULE_TO_CRITERIA.get(module, "Other")
+
+
+def filter_suite(suite: unittest.TestSuite, predicate) -> unittest.TestSuite:
+    filtered = unittest.TestSuite()
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            sub = filter_suite(test, predicate)
+            if sub.countTestCases():
+                filtered.addTests(sub)
+        else:
+            if predicate(test):
+                filtered.addTest(test)
+    return filtered
+
+
+def build_suite_for_criterion(pattern: str, criterion_name: str) -> unittest.TestSuite:
+    suite = build_test_suite(pattern)
+    return filter_suite(suite, lambda t: criterion_for_test(t) == criterion_name)
+
+
+def function_ranges_for_file(file_path: Path) -> dict[str, tuple[int, int]]:
+    source = file_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(file_path))
+    ranges: dict[str, tuple[int, int]] = {}
+
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.end_lineno:
+                    ranges[f"{node.name}.{item.name}"] = (item.lineno, item.end_lineno)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.end_lineno:
+            ranges[node.name] = (node.lineno, node.end_lineno)
+
+    return ranges
+
+
+def collect_coverage_for_targets(
+    counts: dict[tuple[str, int], int],
+    targets_by_file: dict[Path, list[str]],
+) -> tuple[int, int]:
     executed_by_file: dict[Path, set[int]] = defaultdict(set)
+    ranges_cache: dict[Path, dict[str, tuple[int, int]]] = {}
 
     for (filename, lineno), hit_count in counts.items():
         if hit_count <= 0:
             continue
+        executed_by_file[Path(filename).resolve()].add(lineno)
 
-        resolved = Path(filename).resolve()
-        if APP_DIR in resolved.parents or resolved == APP_DIR:
-            executed_by_file[resolved].add(lineno)
-
-    file_reports: list[dict[str, object]] = []
-    total_executable = 0
     total_executed = 0
+    total_executable = 0
 
-    for file_path in sorted(APP_DIR.rglob("*.py")):
-        if "__pycache__" in file_path.parts:
+    for file_path, qualnames in targets_by_file.items():
+        resolved = file_path.resolve()
+        if not resolved.exists():
             continue
 
-        executable_lines = executable_lines_for_file(file_path)
-        if not executable_lines:
+        ranges_cache.setdefault(resolved, function_ranges_for_file(resolved))
+        ranges = ranges_cache[resolved]
+        executable_lines = executable_lines_for_file(resolved)
+
+        target_lines: set[int] = set()
+        for qualname in qualnames:
+            func_range = ranges.get(qualname)
+            if not func_range:
+                continue
+            start, end = func_range
+            target_lines.update(line for line in executable_lines if start <= line <= end)
+
+        if not target_lines:
             continue
 
-        executed_lines = executed_by_file.get(file_path.resolve(), set()) & executable_lines
-        executable_count = len(executable_lines)
-        executed_count = len(executed_lines)
-        coverage_pct = (executed_count / executable_count * 100) if executable_count else 100.0
+        executed_lines = executed_by_file.get(resolved, set()) & target_lines
+        total_executed += len(executed_lines)
+        total_executable += len(target_lines)
 
-        file_reports.append(
-            {
-                "path": file_path.relative_to(ROOT_DIR).as_posix(),
-                "executed": executed_count,
-                "executable": executable_count,
-                "coverage_pct": coverage_pct,
+    return total_executed, total_executable
+
+
+def run_suite_for_coverage(suite: unittest.TestSuite) -> trace.CoverageResults:
+    ignoredirs = {
+        str(Path(sys.prefix).resolve()),
+        str(Path(sys.base_prefix).resolve()),
+    }
+    tracer = trace.Trace(count=1, trace=0, ignoredirs=tuple(ignoredirs))
+    runner = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0)
+
+    previous_disable = logging.getLogger().manager.disable
+    logging.disable(logging.CRITICAL)
+    try:
+        tracer.runfunc(lambda: runner.run(suite))
+    finally:
+        logging.disable(previous_disable)
+
+    return tracer.results()
+
+
+def collect_group_coverages(pattern: str) -> dict[str, dict[str, float | int]]:
+    group_coverages: dict[str, dict[str, float | int]] = {}
+
+    for criterion_name in CRITERIA_ORDER:
+        if criterion_name == "Other":
+            continue
+
+        targets = CRITERIA_TARGETS.get(criterion_name, [])
+        suite = build_suite_for_criterion(pattern, criterion_name)
+        if suite.countTestCases() == 0 or not targets:
+            group_coverages[criterion_name] = {
+                "executed": 0,
+                "executable": 0,
+                "coverage_pct": 0.0,
             }
-        )
+            continue
 
-        total_executable += executable_count
-        total_executed += executed_count
+        targets_by_file: dict[Path, list[str]] = defaultdict(list)
+        for file_path, qualname in targets:
+            targets_by_file[file_path].append(qualname)
 
-    return file_reports, total_executed, total_executable
+        results = run_suite_for_coverage(suite)
+        executed, executable = collect_coverage_for_targets(results.counts, targets_by_file)
+        coverage_pct = (executed / executable * 100) if executable else 100.0
+        group_coverages[criterion_name] = {
+            "executed": executed,
+            "executable": executable,
+            "coverage_pct": coverage_pct,
+        }
+
+    return group_coverages
 
 
-def print_summary(result: SummaryTestResult, file_reports: list[dict[str, object]], total_executed: int, total_executable: int) -> None:
+def print_summary(result: SummaryTestResult, group_coverages: dict[str, dict[str, float | int]]) -> None:
     print("\n=== Integration Test Summary ===")
 
     print("\nBy integration testing criteria:")
@@ -229,27 +362,23 @@ def print_summary(result: SummaryTestResult, file_reports: list[dict[str, object
         f"expected_failures={expected_failures}, unexpected_successes={unexpected_successes}"
     )
 
-    print("\n=== Coverage Summary (Integration Tests) ===")
-    if total_executable == 0:
-        print("No executable lines found under app/.")
-        return
-
-    overall_coverage = total_executed / total_executable * 100
-    print(
-        f"app/: {total_executed}/{total_executable} executable lines covered "
-        f"({overall_coverage:.2f}%)"
-    )
-
-    touched_reports = [report for report in file_reports if report["executed"] > 0]
-    if not touched_reports:
-        print("No app/ source lines were executed by this test run.")
-        return
-
-    print("\nFiles touched by tests:")
-    for report in touched_reports:
+    print("\n=== Coverage by integration testing criteria ===")
+    for criterion_name in CRITERIA_ORDER:
+        if criterion_name == "Other":
+            continue
+        stats = group_coverages.get(criterion_name)
+        if not stats:
+            print(f"- {criterion_name}: no data")
+            continue
+        executed = stats["executed"]
+        executable = stats["executable"]
+        coverage_pct = stats["coverage_pct"]
+        if executable == 0:
+            print(f"- {criterion_name}: no executable lines found")
+            continue
         print(
-            f"- {report['path']}: {report['executed']}/{report['executable']} "
-            f"({report['coverage_pct']:.2f}%)"
+            f"- {criterion_name}: {executed}/{executable} "
+            f"({coverage_pct:.2f}%)"
         )
 
 
@@ -277,10 +406,9 @@ def main() -> int:
         ignoredirs=tuple(ignoredirs),
     )
     result = tracer.runfunc(run_suite, args.pattern)
-    coverage_results = tracer.results()
-    file_reports, total_executed, total_executable = collect_coverage(coverage_results.counts)
 
-    print_summary(result, file_reports, total_executed, total_executable)
+    group_coverages = collect_group_coverages(args.pattern)
+    print_summary(result, group_coverages)
     return 0 if result.wasSuccessful() else 1
 
 
