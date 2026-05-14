@@ -591,6 +591,28 @@ class LLMExtractionService:
 
         return normalized
 
+    @staticmethod
+    def _override_provider_as_regex(provider_result: dict[str, Any]) -> dict[str, Any]:
+        """Return a shallow copy of provider_result with provider set to
+        ``regex_parsing`` so the DB record correctly reflects that the
+        extraction data came from deterministic regex/heuristic parsing,
+        not from the LLM."""
+        overridden = dict(provider_result)
+        overridden["provider"] = "regex_parsing"
+        return overridden
+
+    @staticmethod
+    def _tag_provider_schema_coercion(provider_result: dict[str, Any]) -> dict[str, Any]:
+        """Return a shallow copy of provider_result with '+schema_coercion'
+        appended to the provider name so the DB record reflects that the
+        LLM did produce output but it was locally reshaped to the expected
+        schema."""
+        overridden = dict(provider_result)
+        original = overridden.get("provider") or "unknown"
+        if not original.endswith("+schema_coercion"):
+            overridden["provider"] = f"{original}+schema_coercion"
+        return overridden
+
     def _extract_with_schema_retry_once(
         self,
         prompt: str,
@@ -609,7 +631,7 @@ class LLMExtractionService:
             )
 
             degraded_provider_result = {
-                "provider": "fallback",
+                "provider": "regex_parsing",
                 "model": getattr(self.provider, "ollama_model", None)
                 or getattr(self.provider, "model", None)
                 or "unknown",
@@ -642,7 +664,7 @@ class LLMExtractionService:
                 logger.warning(
                     "[LLM SERVICE] Invalid JSON from provider; using deterministic fallback from input text.",
                 )
-                return provider_result, coerced_from_input
+                return self._override_provider_as_regex(provider_result), coerced_from_input
 
             logger.warning(
                 "[LLM SERVICE] Invalid JSON from provider and no deterministic fallback available; using empty payload.",
@@ -683,14 +705,14 @@ class LLMExtractionService:
                 logger.warning(
                     "[LLM SCHEMA] Schema-repair provider failed; using local schema coercion from first response.",
                 )
-                return provider_result, coerced_initial
+                return self._tag_provider_schema_coercion(provider_result), coerced_initial
 
             coerced_from_input = self._coerce_from_input_text(input_text)
             if coerced_from_input is not None:
                 logger.warning(
                     "[LLM SCHEMA] Schema-repair provider failed; using deterministic fallback from input text.",
                 )
-                return provider_result, coerced_from_input
+                return self._override_provider_as_regex(provider_result), coerced_from_input
 
             logger.warning(
                 "[LLM SCHEMA] Schema-repair provider failed and no fallback available; using empty payload.",
@@ -710,14 +732,14 @@ class LLMExtractionService:
                 logger.warning(
                     "[LLM SCHEMA] Schema-repair retry JSON invalid; using local schema coercion from first response.",
                 )
-                return provider_result, coerced_initial
+                return self._tag_provider_schema_coercion(provider_result), coerced_initial
 
             coerced_from_input = self._coerce_from_input_text(input_text)
             if coerced_from_input is not None:
                 logger.warning(
                     "[LLM SCHEMA] Schema-repair retry JSON invalid; using deterministic fallback from input text.",
                 )
-                return repaired_provider_result, coerced_from_input
+                return self._override_provider_as_regex(repaired_provider_result), coerced_from_input
 
             logger.warning(
                 "[LLM SCHEMA] Schema-repair retry JSON invalid and no fallback available; using empty payload.",
@@ -730,21 +752,21 @@ class LLMExtractionService:
                 logger.warning(
                     "[LLM SCHEMA] Schema-repair retry still non-standard; using local schema coercion.",
                 )
-                return repaired_provider_result, coerced
+                return self._tag_provider_schema_coercion(repaired_provider_result), coerced
 
             coerced_initial = self._coerce_unexpected_schema_to_expected(raw_result)
             if coerced_initial is not None:
                 logger.warning(
                     "[LLM SCHEMA] Retry non-standard; using local schema coercion from first response.",
                 )
-                return provider_result, coerced_initial
+                return self._tag_provider_schema_coercion(provider_result), coerced_initial
 
             coerced_from_input = self._coerce_from_input_text(input_text)
             if coerced_from_input is not None:
                 logger.warning(
                     "[LLM SCHEMA] Retry non-standard; using deterministic fallback from input text.",
                 )
-                return repaired_provider_result, coerced_from_input
+                return self._override_provider_as_regex(repaired_provider_result), coerced_from_input
 
             logger.error(
                 "[LLM SCHEMA] Schema-repair retry failed. provider=%s model=%s keys=%s",
