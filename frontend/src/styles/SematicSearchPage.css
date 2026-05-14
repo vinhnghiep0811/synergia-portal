@@ -1,4 +1,44 @@
 /* SemanticSearchPage responsive styles */
+
+/* Search Mode Toggle Styles */
+.semantic-search-mode-group {
+  margin-bottom: 1.5rem;
+}
+
+.semantic-search-mode-toggle {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.25rem;
+  background: #f3f4f6;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+}
+
+.semantic-search-mode-button {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: transparent;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.semantic-search-mode-button:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.semantic-search-mode-button.active {
+  background: white;
+  color: #4f46e5;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
 .semantic-search-form {
   display: grid;
   grid-template-columns: 1fr 100px auto;
@@ -366,6 +406,16 @@
 
 /* Mobile responsive styles */
 @media (max-width: 768px) {
+  .semantic-search-mode-toggle {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .semantic-search-mode-button {
+    padding: 0.6rem 0.8rem;
+    font-size: 0.85rem;
+  }
+
   .semantic-search-form {
     grid-template-columns: 1fr;
     gap: 1rem;
