@@ -1,628 +1,691 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "../components/AppHeader.jsx";
-import { 
-  getAdminOverview, 
-  getAdminPapers, 
-  getAdminCanonicalDocuments, 
-  getAdminActivities 
+import {
+  getAdminActivities,
+  getAdminCanonicalDocuments,
+  getAdminConfiguration,
+  getAdminEvaluationReport,
+  getAdminOverview,
+  getAdminPapers,
+  getAdminProcessingLogs,
+  updateAdminConfiguration,
 } from "../services/adminApi.js";
+
+const TAB_CONFIG = [
+  { key: "overview", label: "Tổng quan" },
+  { key: "papers", label: "Papers" },
+  { key: "canonical", label: "Canonical" },
+  { key: "activities", label: "Activity log" },
+  { key: "processing", label: "Processing log" },
+  { key: "config", label: "Cấu hình" },
+  { key: "evaluation", label: "Dữ liệu đánh giá" },
+];
+
+function formatDate(value) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("vi-VN");
+}
+
+function getStatusColor(status) {
+  const key = String(status || "").toLowerCase();
+  if (key.includes("success") || key === "completed" || key === "published") return "#16a34a";
+  if (key.includes("warn") || key === "warning" || key === "pending") return "#d97706";
+  if (key.includes("error") || key === "failed") return "#dc2626";
+  return "#2563eb";
+}
+
+function Pagination({ page, totalPages, onChange }) {
+  if (totalPages <= 1) return null;
+
+  const pages = [];
+  const start = Math.max(1, page - 2);
+  const end = Math.min(totalPages, start + 4);
+  for (let i = start; i <= end; i += 1) pages.push(i);
+
+  return (
+    <div style={{ display: "flex", gap: "0.5rem", justifyContent: "center", marginTop: "1rem" }}>
+      <button type="button" onClick={() => onChange(Math.max(1, page - 1))} disabled={page === 1}>
+        ‹
+      </button>
+      {pages.map((p) => (
+        <button
+          key={p}
+          type="button"
+          onClick={() => onChange(p)}
+          style={{
+            minWidth: "2rem",
+            background: p === page ? "#2563eb" : "white",
+            color: p === page ? "white" : "inherit",
+            border: "1px solid #d1d5db",
+            borderRadius: "0.25rem",
+          }}
+        >
+          {p}
+        </button>
+      ))}
+      <button type="button" onClick={() => onChange(Math.min(totalPages, page + 1))} disabled={page === totalPages}>
+        ›
+      </button>
+    </div>
+  );
+}
 
 export function AdminPage() {
   const [activeTab, setActiveTab] = useState("overview");
-  const [overview, setOverview] = useState(null);
-  const [papers, setPapers] = useState([]);
-  const [canonicalDocuments, setCanonicalDocuments] = useState([]);
-  const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  
-  // Pagination states
-  const [papersPage, setPapersPage] = useState(1);
-  const [canonicalPage, setCanonicalPage] = useState(1);
-  const [activitiesPage, setActivitiesPage] = useState(1);
-  
-  // Total counts for pagination
+
+  const [overview, setOverview] = useState(null);
+  const [papers, setPapers] = useState([]);
   const [papersTotal, setPapersTotal] = useState(0);
+  const [papersPage, setPapersPage] = useState(1);
+  const papersPageSize = 10;
+
+  const [canonicalDocs, setCanonicalDocs] = useState([]);
   const [canonicalTotal, setCanonicalTotal] = useState(0);
+  const [canonicalPage, setCanonicalPage] = useState(1);
+  const canonicalPageSize = 10;
+
+  const [activities, setActivities] = useState([]);
   const [activitiesTotal, setActivitiesTotal] = useState(0);
-  
-  // Different page sizes for each tab
-  const papersPageSize = 5;
-  const canonicalPageSize = 5;
+  const [activitiesPage, setActivitiesPage] = useState(1);
   const activitiesPageSize = 20;
 
-  const loadOverview = useCallback(async () => {
+  const [processingLogs, setProcessingLogs] = useState([]);
+  const [processingTotal, setProcessingTotal] = useState(0);
+  const [processingPage, setProcessingPage] = useState(1);
+  const [processingErrorsOnly, setProcessingErrorsOnly] = useState(false);
+  const [processingFamily, setProcessingFamily] = useState("all");
+  const processingPageSize = 20;
+
+  const [config, setConfig] = useState(null);
+  const [configForm, setConfigForm] = useState({
+    llm_provider: "gemini",
+    llm_model: "",
+    embedding_model: "",
+    metadata_match_threshold: 0.7,
+    pipeline_retry_limit: 3,
+    pipeline_timeout_seconds: 300,
+    telegram_enabled: false,
+    telegram_chat_id: "",
+    semantic_scholar_api_key: "",
+    telegram_bot_token: "",
+  });
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
+
+  const [evaluation, setEvaluation] = useState(null);
+  const [windowDays, setWindowDays] = useState(7);
+
+  const runWithState = useCallback(async (task) => {
+    setLoading(true);
+    setError("");
     try {
-      setLoading(true);
-      setError("");
-      const data = await getAdminOverview();
-      setOverview(data);
+      await task();
     } catch (err) {
-      setError(err.message || "Không thể tải overview");
+      setError(err.message || "Không thể tải dữ liệu admin");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const loadPapers = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError("");
+  const loadOverview = useCallback(() => {
+    return runWithState(async () => {
+      const data = await getAdminOverview();
+      setOverview(data);
+    });
+  }, [runWithState]);
+
+  const loadPapers = useCallback(() => {
+    return runWithState(async () => {
       const data = await getAdminPapers(papersPage, papersPageSize);
-      console.log('Papers API response:', data);
-      setPapers(data.items);
+      setPapers(data.items || []);
       setPapersTotal(data.pagination?.total || 0);
-    } catch (err) {
-      setError(err.message || "Không thể tải danh sách papers");
-    } finally {
-      setLoading(false);
-    }
-  }, [papersPage, papersPageSize]);
+    });
+  }, [papersPage, runWithState]);
 
-  const loadCanonicalDocuments = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError("");
+  const loadCanonical = useCallback(() => {
+    return runWithState(async () => {
       const data = await getAdminCanonicalDocuments(canonicalPage, canonicalPageSize);
-      console.log('Canonical documents API response:', data);
-      setCanonicalDocuments(data.items);
+      setCanonicalDocs(data.items || []);
       setCanonicalTotal(data.pagination?.total || 0);
-    } catch (err) {
-      setError(err.message || "Không thể tải danh sách canonical documents");
-    } finally {
-      setLoading(false);
-    }
-  }, [canonicalPage, canonicalPageSize]);
+    });
+  }, [canonicalPage, runWithState]);
 
-  const loadActivities = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError("");
-      console.log(`Loading activities page ${activitiesPage} with size ${activitiesPageSize}`);
+  const loadActivities = useCallback(() => {
+    return runWithState(async () => {
       const data = await getAdminActivities(activitiesPage, activitiesPageSize);
-      console.log('Activities API response:', data);
-      setActivities(data.items);
+      setActivities(data.items || []);
       setActivitiesTotal(data.total || 0);
+    });
+  }, [activitiesPage, runWithState]);
+
+  const loadProcessingLogs = useCallback(() => {
+    return runWithState(async () => {
+      const data = await getAdminProcessingLogs(processingPage, processingPageSize, {
+        event_family: processingFamily,
+        errors_only: processingErrorsOnly,
+        days: 7,
+      });
+      setProcessingLogs(data.items || []);
+      setProcessingTotal(data.total || 0);
+    });
+  }, [processingPage, processingFamily, processingErrorsOnly, runWithState]);
+
+  const loadConfig = useCallback(() => {
+    return runWithState(async () => {
+      const data = await getAdminConfiguration();
+      setConfig(data);
+      setConfigForm({
+        llm_provider: data.llm_provider || "gemini",
+        llm_model: data.llm_model || "",
+        embedding_model: data.embedding_model || "",
+        metadata_match_threshold: data.metadata_match_threshold ?? 0.7,
+        pipeline_retry_limit: data.pipeline_retry_limit ?? 3,
+        pipeline_timeout_seconds: data.pipeline_timeout_seconds ?? 300,
+        telegram_enabled: Boolean(data.telegram_enabled),
+        telegram_chat_id: data.telegram_chat_id || "",
+        semantic_scholar_api_key: "",
+        telegram_bot_token: "",
+      });
+    });
+  }, [runWithState]);
+
+  const loadEvaluation = useCallback(() => {
+    return runWithState(async () => {
+      const data = await getAdminEvaluationReport(windowDays, 20);
+      setEvaluation(data);
+    });
+  }, [windowDays, runWithState]);
+
+  useEffect(() => {
+    if (activeTab === "overview") void loadOverview();
+    if (activeTab === "papers") void loadPapers();
+    if (activeTab === "canonical") void loadCanonical();
+    if (activeTab === "activities") void loadActivities();
+    if (activeTab === "processing") void loadProcessingLogs();
+    if (activeTab === "config") void loadConfig();
+    if (activeTab === "evaluation") void loadEvaluation();
+  }, [
+    activeTab,
+    loadOverview,
+    loadPapers,
+    loadCanonical,
+    loadActivities,
+    loadProcessingLogs,
+    loadConfig,
+    loadEvaluation,
+  ]);
+
+  const paperTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(papersTotal / papersPageSize)),
+    [papersTotal]
+  );
+  const canonicalTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(canonicalTotal / canonicalPageSize)),
+    [canonicalTotal]
+  );
+  const activitiesTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(activitiesTotal / activitiesPageSize)),
+    [activitiesTotal]
+  );
+  const processingTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(processingTotal / processingPageSize)),
+    [processingTotal]
+  );
+
+  const updateConfigField = useCallback((field, value) => {
+    setConfigForm((prev) => ({ ...prev, [field]: value }));
+  }, []);
+
+  const saveConfig = useCallback(async () => {
+    setIsSavingConfig(true);
+    setError("");
+    try {
+      const payload = {
+        llm_provider: configForm.llm_provider,
+        llm_model: configForm.llm_model,
+        embedding_model: configForm.embedding_model,
+        metadata_match_threshold: Number(configForm.metadata_match_threshold),
+        pipeline_retry_limit: Number(configForm.pipeline_retry_limit),
+        pipeline_timeout_seconds: Number(configForm.pipeline_timeout_seconds),
+        telegram_enabled: Boolean(configForm.telegram_enabled),
+        telegram_chat_id: configForm.telegram_chat_id || null,
+      };
+      if (configForm.semantic_scholar_api_key.trim()) {
+        payload.semantic_scholar_api_key = configForm.semantic_scholar_api_key.trim();
+      }
+      if (configForm.telegram_bot_token.trim()) {
+        payload.telegram_bot_token = configForm.telegram_bot_token.trim();
+      }
+
+      const updated = await updateAdminConfiguration(payload);
+      setConfig(updated);
+      setConfigForm((prev) => ({
+        ...prev,
+        semantic_scholar_api_key: "",
+        telegram_bot_token: "",
+      }));
     } catch (err) {
-      console.error('Error loading activities:', err);
-      setError(err.message || "Không thể tải danh sách activities");
+      setError(err.message || "Lưu cấu hình thất bại");
     } finally {
-      setLoading(false);
+      setIsSavingConfig(false);
     }
-  }, [activitiesPage, activitiesPageSize]);
+  }, [configForm]);
 
-  // Load Overview
-  useEffect(() => {
-    if (activeTab === "overview") {
-      loadOverview();
-    }
-  }, [activeTab, loadOverview]);
-
-  // Load Papers
-  useEffect(() => {
-    if (activeTab === "papers") {
-      loadPapers();
-    }
-  }, [activeTab, loadPapers]);
-
-  // Load Canonical Documents
-  useEffect(() => {
-    if (activeTab === "canonical") {
-      loadCanonicalDocuments();
-    }
-  }, [activeTab, loadCanonicalDocuments]);
-
-  // Load Activities
-  useEffect(() => {
-    if (activeTab === "activities") {
-      loadActivities();
-    }
-  }, [activeTab, loadActivities]);
-
-  const getStatusColor = (status) => {
-    const colors = {
-      success: "#22c55e",
-      info: "#3b82f6", 
-      warning: "#f59e0b",
-      error: "#ef4444"
-    };
-    return colors[status] || "#6b7280";
-  };
-
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleString('vi-VN');
-  };
-
-  // Pagination component
-  const Pagination = ({ currentPage, totalPages, onPageChange }) => {
-    if (totalPages <= 1) return null;
-    
-    const pages = [];
-    const maxVisiblePages = 5;
-    
-    let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
-    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
-    
-    if (endPage - startPage + 1 < maxVisiblePages) {
-      startPage = Math.max(1, endPage - maxVisiblePages + 1);
-    }
-    
-    for (let i = startPage; i <= endPage; i++) {
-      pages.push(i);
-    }
-    
-    return (
-      <div style={{ 
-        display: "flex", 
-        justifyContent: "center", 
-        alignItems: "center", 
-        gap: "0.5rem", 
-        marginTop: "1rem" 
-      }}>
-        <button
-          onClick={() => onPageChange(1)}
-          disabled={currentPage === 1}
-          style={{
-            padding: "0.5rem",
-            border: "1px solid #d1d5db",
-            backgroundColor: currentPage === 1 ? "#f9fafb" : "white",
-            cursor: currentPage === 1 ? "not-allowed" : "pointer",
-            borderRadius: "0.25rem"
-          }}
-        >
-          «
-        </button>
-        
-        <button
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage === 1}
-          style={{
-            padding: "0.5rem",
-            border: "1px solid #d1d5db",
-            backgroundColor: currentPage === 1 ? "#f9fafb" : "white",
-            cursor: currentPage === 1 ? "not-allowed" : "pointer",
-            borderRadius: "0.25rem"
-          }}
-        >
-          ‹
-        </button>
-        
-        {startPage > 1 && (
-          <>
-            <button
-              onClick={() => onPageChange(1)}
-              style={{
-                padding: "0.5rem",
-                border: "1px solid #d1d5db",
-                backgroundColor: "white",
-                cursor: "pointer",
-                borderRadius: "0.25rem"
-              }}
-            >
-              1
-            </button>
-            {startPage > 2 && <span>...</span>}
-          </>
-        )}
-        
-        {pages.map(page => (
-          <button
-            key={page}
-            onClick={() => onPageChange(page)}
-            style={{
-              padding: "0.5rem",
-              border: "1px solid #d1d5db",
-              backgroundColor: page === currentPage ? "#3b82f6" : "white",
-              color: page === currentPage ? "white" : "black",
-              cursor: "pointer",
-              borderRadius: "0.25rem"
-            }}
-          >
-            {page}
-          </button>
-        ))}
-        
-        {endPage < totalPages && (
-          <>
-            {endPage < totalPages - 1 && <span>...</span>}
-            <button
-              onClick={() => onPageChange(totalPages)}
-              style={{
-                padding: "0.5rem",
-                border: "1px solid #d1d5db",
-                backgroundColor: "white",
-                cursor: "pointer",
-                borderRadius: "0.25rem"
-              }}
-            >
-              {totalPages}
-            </button>
-          </>
-        )}
-        
-        <button
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage === totalPages}
-          style={{
-            padding: "0.5rem",
-            border: "1px solid #d1d5db",
-            backgroundColor: currentPage === totalPages ? "#f9fafb" : "white",
-            cursor: currentPage === totalPages ? "not-allowed" : "pointer",
-            borderRadius: "0.25rem"
-          }}
-        >
-          ›
-        </button>
-        
-        <button
-          onClick={() => onPageChange(totalPages)}
-          disabled={currentPage === totalPages}
-          style={{
-            padding: "0.5rem",
-            border: "1px solid #d1d5db",
-            backgroundColor: currentPage === totalPages ? "#f9fafb" : "white",
-            cursor: currentPage === totalPages ? "not-allowed" : "pointer",
-            borderRadius: "0.25rem"
-          }}
-        >
-          »
-        </button>
-      </div>
-    );
-  };
+  const exportEvaluationData = useCallback(() => {
+    if (!evaluation) return;
+    const blob = new Blob([JSON.stringify(evaluation, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `admin-evaluation-${new Date().toISOString()}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }, [evaluation]);
 
   return (
     <div className="app-shell">
-      <AppHeader 
-        title="Quản trị hệ thống" 
-        subtitle="Quản lý và giám sát hệ thống"
-      />
+      <AppHeader title="Quản trị hệ thống" subtitle="UC-04: Vận hành và cấu hình hệ thống" />
 
       <main className="app-main app-main--papers">
         <div className="app-main__full">
-          {/* Tabs */}
           <div className="tabs">
-            <button
-              className={`tab ${activeTab === "overview" ? "tab--active" : ""}`}
-              onClick={() => setActiveTab("overview")}
-            >
-              <div className="tab__indicator tab__indicator--overview"></div>
-              Tổng quan
-            </button>
-            <button
-              className={`tab ${activeTab === "papers" ? "tab--active" : ""}`}
-              onClick={() => setActiveTab("papers")}
-            >
-              <div className="tab__indicator tab__indicator--papers"></div>
-              Papers
-            </button>
-            <button
-              className={`tab ${activeTab === "canonical" ? "tab--active" : ""}`}
-              onClick={() => setActiveTab("canonical")}
-            >
-              <div className="tab__indicator tab__indicator--canonical"></div>
-              Canonical Documents
-            </button>
-            <button
-              className={`tab ${activeTab === "activities" ? "tab--active" : ""}`}
-              onClick={() => setActiveTab("activities")}
-            >
-              <div className="tab__indicator tab__indicator--activities"></div>
-              Hoạt động
-            </button>
+            {TAB_CONFIG.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                className={`tab ${activeTab === tab.key ? "tab--active" : ""}`}
+                onClick={() => setActiveTab(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          {/* Error */}
           {error && (
-            <div className="card" style={{ 
-              padding: "1rem", 
-              marginBottom: "1rem", 
-              color: "#dc2626",
-              backgroundColor: "#fef2f2",
-              border: "1px solid #fecaca"
-            }}>
+            <div className="card" style={{ marginBottom: "1rem", padding: "1rem", color: "#b91c1c" }}>
               {error}
             </div>
           )}
 
-          {/* Loading */}
           {loading && (
-            <div className="card" style={{ padding: "1rem" }}>
-              Đang tải...
+            <div className="card" style={{ marginBottom: "1rem", padding: "1rem" }}>
+              Đang tải dữ liệu...
             </div>
           )}
 
-          {/* Overview Tab */}
           {activeTab === "overview" && overview && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1rem" }}>
-              {/* Total Papers */}
-              <div className="card" style={{ padding: "1.5rem" }}>
-                <h3 style={{ margin: "0 0 1rem 0", color: "#374151" }}>Tổng số Papers</h3>
-                <div style={{ fontSize: "2rem", fontWeight: "bold", color: "#1f2937" }}>
-                  {overview.total_papers}
-                </div>
+            <div style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+              <div className="card" style={{ padding: "1rem" }}>
+                <h3 style={{ marginTop: 0 }}>Tài liệu</h3>
+                <div><strong>Tổng số:</strong> {overview.total_papers}</div>
+                <div><strong>Trùng lặp:</strong> {overview.duplicate_count}</div>
               </div>
 
-              {/* Processing Status */}
-              <div className="card" style={{ padding: "1.5rem" }}>
-                <h3 style={{ margin: "0 0 1rem 0", color: "#374151" }}>Trạng thái xử lý</h3>
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                  {Object.entries(overview.processing_status).map(([status, count]) => (
-                    <div key={status} style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ textTransform: "capitalize" }}>{status}:</span>
-                      <span style={{ fontWeight: "bold" }}>{count}</span>
-                    </div>
-                  ))}
-                </div>
+              <div className="card" style={{ padding: "1rem" }}>
+                <h3 style={{ marginTop: 0 }}>Pipeline</h3>
+                <div><strong>Jobs đang xử lý:</strong> {overview.operations?.jobs_processing ?? 0}</div>
+                <div><strong>Jobs lỗi:</strong> {overview.operations?.jobs_failed ?? 0}</div>
+                <div><strong>Cache hit:</strong> {overview.operations?.cache_hits ?? 0}</div>
+                <div><strong>Cache miss:</strong> {overview.operations?.cache_misses ?? 0}</div>
               </div>
 
-              {/* Processing Stage */}
-              <div className="card" style={{ padding: "1.5rem" }}>
-                <h3 style={{ margin: "0 0 1rem 0", color: "#374151" }}>Giai đoạn xử lý</h3>
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                  {Object.entries(overview.processing_stage).map(([stage, count]) => (
-                    <div key={stage} style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ textTransform: "capitalize" }}>{stage}:</span>
-                      <span style={{ fontWeight: "bold" }}>{count}</span>
-                    </div>
-                  ))}
-                </div>
+              <div className="card" style={{ padding: "1rem" }}>
+                <h3 style={{ marginTop: 0 }}>Logs</h3>
+                <div><strong>Activity:</strong> {overview.operations?.total_activity_logs ?? 0}</div>
+                <div><strong>Processing:</strong> {overview.operations?.total_processing_logs ?? 0}</div>
               </div>
 
-              {/* Publication Status */}
-              <div className="card" style={{ padding: "1.5rem" }}>
-                <h3 style={{ margin: "0 0 1rem 0", color: "#374151" }}>Trạng thái xuất bản</h3>
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                  {Object.entries(overview.publication_status).map(([status, count]) => (
-                    <div key={status} style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ textTransform: "capitalize" }}>{status}:</span>
-                      <span style={{ fontWeight: "bold" }}>{count}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Duplicate Count */}
-              <div className="card" style={{ padding: "1.5rem" }}>
-                <h3 style={{ margin: "0 0 1rem 0", color: "#374151" }}>Số trùng lặp</h3>
-                <div style={{ fontSize: "2rem", fontWeight: "bold", color: "#ef4444" }}>
-                  {overview.duplicate_count}
-                </div>
-              </div>
-
-              {/* Current Admin */}
-              <div className="card" style={{ padding: "1.5rem", gridColumn: "span 2" }}>
-                <h3 style={{ margin: "0 0 1rem 0", color: "#374151" }}>Admin hiện tại</h3>
-                <div style={{ display: "flex", gap: "2rem", alignItems: "center" }}>
-                  <div>
-                    <strong>Email:</strong> {overview.current_admin.email}
-                  </div>
-                  <div>
-                    <strong>Role:</strong> 
-                    <span style={{ 
-                      backgroundColor: "#dc2626", 
-                      color: "white", 
-                      padding: "0.25rem 0.5rem", 
-                      borderRadius: "0.25rem",
-                      fontSize: "0.875rem"
-                    }}>
-                      {overview.current_admin.role}
-                    </span>
-                  </div>
-                </div>
+              <div className="card" style={{ padding: "1rem" }}>
+                <h3 style={{ marginTop: 0 }}>Admin hiện tại</h3>
+                <div><strong>Email:</strong> {overview.current_admin?.email || "-"}</div>
+                <div><strong>Role:</strong> {overview.current_admin?.role || "-"}</div>
               </div>
             </div>
           )}
 
-          {/* Papers Tab */}
           {activeTab === "papers" && (
-            <div className="card">
-              <div className="card__header">
-                <h2 className="card__title">Danh sách Papers</h2>
-                <p className="card__subtitle">
-                  Tổng số: {papersTotal} papers (Trang {papersPage}/{Math.ceil(papersTotal/papersPageSize) || 1})
-                </p>
-              </div>
+            <div className="card" style={{ padding: "1rem" }}>
+              <h3 style={{ marginTop: 0 }}>
+                Papers ({papersTotal}) - Trang {papersPage}/{paperTotalPages}
+              </h3>
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
-                    <tr style={{ backgroundColor: "#f9fafb" }}>
-                      <th style={{ padding: "0.75rem", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>ID</th>
-                      <th style={{ padding: "0.75rem", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Filename</th>
-                      <th style={{ padding: "0.75rem", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Status</th>
-                      <th style={{ padding: "0.75rem", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Created At</th>
+                    <tr>
+                      <th style={{ textAlign: "left" }}>Filename</th>
+                      <th style={{ textAlign: "left" }}>Status</th>
+                      <th style={{ textAlign: "left" }}>Stage</th>
+                      <th style={{ textAlign: "left" }}>Created</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {papers.length === 0 ? (
-                      <tr>
-                        <td colSpan="4" style={{ padding: "2rem", textAlign: "center", color: "#6b7280" }}>
-                          Không có papers nào
+                    {papers.map((paper) => (
+                      <tr key={paper.id}>
+                        <td>{paper.original_filename}</td>
+                        <td>
+                          <span style={{ color: getStatusColor(paper.processing_status) }}>
+                            {paper.processing_status}
+                          </span>
                         </td>
+                        <td>{paper.processing_stage || "-"}</td>
+                        <td>{formatDate(paper.created_at)}</td>
                       </tr>
-                    ) : (
-                      papers.map((paper) => (
-                        <tr key={paper.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                          <td style={{ padding: "0.75rem" }}>{paper.id}</td>
-                          <td style={{ padding: "0.75rem" }}>{paper.original_filename || paper.filename}</td>
-                          <td style={{ padding: "0.75rem" }}>
-                            <span style={{ 
-                              backgroundColor: getStatusColor(paper.processing_status),
-                              color: "white",
-                              padding: "0.25rem 0.5rem",
-                              borderRadius: "0.25rem",
-                              fontSize: "0.75rem"
-                            }}>
-                              {paper.processing_status}
-                            </span>
-                          </td>
-                          <td style={{ padding: "0.75rem" }}>
-                            {formatDate(paper.created_at)}
-                          </td>
-                        </tr>
-                      ))
+                    ))}
+                    {papers.length === 0 && (
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: "center", padding: "1rem" }}>Không có dữ liệu</td>
+                      </tr>
                     )}
                   </tbody>
                 </table>
               </div>
-              <Pagination 
-                currentPage={papersPage}
-                totalPages={Math.ceil(papersTotal/papersPageSize) || 1}
-                onPageChange={setPapersPage}
-              />
+              <Pagination page={papersPage} totalPages={paperTotalPages} onChange={setPapersPage} />
             </div>
           )}
 
-          {/* Canonical Documents Tab */}
           {activeTab === "canonical" && (
-            <div className="card">
-              <div className="card__header">
-                <h2 className="card__title">Danh sách Canonical Documents</h2>
-                <p className="card__subtitle">
-                  Tổng số: {canonicalTotal} tài liệu chuẩn hóa (Trang {canonicalPage}/{Math.ceil(canonicalTotal/canonicalPageSize) || 1})
-                </p>
-              </div>
+            <div className="card" style={{ padding: "1rem" }}>
+              <h3 style={{ marginTop: 0 }}>
+                Canonical Documents ({canonicalTotal}) - Trang {canonicalPage}/{canonicalTotalPages}
+              </h3>
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
-                    <tr style={{ backgroundColor: "#f9fafb" }}>
-                      <th style={{ padding: "0.75rem", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>ID</th>
-                      <th style={{ padding: "0.75rem", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Canonical Key</th>
-                      <th style={{ padding: "0.75rem", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Title</th>
-                      <th style={{ padding: "0.75rem", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Year</th>
-                      <th style={{ padding: "0.75rem", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Venue</th>
-                      <th style={{ padding: "0.75rem", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Status</th>
-                      <th style={{ padding: "0.75rem", textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Created At</th>
+                    <tr>
+                      <th style={{ textAlign: "left" }}>Key</th>
+                      <th style={{ textAlign: "left" }}>Title</th>
+                      <th style={{ textAlign: "left" }}>Status</th>
+                      <th style={{ textAlign: "left" }}>Papers</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {canonicalDocuments.length === 0 ? (
-                      <tr>
-                        <td colSpan="7" style={{ padding: "2rem", textAlign: "center", color: "#6b7280" }}>
-                          Không có canonical documents nào
-                        </td>
+                    {canonicalDocs.map((doc) => (
+                      <tr key={doc.id}>
+                        <td style={{ fontFamily: "monospace" }}>{doc.canonical_key}</td>
+                        <td>{doc.title || doc.title_candidate || "-"}</td>
+                        <td>{doc.enrichment_status || "-"}</td>
+                        <td>{doc.paper_count || 0}</td>
                       </tr>
-                    ) : (
-                      canonicalDocuments.map((doc) => (
-                        <tr key={doc.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                          <td style={{ padding: "0.75rem" }}>{doc.id.substring(0, 8)}...</td>
-                          <td style={{ padding: "0.75rem" }}>
-                            <span style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
-                              {doc.canonical_key}
-                            </span>
-                          </td>
-                          <td style={{ padding: "0.75rem" }}>{doc.title}</td>
-                          <td style={{ padding: "0.75rem" }}>{doc.publication_year}</td>
-                          <td style={{ padding: "0.75rem" }}>{doc.venue}</td>
-                          <td style={{ padding: "0.75rem" }}>
-                            <span style={{ 
-                              backgroundColor: getStatusColor(doc.enrichment_status === "enriched" ? "success" : "info"),
-                              color: "white",
-                              padding: "0.25rem 0.5rem",
-                              borderRadius: "0.25rem",
-                              fontSize: "0.75rem"
-                            }}>
-                              {doc.enrichment_status}
-                            </span>
-                          </td>
-                          <td style={{ padding: "0.75rem" }}>
-                            {formatDate(doc.created_at)}
-                          </td>
-                        </tr>
-                      ))
+                    ))}
+                    {canonicalDocs.length === 0 && (
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: "center", padding: "1rem" }}>Không có dữ liệu</td>
+                      </tr>
                     )}
                   </tbody>
                 </table>
               </div>
-              <Pagination 
-                currentPage={canonicalPage}
-                totalPages={Math.ceil(canonicalTotal/canonicalPageSize) || 1}
-                onPageChange={setCanonicalPage}
-              />
+              <Pagination page={canonicalPage} totalPages={canonicalTotalPages} onChange={setCanonicalPage} />
             </div>
           )}
 
-          {/* Activities Tab */}
           {activeTab === "activities" && (
-            <div className="card">
-              <div className="card__header">
-                <h2 className="card__title">Hoạt động hệ thống</h2>
-                <p className="card__subtitle">
-                  Tổng số: {activitiesTotal} hoạt động (Trang {activitiesPage}/{Math.ceil(activitiesTotal/activitiesPageSize) || 1})
-                </p>
-              </div>
-              <div style={{ maxHeight: "600px", overflowY: "auto" }}>
-                {activities.length === 0 ? (
-                  <div style={{ padding: "2rem", textAlign: "center", color: "#6b7280" }}>
-                    Không có hoạt động nào
+            <div className="card" style={{ padding: "1rem" }}>
+              <h3 style={{ marginTop: 0 }}>
+                Activity log ({activitiesTotal}) - Trang {activitiesPage}/{activitiesTotalPages}
+              </h3>
+              {activities.map((item) => (
+                <div key={item.id} style={{ borderBottom: "1px solid #e5e7eb", padding: "0.75rem 0" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <strong>{item.event_label}</strong>
+                    <span>{formatDate(item.created_at)}</span>
                   </div>
-                ) : (
-                  activities.map((activity) => (
-                    <div key={activity.id} style={{ 
-                      borderBottom: "1px solid #e5e7eb", 
-                      padding: "1rem 0",
-                      display: "flex",
-                      gap: "1rem",
-                      alignItems: "flex-start"
-                    }}>
-                      {/* Status Indicator */}
-                      <div style={{ 
-                        width: "4px", 
-                        height: "100%", 
-                        backgroundColor: getStatusColor(activity.status),
-                        borderRadius: "2px",
-                        flexShrink: 0
-                      }}></div>
-                      
-                      {/* Activity Content */}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.5rem" }}>
-                          <div>
-                            <span style={{ 
-                              backgroundColor: getStatusColor(activity.status),
-                              color: "white",
-                              padding: "0.25rem 0.5rem",
-                              borderRadius: "0.25rem",
-                              fontSize: "0.75rem",
-                              fontWeight: "bold"
-                            }}>
-                              {activity.status_label}
-                            </span>
-                          </div>
-                          <div style={{ fontSize: "0.875rem", color: "#6b7280" }}>
-                            {formatDate(activity.created_at)}
-                          </div>
-                        </div>
-                        
-                        <div style={{ marginBottom: "0.5rem" }}>
-                          <strong>{activity.event_label}</strong>
-                        </div>
-                        
-                        <div style={{ color: "#374151", marginBottom: "0.5rem" }}>
-                          {activity.message}
-                        </div>
-                        
-                        <div style={{ display: "flex", gap: "1rem", fontSize: "0.875rem", color: "#6b7280" }}>
-                          <span><strong>Actor:</strong> {activity.actor_display}</span>
-                          {activity.object_type && (
-                            <span><strong>Type:</strong> {activity.object_type}</span>
-                          )}
-                          {activity.canonical_key && (
-                            <span><strong>Key:</strong> 
-                              <span style={{ fontFamily: "monospace" }}>{activity.canonical_key}</span>
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
+                  <div>{item.message}</div>
+                  <div style={{ color: "#6b7280", fontSize: "0.875rem" }}>
+                    Actor: {item.actor_display} · Status: {item.status}
+                  </div>
+                </div>
+              ))}
+              {activities.length === 0 && <div>Không có dữ liệu.</div>}
+              <Pagination page={activitiesPage} totalPages={activitiesTotalPages} onChange={setActivitiesPage} />
+            </div>
+          )}
+
+          {activeTab === "processing" && (
+            <div className="card" style={{ padding: "1rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem" }}>
+                <h3 style={{ margin: 0 }}>
+                  Processing log ({processingTotal}) - Trang {processingPage}/{processingTotalPages}
+                </h3>
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <select value={processingFamily} onChange={(e) => setProcessingFamily(e.target.value)}>
+                    <option value="all">Tất cả</option>
+                    <option value="parse">Parse</option>
+                    <option value="semantic_scholar">Semantic Scholar</option>
+                    <option value="llm_extraction">LLM Extraction</option>
+                    <option value="duplicate">Duplicate</option>
+                    <option value="canonical">Canonical</option>
+                  </select>
+                  <label style={{ display: "flex", gap: "0.25rem", alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={processingErrorsOnly}
+                      onChange={(e) => setProcessingErrorsOnly(e.target.checked)}
+                    />
+                    Chỉ lỗi
+                  </label>
+                </div>
               </div>
-              <Pagination 
-                currentPage={activitiesPage}
-                totalPages={Math.ceil(activitiesTotal/activitiesPageSize) || 1}
-                onPageChange={setActivitiesPage}
-              />
+              {processingLogs.map((item) => (
+                <div key={item.id} style={{ borderBottom: "1px solid #e5e7eb", padding: "0.75rem 0" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <strong>{item.event_label}</strong>
+                    <span>{formatDate(item.created_at)}</span>
+                  </div>
+                  <div>{item.message}</div>
+                  <div style={{ color: "#6b7280", fontSize: "0.875rem" }}>
+                    Event: {item.event_type} · Status:{" "}
+                    <span style={{ color: getStatusColor(item.status) }}>{item.status}</span>
+                  </div>
+                </div>
+              ))}
+              {processingLogs.length === 0 && <div>Không có dữ liệu.</div>}
+              <Pagination page={processingPage} totalPages={processingTotalPages} onChange={setProcessingPage} />
+            </div>
+          )}
+
+          {activeTab === "config" && (
+            <div className="card" style={{ padding: "1rem" }}>
+              <h3 style={{ marginTop: 0 }}>Cấu hình hệ thống</h3>
+              <p style={{ color: "#6b7280", marginTop: 0 }}>
+                Cập nhật tham số vận hành cho metadata source, LLM, embedding và pipeline.
+              </p>
+
+              <div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+                <label>
+                  LLM provider
+                  <select
+                    value={configForm.llm_provider}
+                    onChange={(e) => updateConfigField("llm_provider", e.target.value)}
+                    style={{ width: "100%" }}
+                  >
+                    <option value="gemini">gemini</option>
+                    <option value="ollama">ollama</option>
+                  </select>
+                </label>
+
+                <label>
+                  LLM model
+                  <input
+                    type="text"
+                    value={configForm.llm_model}
+                    onChange={(e) => updateConfigField("llm_model", e.target.value)}
+                    style={{ width: "100%" }}
+                  />
+                </label>
+
+                <label>
+                  Embedding model
+                  <input
+                    type="text"
+                    value={configForm.embedding_model}
+                    onChange={(e) => updateConfigField("embedding_model", e.target.value)}
+                    style={{ width: "100%" }}
+                  />
+                </label>
+
+                <label>
+                  Metadata match threshold
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={configForm.metadata_match_threshold}
+                    onChange={(e) => updateConfigField("metadata_match_threshold", e.target.value)}
+                    style={{ width: "100%" }}
+                  />
+                </label>
+
+                <label>
+                  Pipeline retry limit
+                  <input
+                    type="number"
+                    min={0}
+                    max={10}
+                    value={configForm.pipeline_retry_limit}
+                    onChange={(e) => updateConfigField("pipeline_retry_limit", e.target.value)}
+                    style={{ width: "100%" }}
+                  />
+                </label>
+
+                <label>
+                  Pipeline timeout (seconds)
+                  <input
+                    type="number"
+                    min={10}
+                    max={3600}
+                    value={configForm.pipeline_timeout_seconds}
+                    onChange={(e) => updateConfigField("pipeline_timeout_seconds", e.target.value)}
+                    style={{ width: "100%" }}
+                  />
+                </label>
+
+                <label>
+                  Telegram chat id
+                  <input
+                    type="text"
+                    value={configForm.telegram_chat_id}
+                    onChange={(e) => updateConfigField("telegram_chat_id", e.target.value)}
+                    style={{ width: "100%" }}
+                  />
+                </label>
+
+                <label>
+                  Semantic Scholar API key (nhập mới để cập nhật)
+                  <input
+                    type="password"
+                    value={configForm.semantic_scholar_api_key}
+                    onChange={(e) => updateConfigField("semantic_scholar_api_key", e.target.value)}
+                    style={{ width: "100%" }}
+                  />
+                </label>
+
+                <label>
+                  Telegram bot token (nhập mới để cập nhật)
+                  <input
+                    type="password"
+                    value={configForm.telegram_bot_token}
+                    onChange={(e) => updateConfigField("telegram_bot_token", e.target.value)}
+                    style={{ width: "100%" }}
+                  />
+                </label>
+              </div>
+
+              <label style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", marginTop: "0.75rem" }}>
+                <input
+                  type="checkbox"
+                  checked={configForm.telegram_enabled}
+                  onChange={(e) => updateConfigField("telegram_enabled", e.target.checked)}
+                />
+                Bật Telegram notification
+              </label>
+
+              <div style={{ marginTop: "1rem", color: "#6b7280", fontSize: "0.875rem" }}>
+                <div>
+                  Key hiện tại: {config?.semantic_scholar_api_key_masked || "(chưa cấu hình)"}
+                </div>
+                <div>
+                  Telegram token hiện tại: {config?.telegram_bot_token_masked || "(chưa cấu hình)"}
+                </div>
+                <div>
+                  Cập nhật gần nhất: {config?.updated_at ? `${formatDate(config.updated_at)} bởi ${config.updated_by || "-"}` : "-"}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={saveConfig}
+                disabled={isSavingConfig}
+                style={{ marginTop: "1rem" }}
+              >
+                {isSavingConfig ? "Đang lưu..." : "Lưu cấu hình"}
+              </button>
+            </div>
+          )}
+
+          {activeTab === "evaluation" && evaluation && (
+            <div className="card" style={{ padding: "1rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
+                <h3 style={{ margin: 0 }}>Dữ liệu đánh giá PoC</h3>
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={windowDays}
+                    onChange={(e) => setWindowDays(Number(e.target.value) || 7)}
+                  />
+                  <button type="button" onClick={() => void loadEvaluation()}>
+                    Làm mới
+                  </button>
+                  <button type="button" onClick={exportEvaluationData}>
+                    Export JSON
+                  </button>
+                </div>
+              </div>
+
+              <p style={{ color: "#6b7280" }}>
+                Cửa sổ dữ liệu: {evaluation.window_days} ngày · sinh lúc {formatDate(evaluation.generated_at)}
+              </p>
+
+              <div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                <div><strong>Tổng papers:</strong> {evaluation.summary.total_papers}</div>
+                <div><strong>Draft:</strong> {evaluation.summary.draft_papers}</div>
+                <div><strong>Published:</strong> {evaluation.summary.published_papers}</div>
+                <div><strong>Jobs xử lý:</strong> {evaluation.summary.jobs_processing}</div>
+                <div><strong>Jobs lỗi:</strong> {evaluation.summary.jobs_failed}</div>
+                <div><strong>Cache hit:</strong> {evaluation.summary.cache_hits}</div>
+                <div><strong>Cache miss:</strong> {evaluation.summary.cache_misses}</div>
+                <div><strong>Cache hit rate:</strong> {(evaluation.summary.cache_hit_rate * 100).toFixed(2)}%</div>
+                <div><strong>Avg pipeline:</strong> {evaluation.summary.avg_pipeline_seconds?.toFixed(2) || "-"}s</div>
+              </div>
+
+              <h4 style={{ marginBottom: "0.5rem" }}>Pipeline errors</h4>
+              {evaluation.processing_errors.length === 0 && <div>Không có lỗi trong cửa sổ hiện tại.</div>}
+              {evaluation.processing_errors.map((item) => (
+                <div key={item.event_type}>
+                  {item.event_type}: {item.count}
+                </div>
+              ))}
+
+              <h4 style={{ marginBottom: "0.5rem", marginTop: "1rem" }}>Search samples</h4>
+              {evaluation.search_samples.length === 0 && <div>Chưa có search log.</div>}
+              {evaluation.search_samples.map((item, idx) => (
+                <div key={`${item.event_type}-${item.created_at}-${idx}`} style={{ borderBottom: "1px solid #e5e7eb", padding: "0.5rem 0" }}>
+                  <div>
+                    <strong>{item.event_type}</strong> · {formatDate(item.created_at)}
+                  </div>
+                  <div style={{ color: "#6b7280" }}>
+                    Query: "{item.query}" · Kết quả: {item.result_count} · top/limit: {item.top_k_or_limit}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>

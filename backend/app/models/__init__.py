@@ -9,6 +9,7 @@ from app.models.citation_score_run import CitationScoreRun
 from app.models.citation_mention import CitationMention
 from app.models.citation_edge import CitationEdge
 from app.models.user import User
+from app.models.admin_system_config import AdminSystemConfig
 
 __all__ = [
     "CanonicalDocument",
@@ -22,4 +23,5 @@ __all__ = [
     "CitationMention",
     "CitationEdge",
     "User",
+    "AdminSystemConfig",
 ]
