@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "../components/AppHeader.jsx";
+import "../styles/AdminPage.css";
 import {
   getAdminActivities,
   getAdminCanonicalDocuments,
@@ -35,6 +36,40 @@ function getStatusColor(status) {
   return "#2563eb";
 }
 
+function StatusBadge({ status }) {
+  return (
+    <span className="admin-status-pill" style={{ "--admin-status-color": getStatusColor(status) }}>
+      {status || "-"}
+    </span>
+  );
+}
+
+function MiniBarChart({ items, emptyMessage }) {
+  if (!items.length) {
+    return <div className="admin-empty-state">{emptyMessage}</div>;
+  }
+
+  const max = Math.max(...items.map((item) => item.value), 1);
+  return (
+    <div className="admin-chart">
+      {items.map((item) => {
+        const width = Math.min(100, Math.max(0, (item.value / max) * 100));
+        return (
+          <div key={item.key} className="admin-chart__row">
+            <div className="admin-chart__meta">
+              <span className="admin-chart__label">{item.label}</span>
+              <span className="admin-chart__value">{item.valueText || item.value}</span>
+            </div>
+            <div className="admin-chart__track">
+              <span className="admin-chart__fill" style={{ width: `${width}%` }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Pagination({ page, totalPages, onChange }) {
   if (totalPages <= 1) return null;
 
@@ -44,27 +79,33 @@ function Pagination({ page, totalPages, onChange }) {
   for (let i = start; i <= end; i += 1) pages.push(i);
 
   return (
-    <div style={{ display: "flex", gap: "0.5rem", justifyContent: "center", marginTop: "1rem" }}>
-      <button type="button" onClick={() => onChange(Math.max(1, page - 1))} disabled={page === 1}>
+    <div className="pagination">
+      <button
+        type="button"
+        className="pagination__btn pagination__btn--arrow"
+        onClick={() => onChange(Math.max(1, page - 1))}
+        disabled={page === 1}
+      >
         ‹
       </button>
-      {pages.map((p) => (
-        <button
-          key={p}
-          type="button"
-          onClick={() => onChange(p)}
-          style={{
-            minWidth: "2rem",
-            background: p === page ? "#2563eb" : "white",
-            color: p === page ? "white" : "inherit",
-            border: "1px solid #d1d5db",
-            borderRadius: "0.25rem",
-          }}
-        >
-          {p}
-        </button>
-      ))}
-      <button type="button" onClick={() => onChange(Math.min(totalPages, page + 1))} disabled={page === totalPages}>
+      <div className="pagination__numbers">
+        {pages.map((p) => (
+          <button
+            key={p}
+            type="button"
+            className={`pagination__btn pagination__btn--number ${p === page ? "pagination__btn--active" : ""}`}
+            onClick={() => onChange(p)}
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="pagination__btn pagination__btn--arrow"
+        onClick={() => onChange(Math.min(totalPages, page + 1))}
+        disabled={page === totalPages}
+      >
         ›
       </button>
     </div>
@@ -238,6 +279,39 @@ export function AdminPage() {
     () => Math.max(1, Math.ceil(processingTotal / processingPageSize)),
     [processingTotal]
   );
+  const overviewPipelineChart = useMemo(() => {
+    const operations = overview?.operations || {};
+    return [
+      { key: "jobs_processing", label: "Jobs đang xử lý", value: Number(operations.jobs_processing || 0) },
+      { key: "jobs_failed", label: "Jobs lỗi", value: Number(operations.jobs_failed || 0) },
+      { key: "cache_hits", label: "Cache hit", value: Number(operations.cache_hits || 0) },
+      { key: "cache_misses", label: "Cache miss", value: Number(operations.cache_misses || 0) },
+    ];
+  }, [overview]);
+  const evaluationErrorChart = useMemo(
+    () =>
+      (evaluation?.processing_errors || []).map((item) => ({
+        key: item.event_type,
+        label: item.event_type,
+        value: Number(item.count || 0),
+      })),
+    [evaluation]
+  );
+  const evaluationCacheChart = useMemo(() => {
+    if (!evaluation) return [];
+    return [
+      {
+        key: "cache_hit",
+        label: "Cache hit",
+        value: Number(evaluation.summary.cache_hits || 0),
+      },
+      {
+        key: "cache_miss",
+        label: "Cache miss",
+        value: Number(evaluation.summary.cache_misses || 0),
+      },
+    ];
+  }, [evaluation]);
 
   const updateConfigField = useCallback((field, value) => {
     setConfigForm((prev) => ({ ...prev, [field]: value }));
@@ -360,12 +434,12 @@ export function AdminPage() {
   }, [evaluation]);
 
   return (
-    <div className="app-shell">
+    <div className="app-shell admin-page">
       <AppHeader title="Quản trị hệ thống" subtitle="UC-04: Vận hành và cấu hình hệ thống" />
 
       <main className="app-main app-main--papers">
         <div className="app-main__full">
-          <div className="tabs">
+          <div className="tabs admin-tabs">
             {TAB_CONFIG.map((tab) => (
               <button
                 key={tab.key}
@@ -379,60 +453,78 @@ export function AdminPage() {
           </div>
 
           {error && (
-            <div className="card" style={{ marginBottom: "1rem", padding: "1rem", color: "#b91c1c" }}>
+            <div className="card admin-alert admin-alert--error">
               {error}
             </div>
           )}
 
           {loading && (
-            <div className="card" style={{ marginBottom: "1rem", padding: "1rem" }}>
+            <div className="card admin-alert">
               Đang tải dữ liệu...
             </div>
           )}
 
           {activeTab === "overview" && overview && (
-            <div style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-              <div className="card" style={{ padding: "1rem" }}>
-                <h3 style={{ marginTop: 0 }}>Tài liệu</h3>
-                <div><strong>Tổng số:</strong> {overview.total_papers}</div>
-                <div><strong>Trùng lặp:</strong> {overview.duplicate_count}</div>
+            <div className="admin-overview-layout">
+              <div className="admin-overview-grid">
+                <div className="card admin-metric-card">
+                  <h3 className="admin-card-title">Tài liệu</h3>
+                  <div className="admin-kv-list">
+                    <div className="admin-kv-row"><span>Tổng số</span><strong>{overview.total_papers}</strong></div>
+                    <div className="admin-kv-row"><span>Trùng lặp</span><strong>{overview.duplicate_count}</strong></div>
+                  </div>
+                </div>
+
+                <div className="card admin-metric-card">
+                  <h3 className="admin-card-title">Pipeline</h3>
+                  <div className="admin-kv-list">
+                    <div className="admin-kv-row"><span>Jobs đang xử lý</span><strong>{overview.operations?.jobs_processing ?? 0}</strong></div>
+                    <div className="admin-kv-row"><span>Jobs lỗi</span><strong>{overview.operations?.jobs_failed ?? 0}</strong></div>
+                    <div className="admin-kv-row"><span>Cache hit</span><strong>{overview.operations?.cache_hits ?? 0}</strong></div>
+                    <div className="admin-kv-row"><span>Cache miss</span><strong>{overview.operations?.cache_misses ?? 0}</strong></div>
+                  </div>
+                </div>
+
+                <div className="card admin-metric-card">
+                  <h3 className="admin-card-title">Logs</h3>
+                  <div className="admin-kv-list">
+                    <div className="admin-kv-row"><span>Activity</span><strong>{overview.operations?.total_activity_logs ?? 0}</strong></div>
+                    <div className="admin-kv-row"><span>Processing</span><strong>{overview.operations?.total_processing_logs ?? 0}</strong></div>
+                  </div>
+                </div>
+
+                <div className="card admin-metric-card">
+                  <h3 className="admin-card-title">Admin hiện tại</h3>
+                  <div className="admin-kv-list">
+                    <div className="admin-kv-row"><span>Email</span><strong>{overview.current_admin?.email || "-"}</strong></div>
+                    <div className="admin-kv-row"><span>Role</span><strong>{overview.current_admin?.role || "-"}</strong></div>
+                  </div>
+                </div>
               </div>
 
-              <div className="card" style={{ padding: "1rem" }}>
-                <h3 style={{ marginTop: 0 }}>Pipeline</h3>
-                <div><strong>Jobs đang xử lý:</strong> {overview.operations?.jobs_processing ?? 0}</div>
-                <div><strong>Jobs lỗi:</strong> {overview.operations?.jobs_failed ?? 0}</div>
-                <div><strong>Cache hit:</strong> {overview.operations?.cache_hits ?? 0}</div>
-                <div><strong>Cache miss:</strong> {overview.operations?.cache_misses ?? 0}</div>
-              </div>
-
-              <div className="card" style={{ padding: "1rem" }}>
-                <h3 style={{ marginTop: 0 }}>Logs</h3>
-                <div><strong>Activity:</strong> {overview.operations?.total_activity_logs ?? 0}</div>
-                <div><strong>Processing:</strong> {overview.operations?.total_processing_logs ?? 0}</div>
-              </div>
-
-              <div className="card" style={{ padding: "1rem" }}>
-                <h3 style={{ marginTop: 0 }}>Admin hiện tại</h3>
-                <div><strong>Email:</strong> {overview.current_admin?.email || "-"}</div>
-                <div><strong>Role:</strong> {overview.current_admin?.role || "-"}</div>
+              <div className="card admin-chart-card">
+                <div className="admin-chart-card__header">
+                  <h3 className="admin-card-title">Biểu đồ vận hành</h3>
+                  <span className="admin-chart-card__sub">So sánh nhanh trạng thái pipeline</span>
+                </div>
+                <MiniBarChart items={overviewPipelineChart} emptyMessage="Chưa có dữ liệu vận hành." />
               </div>
             </div>
           )}
 
           {activeTab === "papers" && (
-            <div className="card" style={{ padding: "1rem" }}>
-              <h3 style={{ marginTop: 0 }}>
+            <div className="card admin-panel-card">
+              <h3 className="admin-card-title">
                 Papers ({papersTotal}) - Trang {papersPage}/{paperTotalPages}
               </h3>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <div className="admin-table-wrap">
+                <table className="admin-table">
                   <thead>
                     <tr>
-                      <th style={{ textAlign: "left" }}>Filename</th>
-                      <th style={{ textAlign: "left" }}>Status</th>
-                      <th style={{ textAlign: "left" }}>Stage</th>
-                      <th style={{ textAlign: "left" }}>Created</th>
+                      <th>Filename</th>
+                      <th>Status</th>
+                      <th>Stage</th>
+                      <th>Created</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -440,9 +532,7 @@ export function AdminPage() {
                       <tr key={paper.id}>
                         <td>{paper.original_filename}</td>
                         <td>
-                          <span style={{ color: getStatusColor(paper.processing_status) }}>
-                            {paper.processing_status}
-                          </span>
+                          <StatusBadge status={paper.processing_status} />
                         </td>
                         <td>{paper.processing_stage || "-"}</td>
                         <td>{formatDate(paper.created_at)}</td>
@@ -450,7 +540,7 @@ export function AdminPage() {
                     ))}
                     {papers.length === 0 && (
                       <tr>
-                        <td colSpan={4} style={{ textAlign: "center", padding: "1rem" }}>Không có dữ liệu</td>
+                        <td colSpan={4} className="admin-table__empty">Không có dữ liệu</td>
                       </tr>
                     )}
                   </tbody>
@@ -461,32 +551,32 @@ export function AdminPage() {
           )}
 
           {activeTab === "canonical" && (
-            <div className="card" style={{ padding: "1rem" }}>
-              <h3 style={{ marginTop: 0 }}>
+            <div className="card admin-panel-card">
+              <h3 className="admin-card-title">
                 Canonical Documents ({canonicalTotal}) - Trang {canonicalPage}/{canonicalTotalPages}
               </h3>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <div className="admin-table-wrap">
+                <table className="admin-table">
                   <thead>
                     <tr>
-                      <th style={{ textAlign: "left" }}>Key</th>
-                      <th style={{ textAlign: "left" }}>Title</th>
-                      <th style={{ textAlign: "left" }}>Status</th>
-                      <th style={{ textAlign: "left" }}>Papers</th>
+                      <th>Key</th>
+                      <th>Title</th>
+                      <th>Status</th>
+                      <th>Papers</th>
                     </tr>
                   </thead>
                   <tbody>
                     {canonicalDocs.map((doc) => (
                       <tr key={doc.id}>
-                        <td style={{ fontFamily: "monospace" }}>{doc.canonical_key}</td>
+                        <td className="admin-code">{doc.canonical_key}</td>
                         <td>{doc.title || doc.title_candidate || "-"}</td>
-                        <td>{doc.enrichment_status || "-"}</td>
+                        <td><StatusBadge status={doc.enrichment_status || "-"} /></td>
                         <td>{doc.paper_count || 0}</td>
                       </tr>
                     ))}
                     {canonicalDocs.length === 0 && (
                       <tr>
-                        <td colSpan={4} style={{ textAlign: "center", padding: "1rem" }}>Không có dữ liệu</td>
+                        <td colSpan={4} className="admin-table__empty">Không có dữ liệu</td>
                       </tr>
                     )}
                   </tbody>
@@ -497,35 +587,41 @@ export function AdminPage() {
           )}
 
           {activeTab === "activities" && (
-            <div className="card" style={{ padding: "1rem" }}>
-              <h3 style={{ marginTop: 0 }}>
+            <div className="card admin-panel-card">
+              <h3 className="admin-card-title">
                 Activity log ({activitiesTotal}) - Trang {activitiesPage}/{activitiesTotalPages}
               </h3>
-              {activities.map((item) => (
-                <div key={item.id} style={{ borderBottom: "1px solid #e5e7eb", padding: "0.75rem 0" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <strong>{item.event_label}</strong>
-                    <span>{formatDate(item.created_at)}</span>
+              <div className="admin-log-list">
+                {activities.map((item) => (
+                  <div key={item.id} className="admin-log-item">
+                    <div className="admin-log-item__head">
+                      <strong>{item.event_label}</strong>
+                      <span>{formatDate(item.created_at)}</span>
+                    </div>
+                    <div className="admin-log-item__message">{item.message}</div>
+                    <div className="admin-log-item__meta">
+                      Actor: {item.actor_display} · Status: <StatusBadge status={item.status} />
+                    </div>
                   </div>
-                  <div>{item.message}</div>
-                  <div style={{ color: "#6b7280", fontSize: "0.875rem" }}>
-                    Actor: {item.actor_display} · Status: {item.status}
-                  </div>
-                </div>
-              ))}
-              {activities.length === 0 && <div>Không có dữ liệu.</div>}
+                ))}
+              </div>
+              {activities.length === 0 && <div className="admin-empty-state">Không có dữ liệu.</div>}
               <Pagination page={activitiesPage} totalPages={activitiesTotalPages} onChange={setActivitiesPage} />
             </div>
           )}
 
           {activeTab === "processing" && (
-            <div className="card" style={{ padding: "1rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem" }}>
-                <h3 style={{ margin: 0 }}>
+            <div className="card admin-panel-card">
+              <div className="admin-panel-head">
+                <h3 className="admin-card-title">
                   Processing log ({processingTotal}) - Trang {processingPage}/{processingTotalPages}
                 </h3>
-                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                  <select value={processingFamily} onChange={(e) => setProcessingFamily(e.target.value)}>
+                <div className="admin-filter-row">
+                  <select
+                    className="admin-input admin-input--compact"
+                    value={processingFamily}
+                    onChange={(e) => setProcessingFamily(e.target.value)}
+                  >
                     <option value="all">Tất cả</option>
                     <option value="parse">Parse</option>
                     <option value="semantic_scholar">Semantic Scholar</option>
@@ -533,7 +629,7 @@ export function AdminPage() {
                     <option value="duplicate">Duplicate</option>
                     <option value="canonical">Canonical</option>
                   </select>
-                  <label style={{ display: "flex", gap: "0.25rem", alignItems: "center" }}>
+                  <label className="admin-check">
                     <input
                       type="checkbox"
                       checked={processingErrorsOnly}
@@ -543,49 +639,45 @@ export function AdminPage() {
                   </label>
                 </div>
               </div>
-              {processingLogs.map((item) => (
-                <div key={item.id} style={{ borderBottom: "1px solid #e5e7eb", padding: "0.75rem 0" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <strong>{item.event_label}</strong>
-                    <span>{formatDate(item.created_at)}</span>
+              <div className="admin-log-list">
+                {processingLogs.map((item) => (
+                  <div key={item.id} className="admin-log-item">
+                    <div className="admin-log-item__head">
+                      <strong>{item.event_label}</strong>
+                      <span>{formatDate(item.created_at)}</span>
+                    </div>
+                    <div className="admin-log-item__message">{item.message}</div>
+                    <div className="admin-log-item__meta">
+                      Event: {item.event_type} · Status: <StatusBadge status={item.status} />
+                    </div>
                   </div>
-                  <div>{item.message}</div>
-                  <div style={{ color: "#6b7280", fontSize: "0.875rem" }}>
-                    Event: {item.event_type} · Status:{" "}
-                    <span style={{ color: getStatusColor(item.status) }}>{item.status}</span>
-                  </div>
-                </div>
-              ))}
-              {processingLogs.length === 0 && <div>Không có dữ liệu.</div>}
+                ))}
+              </div>
+              {processingLogs.length === 0 && <div className="admin-empty-state">Không có dữ liệu.</div>}
               <Pagination page={processingPage} totalPages={processingTotalPages} onChange={setProcessingPage} />
             </div>
           )}
 
           {activeTab === "config" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            <div className="admin-config-layout">
               {/* Header with mode indicator and default settings button */}
-              <div className="card" style={{ padding: "1rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem" }}>
+              <div className="card admin-panel-card">
+                <div className="admin-panel-head">
                   <div>
-                    <h3 style={{ marginTop: 0, marginBottom: "0.25rem" }}>Cấu hình hệ thống</h3>
-                    <p style={{ color: "#6b7280", margin: 0, fontSize: "0.875rem" }}>
+                    <h3 className="admin-card-title">Cấu hình hệ thống</h3>
+                    <p className="admin-muted-text">
                       Cập nhật tham số vận hành. Hệ thống sẽ kiểm tra kết nối trước khi lưu.
                     </p>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                    <span style={{
-                      padding: "0.25rem 0.75rem", borderRadius: "999px", fontSize: "0.8rem", fontWeight: 500,
-                      background: config?.source === "env_default" ? "#dcfce7" : "#dbeafe",
-                      color: config?.source === "env_default" ? "#166534" : "#1e40af",
-                    }}>
+                  <div className="admin-filter-row">
+                    <span className={`admin-chip ${config?.source === "env_default" ? "admin-chip--success" : "admin-chip--info"}`}>
                       {config?.source === "env_default" ? "⚙️ Default (.env)" : "🔧 Custom config"}
                     </span>
                     <button
                       type="button"
-                      className="btn btn--secondary"
+                      className="btn btn--secondary admin-btn-compact"
                       onClick={switchToDefaults}
                       disabled={isSavingConfig || config?.source === "env_default"}
-                      style={{ fontSize: "0.85rem", padding: "0.5rem 1rem", minHeight: "auto" }}
                     >
                       Dùng Default Settings
                     </button>
@@ -593,28 +685,24 @@ export function AdminPage() {
                 </div>
 
                 {configSuccess && (
-                  <div style={{ marginTop: "0.75rem", padding: "0.6rem 1rem", borderRadius: "8px", background: "#dcfce7", color: "#166534", fontSize: "0.875rem" }}>
+                  <div className="admin-callout admin-callout--success">
                     ✅ {configSuccess}
                   </div>
                 )}
                 {config?.updated_at && (
-                  <div style={{ marginTop: "0.5rem", color: "#6b7280", fontSize: "0.8rem" }}>
+                  <div className="admin-meta-text">
                     Cập nhật gần nhất: {formatDate(config.updated_at)} bởi {config.updated_by || "-"}
                   </div>
                 )}
               </div>
 
               {/* LLM Configuration Section */}
-              <div className="card" style={{ padding: "1rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-                  <h4 style={{ margin: 0 }}>🤖 LLM Provider</h4>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <div className="card admin-panel-card admin-config-card">
+                <div className="admin-config-card__head">
+                  <h4 className="admin-card-subtitle">🤖 LLM Provider</h4>
+                  <div className="admin-filter-row">
                     {validationResults.llm && (
-                      <span style={{
-                        padding: "0.2rem 0.6rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 500,
-                        background: validationResults.llm.ok ? "#dcfce7" : "#fee2e2",
-                        color: validationResults.llm.ok ? "#166534" : "#b91c1c",
-                      }}>
+                      <span className={`admin-chip ${validationResults.llm.ok ? "admin-chip--success" : "admin-chip--error"}`}>
                         {validationResults.llm.ok ? "✓ Kết nối OK" : "✕ Lỗi"}
                       </span>
                     )}
@@ -622,48 +710,44 @@ export function AdminPage() {
                       type="button"
                       onClick={() => testService("llm")}
                       disabled={validatingService !== null}
-                      style={{ fontSize: "0.8rem", padding: "0.35rem 0.75rem", cursor: "pointer", borderRadius: "8px", border: "1px solid #d1d5db", background: validatingService === "llm" ? "#f3f4f6" : "#fff" }}
+                      className="admin-test-btn"
                     >
                       {validatingService === "llm" ? "Đang kiểm tra..." : "Test kết nối"}
                     </button>
                   </div>
                 </div>
                 {validationResults.llm && !validationResults.llm.ok && (
-                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#fef2f2", color: "#b91c1c", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                  <div className="admin-callout admin-callout--error">
                     {validationResults.llm.message}
                   </div>
                 )}
                 {validationResults.llm && validationResults.llm.ok && (
-                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#f0fdf4", color: "#166534", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                  <div className="admin-callout admin-callout--success">
                     {validationResults.llm.message}
                   </div>
                 )}
-                <div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "1fr 1fr" }}>
-                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                <div className="admin-form-grid admin-form-grid--two">
+                  <label className="admin-label">
                     Provider
-                    <select value={configForm.llm_provider} onChange={(e) => updateConfigField("llm_provider", e.target.value)} style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db" }}>
+                    <select className="admin-input" value={configForm.llm_provider} onChange={(e) => updateConfigField("llm_provider", e.target.value)}>
                       <option value="gemini">Gemini</option>
                       <option value="ollama">Ollama</option>
                     </select>
                   </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                  <label className="admin-label">
                     Model name
-                    <input type="text" value={configForm.llm_model} onChange={(e) => updateConfigField("llm_model", e.target.value)} placeholder="e.g. gemini-2.5-pro" style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                    <input className="admin-input" type="text" value={configForm.llm_model} onChange={(e) => updateConfigField("llm_model", e.target.value)} placeholder="e.g. gemini-2.5-pro" />
                   </label>
                 </div>
               </div>
 
               {/* Semantic Scholar Section */}
-              <div className="card" style={{ padding: "1rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-                  <h4 style={{ margin: 0 }}>📚 Semantic Scholar</h4>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <div className="card admin-panel-card admin-config-card">
+                <div className="admin-config-card__head">
+                  <h4 className="admin-card-subtitle">📚 Semantic Scholar</h4>
+                  <div className="admin-filter-row">
                     {validationResults.semantic_scholar && (
-                      <span style={{
-                        padding: "0.2rem 0.6rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 500,
-                        background: validationResults.semantic_scholar.ok ? "#dcfce7" : "#fee2e2",
-                        color: validationResults.semantic_scholar.ok ? "#166534" : "#b91c1c",
-                      }}>
+                      <span className={`admin-chip ${validationResults.semantic_scholar.ok ? "admin-chip--success" : "admin-chip--error"}`}>
                         {validationResults.semantic_scholar.ok ? "✓ API key hợp lệ" : "✕ Lỗi"}
                       </span>
                     )}
@@ -671,42 +755,38 @@ export function AdminPage() {
                       type="button"
                       onClick={() => testService("semantic_scholar")}
                       disabled={validatingService !== null}
-                      style={{ fontSize: "0.8rem", padding: "0.35rem 0.75rem", cursor: "pointer", borderRadius: "8px", border: "1px solid #d1d5db", background: validatingService === "semantic_scholar" ? "#f3f4f6" : "#fff" }}
+                      className="admin-test-btn"
                     >
                       {validatingService === "semantic_scholar" ? "Đang kiểm tra..." : "Test kết nối"}
                     </button>
                   </div>
                 </div>
                 {validationResults.semantic_scholar && !validationResults.semantic_scholar.ok && (
-                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#fef2f2", color: "#b91c1c", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                  <div className="admin-callout admin-callout--error">
                     {validationResults.semantic_scholar.message}
                   </div>
                 )}
                 {validationResults.semantic_scholar && validationResults.semantic_scholar.ok && (
-                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#f0fdf4", color: "#166534", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                  <div className="admin-callout admin-callout--success">
                     {validationResults.semantic_scholar.message}
                   </div>
                 )}
-                <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                <label className="admin-label">
                   API key (nhập mới để cập nhật)
-                  <input type="password" value={configForm.semantic_scholar_api_key} onChange={(e) => updateConfigField("semantic_scholar_api_key", e.target.value)} placeholder="Nhập API key..." style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                  <input className="admin-input" type="password" value={configForm.semantic_scholar_api_key} onChange={(e) => updateConfigField("semantic_scholar_api_key", e.target.value)} placeholder="Nhập API key..." />
                 </label>
-                <div style={{ marginTop: "0.5rem", color: "#6b7280", fontSize: "0.8rem" }}>
+                <div className="admin-meta-text">
                   Key hiện tại: {config?.semantic_scholar_api_key_masked || "(chưa cấu hình)"}
                 </div>
               </div>
 
               {/* Embedding Section */}
-              <div className="card" style={{ padding: "1rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-                  <h4 style={{ margin: 0 }}>🧠 Embedding Model</h4>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <div className="card admin-panel-card admin-config-card">
+                <div className="admin-config-card__head">
+                  <h4 className="admin-card-subtitle">🧠 Embedding Model</h4>
+                  <div className="admin-filter-row">
                     {validationResults.embedding && (
-                      <span style={{
-                        padding: "0.2rem 0.6rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 500,
-                        background: validationResults.embedding.ok ? "#dcfce7" : "#fee2e2",
-                        color: validationResults.embedding.ok ? "#166534" : "#b91c1c",
-                      }}>
+                      <span className={`admin-chip ${validationResults.embedding.ok ? "admin-chip--success" : "admin-chip--error"}`}>
                         {validationResults.embedding.ok ? "✓ Model OK" : "✕ Lỗi"}
                       </span>
                     )}
@@ -714,39 +794,35 @@ export function AdminPage() {
                       type="button"
                       onClick={() => testService("embedding")}
                       disabled={validatingService !== null}
-                      style={{ fontSize: "0.8rem", padding: "0.35rem 0.75rem", cursor: "pointer", borderRadius: "8px", border: "1px solid #d1d5db", background: validatingService === "embedding" ? "#f3f4f6" : "#fff" }}
+                      className="admin-test-btn"
                     >
                       {validatingService === "embedding" ? "Đang kiểm tra..." : "Test kết nối"}
                     </button>
                   </div>
                 </div>
                 {validationResults.embedding && !validationResults.embedding.ok && (
-                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#fef2f2", color: "#b91c1c", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                  <div className="admin-callout admin-callout--error">
                     {validationResults.embedding.message}
                   </div>
                 )}
                 {validationResults.embedding && validationResults.embedding.ok && (
-                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#f0fdf4", color: "#166534", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                  <div className="admin-callout admin-callout--success">
                     {validationResults.embedding.message}
                   </div>
                 )}
-                <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                <label className="admin-label">
                   Model name
-                  <input type="text" value={configForm.embedding_model} onChange={(e) => updateConfigField("embedding_model", e.target.value)} placeholder="e.g. BAAI/bge-small-en-v1.5" style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                  <input className="admin-input" type="text" value={configForm.embedding_model} onChange={(e) => updateConfigField("embedding_model", e.target.value)} placeholder="e.g. BAAI/bge-small-en-v1.5" />
                 </label>
               </div>
 
               {/* Telegram Section */}
-              <div className="card" style={{ padding: "1rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-                  <h4 style={{ margin: 0 }}>📨 Telegram Bot</h4>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <div className="card admin-panel-card admin-config-card">
+                <div className="admin-config-card__head">
+                  <h4 className="admin-card-subtitle">📨 Telegram Bot</h4>
+                  <div className="admin-filter-row">
                     {validationResults.telegram && (
-                      <span style={{
-                        padding: "0.2rem 0.6rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 500,
-                        background: validationResults.telegram.ok ? "#dcfce7" : "#fee2e2",
-                        color: validationResults.telegram.ok ? "#166534" : "#b91c1c",
-                      }}>
+                      <span className={`admin-chip ${validationResults.telegram.ok ? "admin-chip--success" : "admin-chip--error"}`}>
                         {validationResults.telegram.ok ? "✓ Bot OK" : "✕ Lỗi"}
                       </span>
                     )}
@@ -754,73 +830,72 @@ export function AdminPage() {
                       type="button"
                       onClick={() => testService("telegram")}
                       disabled={validatingService !== null}
-                      style={{ fontSize: "0.8rem", padding: "0.35rem 0.75rem", cursor: "pointer", borderRadius: "8px", border: "1px solid #d1d5db", background: validatingService === "telegram" ? "#f3f4f6" : "#fff" }}
+                      className="admin-test-btn"
                     >
                       {validatingService === "telegram" ? "Đang kiểm tra..." : "Test kết nối"}
                     </button>
                   </div>
                 </div>
                 {validationResults.telegram && !validationResults.telegram.ok && (
-                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#fef2f2", color: "#b91c1c", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                  <div className="admin-callout admin-callout--error">
                     {validationResults.telegram.message}
                   </div>
                 )}
                 {validationResults.telegram && validationResults.telegram.ok && (
-                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#f0fdf4", color: "#166534", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                  <div className="admin-callout admin-callout--success">
                     {validationResults.telegram.message}
                   </div>
                 )}
-                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem", fontSize: "0.85rem", fontWeight: 500 }}>
+                <label className="admin-check">
                   <input type="checkbox" checked={configForm.telegram_enabled} onChange={(e) => updateConfigField("telegram_enabled", e.target.checked)} />
                   Bật Telegram notification
                 </label>
-                <div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "1fr 1fr" }}>
-                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                <div className="admin-form-grid admin-form-grid--two">
+                  <label className="admin-label">
                     Bot token (nhập mới để cập nhật)
-                    <input type="password" value={configForm.telegram_bot_token} onChange={(e) => updateConfigField("telegram_bot_token", e.target.value)} placeholder="Nhập bot token..." style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                    <input className="admin-input" type="password" value={configForm.telegram_bot_token} onChange={(e) => updateConfigField("telegram_bot_token", e.target.value)} placeholder="Nhập bot token..." />
                   </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                  <label className="admin-label">
                     Chat ID
-                    <input type="text" value={configForm.telegram_chat_id} onChange={(e) => updateConfigField("telegram_chat_id", e.target.value)} placeholder="e.g. -1001234567890" style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                    <input className="admin-input" type="text" value={configForm.telegram_chat_id} onChange={(e) => updateConfigField("telegram_chat_id", e.target.value)} placeholder="e.g. -1001234567890" />
                   </label>
                 </div>
-                <div style={{ marginTop: "0.5rem", color: "#6b7280", fontSize: "0.8rem" }}>
+                <div className="admin-meta-text">
                   Token hiện tại: {config?.telegram_bot_token_masked || "(chưa cấu hình)"}
                 </div>
               </div>
 
               {/* Pipeline Parameters */}
-              <div className="card" style={{ padding: "1rem" }}>
-                <h4 style={{ margin: "0 0 0.75rem" }}>⚡ Pipeline Parameters</h4>
-                <div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "1fr 1fr 1fr" }}>
-                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+              <div className="card admin-panel-card admin-config-card">
+                <h4 className="admin-card-subtitle">⚡ Pipeline Parameters</h4>
+                <div className="admin-form-grid admin-form-grid--three">
+                  <label className="admin-label">
                     Metadata match threshold
-                    <input type="number" min={0} max={1} step={0.01} value={configForm.metadata_match_threshold} onChange={(e) => updateConfigField("metadata_match_threshold", e.target.value)} style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                    <input className="admin-input" type="number" min={0} max={1} step={0.01} value={configForm.metadata_match_threshold} onChange={(e) => updateConfigField("metadata_match_threshold", e.target.value)} />
                   </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                  <label className="admin-label">
                     Retry limit
-                    <input type="number" min={0} max={10} value={configForm.pipeline_retry_limit} onChange={(e) => updateConfigField("pipeline_retry_limit", e.target.value)} style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                    <input className="admin-input" type="number" min={0} max={10} value={configForm.pipeline_retry_limit} onChange={(e) => updateConfigField("pipeline_retry_limit", e.target.value)} />
                   </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                  <label className="admin-label">
                     Timeout (seconds)
-                    <input type="number" min={10} max={3600} value={configForm.pipeline_timeout_seconds} onChange={(e) => updateConfigField("pipeline_timeout_seconds", e.target.value)} style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                    <input className="admin-input" type="number" min={10} max={3600} value={configForm.pipeline_timeout_seconds} onChange={(e) => updateConfigField("pipeline_timeout_seconds", e.target.value)} />
                   </label>
                 </div>
               </div>
 
               {/* Save Actions */}
-              <div className="card" style={{ padding: "1rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem" }}>
-                  <div style={{ fontSize: "0.85rem", color: "#6b7280" }}>
+              <div className="card admin-panel-card">
+                <div className="admin-panel-head">
+                  <div className="admin-muted-text">
                     Lưu sẽ tự động xác thực tất cả kết nối. Nếu bất kỳ dịch vụ nào sai, cấu hình sẽ không được lưu.
                   </div>
-                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <div className="admin-filter-row">
                     <button
                       type="button"
                       onClick={() => testService("all")}
                       disabled={validatingService !== null || isSavingConfig}
-                      className="btn btn--secondary"
-                      style={{ fontSize: "0.85rem", padding: "0.5rem 1rem", minHeight: "auto" }}
+                      className="btn btn--secondary admin-btn-compact"
                     >
                       {validatingService === "all" ? "Đang kiểm tra tất cả..." : "Kiểm tra tất cả"}
                     </button>
@@ -828,8 +903,7 @@ export function AdminPage() {
                       type="button"
                       onClick={saveConfig}
                       disabled={isSavingConfig || validatingService !== null}
-                      className="btn btn--primary"
-                      style={{ fontSize: "0.85rem", padding: "0.5rem 1.2rem", minHeight: "auto" }}
+                      className="btn btn--primary admin-btn-compact"
                     >
                       {isSavingConfig ? "Đang lưu và xác thực..." : "Lưu cấu hình"}
                     </button>
@@ -840,58 +914,66 @@ export function AdminPage() {
           )}
 
           {activeTab === "evaluation" && evaluation && (
-            <div className="card" style={{ padding: "1rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
-                <h3 style={{ margin: 0 }}>Dữ liệu đánh giá PoC</h3>
-                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <div className="card admin-panel-card">
+              <div className="admin-panel-head">
+                <h3 className="admin-card-title">Dữ liệu đánh giá PoC</h3>
+                <div className="admin-filter-row">
                   <input
+                    className="admin-input admin-input--compact"
                     type="number"
                     min={1}
                     max={365}
                     value={windowDays}
                     onChange={(e) => setWindowDays(Number(e.target.value) || 7)}
                   />
-                  <button type="button" onClick={() => void loadEvaluation()}>
+                  <button className="admin-test-btn" type="button" onClick={() => void loadEvaluation()}>
                     Làm mới
                   </button>
-                  <button type="button" onClick={exportEvaluationData}>
+                  <button className="admin-test-btn" type="button" onClick={exportEvaluationData}>
                     Export JSON
                   </button>
                 </div>
               </div>
 
-              <p style={{ color: "#6b7280" }}>
+              <p className="admin-meta-text">
                 Cửa sổ dữ liệu: {evaluation.window_days} ngày · sinh lúc {formatDate(evaluation.generated_at)}
               </p>
 
-              <div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-                <div><strong>Tổng papers:</strong> {evaluation.summary.total_papers}</div>
-                <div><strong>Draft:</strong> {evaluation.summary.draft_papers}</div>
-                <div><strong>Published:</strong> {evaluation.summary.published_papers}</div>
-                <div><strong>Jobs xử lý:</strong> {evaluation.summary.jobs_processing}</div>
-                <div><strong>Jobs lỗi:</strong> {evaluation.summary.jobs_failed}</div>
-                <div><strong>Cache hit:</strong> {evaluation.summary.cache_hits}</div>
-                <div><strong>Cache miss:</strong> {evaluation.summary.cache_misses}</div>
-                <div><strong>Cache hit rate:</strong> {(evaluation.summary.cache_hit_rate * 100).toFixed(2)}%</div>
-                <div><strong>Avg pipeline:</strong> {evaluation.summary.avg_pipeline_seconds?.toFixed(2) || "-"}s</div>
+              <div className="admin-summary-grid">
+                <div className="admin-summary-item"><span>Tổng papers</span><strong>{evaluation.summary.total_papers}</strong></div>
+                <div className="admin-summary-item"><span>Draft</span><strong>{evaluation.summary.draft_papers}</strong></div>
+                <div className="admin-summary-item"><span>Published</span><strong>{evaluation.summary.published_papers}</strong></div>
+                <div className="admin-summary-item"><span>Jobs xử lý</span><strong>{evaluation.summary.jobs_processing}</strong></div>
+                <div className="admin-summary-item"><span>Jobs lỗi</span><strong>{evaluation.summary.jobs_failed}</strong></div>
+                <div className="admin-summary-item"><span>Cache hit</span><strong>{evaluation.summary.cache_hits}</strong></div>
+                <div className="admin-summary-item"><span>Cache miss</span><strong>{evaluation.summary.cache_misses}</strong></div>
+                <div className="admin-summary-item"><span>Cache hit rate</span><strong>{(evaluation.summary.cache_hit_rate * 100).toFixed(2)}%</strong></div>
+                <div className="admin-summary-item"><span>Avg pipeline</span><strong>{evaluation.summary.avg_pipeline_seconds?.toFixed(2) || "-"}s</strong></div>
               </div>
 
-              <h4 style={{ marginBottom: "0.5rem" }}>Pipeline errors</h4>
-              {evaluation.processing_errors.length === 0 && <div>Không có lỗi trong cửa sổ hiện tại.</div>}
-              {evaluation.processing_errors.map((item) => (
-                <div key={item.event_type}>
-                  {item.event_type}: {item.count}
+              <div className="admin-evaluation-charts">
+                <div className="admin-chart-card">
+                  <div className="admin-chart-card__header">
+                    <h4 className="admin-card-subtitle">Pipeline errors</h4>
+                  </div>
+                  <MiniBarChart items={evaluationErrorChart} emptyMessage="Không có lỗi trong cửa sổ hiện tại." />
                 </div>
-              ))}
+                <div className="admin-chart-card">
+                  <div className="admin-chart-card__header">
+                    <h4 className="admin-card-subtitle">Tỉ lệ cache</h4>
+                  </div>
+                  <MiniBarChart items={evaluationCacheChart} emptyMessage="Chưa có số liệu cache." />
+                </div>
+              </div>
 
-              <h4 style={{ marginBottom: "0.5rem", marginTop: "1rem" }}>Search samples</h4>
-              {evaluation.search_samples.length === 0 && <div>Chưa có search log.</div>}
+              <h4 className="admin-card-subtitle">Search samples</h4>
+              {evaluation.search_samples.length === 0 && <div className="admin-empty-state">Chưa có search log.</div>}
               {evaluation.search_samples.map((item, idx) => (
-                <div key={`${item.event_type}-${item.created_at}-${idx}`} style={{ borderBottom: "1px solid #e5e7eb", padding: "0.5rem 0" }}>
-                  <div>
+                <div key={`${item.event_type}-${item.created_at}-${idx}`} className="admin-log-item">
+                  <div className="admin-log-item__head">
                     <strong>{item.event_type}</strong> · {formatDate(item.created_at)}
                   </div>
-                  <div style={{ color: "#6b7280" }}>
+                  <div className="admin-log-item__meta">
                     Query: "{item.query}" · Kết quả: {item.result_count} · top/limit: {item.top_k_or_limit}
                   </div>
                 </div>
