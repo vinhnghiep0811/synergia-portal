@@ -54,7 +54,7 @@ def build_structure(canonical_id: str):
 
         # enqueue embedding
         from app.services.queue_service import QueueService
-        QueueService().enqueue_embedding(canonical_id)
+        QueueService(db).enqueue_embedding(canonical_id)
 
     except Exception:
         db.rollback()

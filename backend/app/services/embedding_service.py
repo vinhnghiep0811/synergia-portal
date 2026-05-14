@@ -11,19 +11,22 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "BAAI/bge-small-en-v1.5"
+DEFAULT_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIM = 384
 
 
 class EmbeddingService:
-    _instance = None
-    _model = None
+    _instances = {}
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(EmbeddingService, cls).__new__(cls)
-            cls._instance._initialize_model()
-        return cls._instance
+    def __new__(cls, model_name: str | None = None):
+        normalized_model = (model_name or "").strip() or DEFAULT_MODEL_NAME
+        instance = cls._instances.get(normalized_model)
+        if instance is None:
+            instance = super(EmbeddingService, cls).__new__(cls)
+            instance.model_name = normalized_model
+            instance._initialize_model()
+            cls._instances[normalized_model] = instance
+        return instance
 
     def _initialize_model(self):
         if FlagModel is None:
@@ -36,11 +39,11 @@ class EmbeddingService:
             except Exception as e:
                 logger.warning("[embedding] HF login failed: %s", e)
 
-        logger.info("[embedding] Loading model: %s", MODEL_NAME)
+        logger.info("[embedding] Loading model: %s", self.model_name)
 
         try:
             self._model = FlagModel(
-                MODEL_NAME,
+                self.model_name,
                 query_instruction_for_retrieval=(
                     "Represent this sentence for searching relevant passages: "
                 ),

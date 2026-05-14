@@ -34,18 +34,38 @@ class GeminiCallFailedError(RuntimeError):
 class GeminiLLMProvider(BaseLLMProvider):
     _call_count = 0
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        model_name: str | None = None,
+        retry_attempts: int | None = None,
+        request_timeout_seconds: int | None = None,
+        fallback_timeout_seconds: int | None = None,
+    ) -> None:
         self.api_key = GEMINI_API_KEY
-        self.model = GEMINI_MODEL
+        normalized_model = (model_name or "").strip()
+        self.model = normalized_model or GEMINI_MODEL
         self.temperature = GEMINI_TEMPERATURE
         self.max_output_tokens = GEMINI_MAX_OUTPUT_TOKENS
 
-        self.retry_attempts = GEMINI_AUTO_RETRY_MAX_ATTEMPTS
+        self.retry_attempts = (
+            max(1, int(retry_attempts))
+            if retry_attempts is not None
+            else GEMINI_AUTO_RETRY_MAX_ATTEMPTS
+        )
         self.retry_delay_seconds = GEMINI_AUTO_RETRY_DELAY_SECONDS
+        self.request_timeout_seconds = (
+            max(1, int(request_timeout_seconds))
+            if request_timeout_seconds is not None
+            else 120
+        )
         self.enable_ollama_fallback = GEMINI_FALLBACK_TO_OLLAMA
         self.ollama_base_url = OLLAMA_BASE_URL
         self.ollama_model = OLLAMA_MODEL
-        self.ollama_timeout_seconds = OLLAMA_TIMEOUT_SECONDS
+        self.ollama_timeout_seconds = (
+            max(1, int(fallback_timeout_seconds))
+            if fallback_timeout_seconds is not None
+            else OLLAMA_TIMEOUT_SECONDS
+        )
         self.ollama_temperature = OLLAMA_TEMPERATURE
         self.ollama_num_predict = OLLAMA_NUM_PREDICT
         self.ollama_num_ctx = OLLAMA_NUM_CTX
@@ -291,7 +311,7 @@ class GeminiLLMProvider(BaseLLMProvider):
             )
 
             try:
-                with urllib.request.urlopen(request, timeout=120) as response:
+                with urllib.request.urlopen(request, timeout=self.request_timeout_seconds) as response:
                     body = response.read().decode("utf-8")
                     logger.warning("[GEMINI RESPONSE] status=200 body_preview=%s", body[:300])
                     return json.loads(body)

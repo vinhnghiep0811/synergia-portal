@@ -15,6 +15,8 @@ class ActivityObjectType:
     PAPER_RECORD = "paper_record"
     CANONICAL_DOCUMENT = "canonical_document"
     EXTRACTION_RUN = "extraction_run"
+    SYSTEM_CONFIG = "system_config"
+    SEARCH_QUERY = "search_query"
 
 
 class ActivityEventType:
@@ -57,3 +59,6 @@ class ActivityEventType:
     ADMIN_ALLOWLIST_UPDATED = "admin_allowlist_updated"
     ADMIN_SETTING_UPDATED = "admin_setting_updated"
     ADMIN_API_KEY_UPDATED = "admin_api_key_updated"
+
+    SEARCH_SEMANTIC_EXECUTED = "search_semantic_executed"
+    SEARCH_KEYWORD_EXECUTED = "search_keyword_executed"

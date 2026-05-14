@@ -1,4 +1,5 @@
 from uuid import UUID
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -16,17 +17,25 @@ class ActivityQueryService:
         skip: int = 0,
         limit: int = 20,
         event_type: str | None = None,
+        event_types: list[str] | None = None,
+        event_prefix: str | None = None,
         status: str | None = None,
+        actor_type: str | None = None,
         paper_record_id: UUID | None = None,
         canonical_document_id: UUID | None = None,
+        created_from: datetime | None = None,
     ) -> dict:
         items, total = self.repo.list_activity_logs(
             skip=skip,
             limit=limit,
             event_type=event_type,
+            event_types=event_types,
+            event_prefix=event_prefix,
             status=status,
+            actor_type=actor_type,
             paper_record_id=paper_record_id,
             canonical_document_id=canonical_document_id,
+            created_from=created_from,
         )
 
         return {

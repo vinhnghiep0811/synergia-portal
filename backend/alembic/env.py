@@ -11,6 +11,8 @@ from app.models.paper_record import PaperRecord
 from app.models.extraction_run import ExtractionRun
 from app.models.publish_version import PublishVersion
 from app.models.user import User
+from app.models.activity_log import ActivityLog
+from app.models.admin_system_config import AdminSystemConfig
 from app.models.citation_score_run import CitationScoreRun
 from app.models.citation_mention import CitationMention
 from app.models.citation_edge import CitationEdge

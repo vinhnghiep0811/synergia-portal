@@ -1,5 +1,5 @@
 import "./styles/App.css";
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { HomeDashboard } from "./pages/HomeDashboard.jsx";
 import { UploadPage } from "./pages/UploadPage.jsx";
 import { PaperDashboard } from "./pages/PaperDashboard.jsx";
@@ -14,6 +14,19 @@ import { AdminPage } from "./pages/AdminPage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage.jsx";
 import { ProtectedRoute } from "./components/ProtectedRoute.jsx";
+import { AdminRoute } from "./components/AdminRoute.jsx";
+import { useAuth } from "./context/AuthContext.jsx";
+
+function HomeEntryRoute() {
+  const { user } = useAuth();
+  const role = String(user?.role || "").toUpperCase();
+
+  if (role === "ADMIN") {
+    return <Navigate to="/admin" replace />;
+  }
+
+  return <HomeDashboard />;
+}
 
 export default function App() {
   return (
@@ -22,7 +35,7 @@ export default function App() {
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
 
       <Route element={<ProtectedRoute />}>
-        <Route path="/" element={<HomeDashboard />} />
+        <Route path="/" element={<HomeEntryRoute />} />
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/papers" element={<PaperDashboard />} />
         <Route path="/papers/:paperId" element={<PaperDetailPage />} />
@@ -32,7 +45,14 @@ export default function App() {
         <Route path="/citation-graph" element={<CitationGraphPage />} />
         <Route path="/semantic-search" element={<SemanticSearchPage />} />
         <Route path="/extraction-runs/:runId" element={<ExtractionRunDetailPage />} />
-        <Route path="/admin" element={<AdminPage />} />
+        <Route
+          path="/admin"
+          element={
+            <AdminRoute>
+              <AdminPage />
+            </AdminRoute>
+          }
+        />
       </Route>
     </Routes>
   );

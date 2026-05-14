@@ -1,4 +1,5 @@
 from uuid import UUID
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -18,9 +19,13 @@ class ActivityLogRepository:
         skip: int = 0,
         limit: int = 20,
         event_type: str | None = None,
+        event_types: list[str] | None = None,
+        event_prefix: str | None = None,
         status: str | None = None,
+        actor_type: str | None = None,
         paper_record_id: UUID | None = None,
         canonical_document_id: UUID | None = None,
+        created_from: datetime | None = None,
     ) -> tuple[list[dict], int]:
         base_query = self.db.query(ActivityLog)
 
@@ -28,8 +33,17 @@ class ActivityLogRepository:
         if event_type:
             base_query = base_query.filter(ActivityLog.event_type == event_type)
 
+        if event_types:
+            base_query = base_query.filter(ActivityLog.event_type.in_(event_types))
+
+        if event_prefix:
+            base_query = base_query.filter(ActivityLog.event_type.ilike(f"{event_prefix}%"))
+
         if status:
             base_query = base_query.filter(ActivityLog.status == status)
+
+        if actor_type:
+            base_query = base_query.filter(ActivityLog.actor_type == actor_type)
 
         if paper_record_id:
             base_query = base_query.filter(ActivityLog.paper_record_id == paper_record_id)
@@ -38,6 +52,9 @@ class ActivityLogRepository:
             base_query = base_query.filter(
                 ActivityLog.canonical_document_id == canonical_document_id
             )
+
+        if created_from:
+            base_query = base_query.filter(ActivityLog.created_at >= created_from)
 
         # 👉 total count (KHÔNG join)
         total = base_query.count()
@@ -57,8 +74,17 @@ class ActivityLogRepository:
         if event_type:
             query = query.filter(ActivityLog.event_type == event_type)
 
+        if event_types:
+            query = query.filter(ActivityLog.event_type.in_(event_types))
+
+        if event_prefix:
+            query = query.filter(ActivityLog.event_type.ilike(f"{event_prefix}%"))
+
         if status:
             query = query.filter(ActivityLog.status == status)
+
+        if actor_type:
+            query = query.filter(ActivityLog.actor_type == actor_type)
 
         if paper_record_id:
             query = query.filter(ActivityLog.paper_record_id == paper_record_id)
@@ -67,6 +93,9 @@ class ActivityLogRepository:
             query = query.filter(
                 ActivityLog.canonical_document_id == canonical_document_id
             )
+
+        if created_from:
+            query = query.filter(ActivityLog.created_at >= created_from)
 
         rows = (
             query.order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
@@ -78,7 +107,7 @@ class ActivityLogRepository:
         results: list[dict] = []
         for activity, user, paper, canonical in rows:
             actor_display = "System"
-            if activity.actor_type == "user":
+            if activity.actor_type in {"user", "admin"}:
                 if user and user.full_name:
                     actor_display = user.full_name
                 elif user and user.email:
@@ -145,6 +174,11 @@ class ActivityLogRepository:
             "llm_extraction_failed": "LLM extraction failed",
             "llm_extraction_skipped_cache_hit": "LLM skipped (cache hit)",
             "paper_published": "Paper published",
+            "paper_metadata_edited": "Publish metadata updated",
+            "admin_setting_updated": "Admin setting updated",
+            "admin_api_key_updated": "Admin credential updated",
+            "search_semantic_executed": "Semantic search executed",
+            "search_keyword_executed": "Keyword search executed",
         }
         return mapping.get(event_type, event_type.replace("_", " ").title())
 

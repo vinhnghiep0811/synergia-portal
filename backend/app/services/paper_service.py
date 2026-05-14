@@ -1,4 +1,5 @@
 import hashlib
+import inspect
 import os
 from io import BytesIO
 from uuid import UUID, uuid4
@@ -20,7 +21,11 @@ class PaperService:
         self.db = db
         self.repo = PaperRepository(db)
         self.storage = StorageService()
-        self.queue_service = QueueService()
+        queue_service_signature = inspect.signature(QueueService)
+        if "db" in queue_service_signature.parameters:
+            self.queue_service = QueueService(db)
+        else:
+            self.queue_service = QueueService()
         self.activity_service = ActivityLogService(db)
 
     async def upload_pdf(

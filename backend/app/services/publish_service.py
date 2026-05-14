@@ -6,6 +6,12 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.constants.activity import (
+    ActivityActorType,
+    ActivityEventType,
+    ActivityObjectType,
+    ActivityStatus,
+)
 from app.models.canonical_document import CanonicalDocument
 from app.models.extraction_run import ExtractionRun
 from app.models.paper_record import PaperRecord
@@ -17,12 +23,14 @@ from app.schemas.publish import (
     PublishMetadataUpdateRequest,
     PublishVersionCreateResponse,
 )
+from app.services.activity_log_service import ActivityLogService
 from app.services.telegram_service import TelegramService
 
 
 class PublishService:
     def __init__(self, db: Session):
         self.db = db
+        self.activity_service = ActivityLogService(db)
 
     def get_publish_preview(self, paper_id: UUID) -> PublishMetadataPreviewResponse:
         paper = self._get_paper_or_raise(paper_id)
@@ -53,6 +61,8 @@ class PublishService:
         self,
         paper_id: UUID,
         payload: PublishMetadataUpdateRequest,
+        actor_user_id: UUID | None = None,
+        actor_email: str | None = None,
     ) -> PublishMetadataPreviewResponse:
         paper = self._get_paper_or_raise(paper_id)
 
@@ -73,12 +83,32 @@ class PublishService:
         }
 
         self.db.add(paper)
+        self.activity_service.log(
+            actor_type=ActivityActorType.USER if actor_user_id else ActivityActorType.SYSTEM,
+            actor_user_id=actor_user_id,
+            event_type=ActivityEventType.PAPER_METADATA_EDITED,
+            object_type=ActivityObjectType.PAPER_RECORD,
+            object_id=paper.id,
+            paper_record_id=paper.id,
+            canonical_document_id=paper.canonical_document_id,
+            status=ActivityStatus.SUCCESS,
+            message=f'Updated publish metadata draft for "{paper.original_filename}"',
+            metadata_json={
+                "edited_by": actor_email,
+                "fields": sorted(payload.model_dump().keys()),
+            },
+        )
         self.db.commit()
         self.db.refresh(paper)
 
         return self.get_publish_preview(paper.id)
 
-    def publish(self, paper_id: UUID, published_by: str | None) -> PublishVersionCreateResponse:
+    def publish(
+        self,
+        paper_id: UUID,
+        published_by: str | None,
+        actor_user_id: UUID | None = None,
+    ) -> PublishVersionCreateResponse:
         paper = self._get_paper_or_raise(paper_id)
 
         if not paper.canonical_document_id:
@@ -147,6 +177,25 @@ class PublishService:
             self.db.add(publish_version)
             self.db.commit()
             self.db.refresh(publish_version)
+
+        self.activity_service.log(
+            actor_type=ActivityActorType.USER if actor_user_id else ActivityActorType.SYSTEM,
+            actor_user_id=actor_user_id,
+            event_type=ActivityEventType.PAPER_PUBLISHED,
+            object_type=ActivityObjectType.PAPER_RECORD,
+            object_id=paper.id,
+            paper_record_id=paper.id,
+            canonical_document_id=paper.canonical_document_id,
+            status=ActivityStatus.SUCCESS,
+            message=f'Published paper "{paper.original_filename}"',
+            metadata_json={
+                "publish_version_id": str(publish_version.id),
+                "version_number": publish_version.version_number,
+                "published_by": published_by,
+                "telegram_notified": telegram_sent,
+            },
+        )
+        self.db.commit()
 
         return PublishVersionCreateResponse(
             paper_id=paper.id,

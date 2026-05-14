@@ -8,6 +8,7 @@ from sqlalchemy import or_, cast, Text as SQLText
 from app.models.document_chunk import DocumentChunk
 from app.models.canonical_document import CanonicalDocument
 from app.services.embedding_service import EmbeddingService
+from app.services.runtime_config_service import RuntimeConfigService
 from app.schemas.search import SearchResultItem
 from app.models.paper_record import PaperRecord
 logger = logging.getLogger(__name__)
@@ -55,7 +56,8 @@ SOFT_EXCLUDED_SECTION_KEYWORDS = [
 class SearchService:
     def __init__(self, db: Session):
         self.db = db
-        self.embedding_service = EmbeddingService()
+        runtime_config = RuntimeConfigService.get(db)
+        self.embedding_service = EmbeddingService(model_name=runtime_config.embedding_model)
 
     def semantic_search(self, query: str, top_k: int = 5, canonical_document_id: str | None = None,) -> list[SearchResultItem]:
         if not query or not query.strip():
