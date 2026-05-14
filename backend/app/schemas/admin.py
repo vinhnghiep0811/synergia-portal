@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class AdminConfigUpdateRequest(BaseModel):
+    use_default_settings: bool | None = None
     semantic_scholar_api_key: str | None = Field(
         default=None,
         min_length=8,
@@ -22,6 +23,18 @@ class AdminConfigUpdateRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_telegram_dependency(self):
+        if self.use_default_settings is True:
+            has_other_values = any(
+                value is not None
+                for key, value in self.model_dump().items()
+                if key != "use_default_settings"
+            )
+            if has_other_values:
+                raise ValueError(
+                    "Do not send custom fields when use_default_settings=true"
+                )
+            return self
+
         if self.telegram_enabled is True:
             token_missing = self.telegram_bot_token is None
             chat_missing = self.telegram_chat_id is None
@@ -48,6 +61,35 @@ class AdminConfigResponse(BaseModel):
     source: str
     updated_at: datetime | None
     updated_by: str | None
+
+
+class ConfigValidateRequest(BaseModel):
+    """Request to validate one or more service connections before saving."""
+
+    service: str = Field(
+        ...,
+        pattern="^(llm|semantic_scholar|telegram|embedding|all)$",
+        description="Which service to validate: llm, semantic_scholar, telegram, embedding, or all.",
+    )
+    llm_provider: str | None = Field(default=None, pattern="^(gemini|ollama)$")
+    llm_model: str | None = Field(default=None, min_length=1, max_length=255)
+    embedding_model: str | None = Field(default=None, min_length=1, max_length=255)
+    semantic_scholar_api_key: str | None = Field(default=None, min_length=1)
+    telegram_bot_token: str | None = Field(default=None, min_length=1)
+    telegram_chat_id: str | None = Field(default=None, min_length=1)
+    pipeline_timeout_seconds: int | None = Field(default=None, ge=10, le=3600)
+
+
+class ServiceValidationResult(BaseModel):
+    service: str
+    ok: bool
+    message: str
+    detail: str | None = None
+
+
+class ConfigValidateResponse(BaseModel):
+    results: list[ServiceValidationResult]
+    all_ok: bool
 
 
 class ProcessingLogSummaryItem(BaseModel):

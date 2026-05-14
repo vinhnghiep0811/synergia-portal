@@ -144,12 +144,9 @@ def llm_extract(canonical_document_id: str) -> None:
         db.commit()
 
         try:
-            from app.core.queue import parse_queue
+            from app.services.queue_service import QueueService
 
-            parse_queue.enqueue(
-                "worker_app.tasks.citation_graph.score_citation_graph_for_canonical",
-                str(canonical.id),
-            )
+            QueueService(db).enqueue_citation_graph_for_canonical(str(canonical.id))
 
             for paper in papers:
                 can_update_status = (

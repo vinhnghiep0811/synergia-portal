@@ -3,6 +3,7 @@ import logging
 from app.core.database import SessionLocal
 from app.models.document_chunk import DocumentChunk
 from app.services.embedding_service import EmbeddingService
+from app.services.runtime_config_service import RuntimeConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,8 @@ def generate_embedding(canonical_id: str):
             len(chunks),
         )
 
-        embedding_svc = EmbeddingService()
+        runtime_config = RuntimeConfigService.get(db)
+        embedding_svc = EmbeddingService(model_name=runtime_config.embedding_model)
 
         texts = [c.content for c in chunks]
         embeddings = embedding_svc.generate_embeddings(texts, batch_size=32)

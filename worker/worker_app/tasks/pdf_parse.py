@@ -19,6 +19,7 @@ from app.services.pdf_parse_service import (
     build_fingerprint,
     extract_pdf_text_for_llm,
 )
+from app.services.queue_service import QueueService
 
 logger = logging.getLogger(__name__)
 
@@ -207,12 +208,9 @@ def pdf_parse(paper_id: str) -> None:
         # --------------------------------
         # 10. enqueue Semantic Scholar enrichment
         # --------------------------------
+        queue_service = QueueService(db)
         try:
-            from app.core.queue import parse_queue, docling_queue
-            parse_queue.enqueue(
-                "worker_app.tasks.semantic_scholar.semantic_scholar_enrich",
-                str(canonical.id)
-            )
+            queue_service.enqueue_semantic_scholar(str(canonical.id))
             logger.info(f"[pdf_parse] Enqueued SS enrichment for canonical_id={canonical.id}")
         except Exception as e:
             # Khong lam hong flow chinh neu enqueue that bai
@@ -220,10 +218,7 @@ def pdf_parse(paper_id: str) -> None:
 
         try:
             if not paper.is_duplicate:
-                docling_queue.enqueue(
-                    "tasks.docling.extract_docling_text",
-                    str(paper.id)
-                )
+                queue_service.enqueue_docling(str(paper.id))
                 logger.info(
                     f"[pdf_parse] Enqueued Docling extraction for paper_id={paper.id}"
                 )

@@ -9,6 +9,7 @@ import {
   getAdminPapers,
   getAdminProcessingLogs,
   updateAdminConfiguration,
+  validateAdminConfiguration,
 } from "../services/adminApi.js";
 
 const TAB_CONFIG = [
@@ -112,6 +113,9 @@ export function AdminPage() {
     telegram_bot_token: "",
   });
   const [isSavingConfig, setIsSavingConfig] = useState(false);
+  const [validationResults, setValidationResults] = useState({});
+  const [validatingService, setValidatingService] = useState(null);
+  const [configSuccess, setConfigSuccess] = useState("");
 
   const [evaluation, setEvaluation] = useState(null);
   const [windowDays, setWindowDays] = useState(7);
@@ -187,6 +191,8 @@ export function AdminPage() {
         semantic_scholar_api_key: "",
         telegram_bot_token: "",
       });
+      setValidationResults({});
+      setConfigSuccess("");
     });
   }, [runWithState]);
 
@@ -235,11 +241,75 @@ export function AdminPage() {
 
   const updateConfigField = useCallback((field, value) => {
     setConfigForm((prev) => ({ ...prev, [field]: value }));
+    setValidationResults((prev) => {
+      const next = { ...prev };
+      if (field.startsWith("llm_")) delete next.llm;
+      if (field.startsWith("semantic_scholar")) delete next.semantic_scholar;
+      if (field.startsWith("telegram_")) delete next.telegram;
+      if (field.startsWith("embedding_")) delete next.embedding;
+      return next;
+    });
+  }, []);
+
+  const testService = useCallback(async (service) => {
+    setValidatingService(service);
+    setError("");
+    try {
+      const payload = {
+        service,
+        llm_provider: configForm.llm_provider,
+        llm_model: configForm.llm_model || undefined,
+        embedding_model: configForm.embedding_model || undefined,
+        semantic_scholar_api_key: configForm.semantic_scholar_api_key || undefined,
+        telegram_bot_token: configForm.telegram_bot_token || undefined,
+        telegram_chat_id: configForm.telegram_chat_id || undefined,
+        pipeline_timeout_seconds: Number(configForm.pipeline_timeout_seconds) || undefined,
+      };
+      const data = await validateAdminConfiguration(payload);
+      const newResults = { ...validationResults };
+      for (const r of data.results) {
+        newResults[r.service] = r;
+      }
+      setValidationResults(newResults);
+    } catch (err) {
+      setError(err.message || "Kiểm tra kết nối thất bại");
+    } finally {
+      setValidatingService(null);
+    }
+  }, [configForm, validationResults]);
+
+  const switchToDefaults = useCallback(async () => {
+    setIsSavingConfig(true);
+    setError("");
+    setConfigSuccess("");
+    try {
+      const updated = await updateAdminConfiguration({ use_default_settings: true });
+      setConfig(updated);
+      setConfigForm({
+        llm_provider: updated.llm_provider || "gemini",
+        llm_model: updated.llm_model || "",
+        embedding_model: updated.embedding_model || "",
+        metadata_match_threshold: updated.metadata_match_threshold ?? 0.7,
+        pipeline_retry_limit: updated.pipeline_retry_limit ?? 3,
+        pipeline_timeout_seconds: updated.pipeline_timeout_seconds ?? 300,
+        telegram_enabled: Boolean(updated.telegram_enabled),
+        telegram_chat_id: updated.telegram_chat_id || "",
+        semantic_scholar_api_key: "",
+        telegram_bot_token: "",
+      });
+      setValidationResults({});
+      setConfigSuccess("Đã chuyển về cấu hình mặc định (.env) thành công.");
+    } catch (err) {
+      setError(err.message || "Chuyển về cấu hình mặc định thất bại");
+    } finally {
+      setIsSavingConfig(false);
+    }
   }, []);
 
   const saveConfig = useCallback(async () => {
     setIsSavingConfig(true);
     setError("");
+    setConfigSuccess("");
     try {
       const payload = {
         llm_provider: configForm.llm_provider,
@@ -265,12 +335,14 @@ export function AdminPage() {
         semantic_scholar_api_key: "",
         telegram_bot_token: "",
       }));
+      setConfigSuccess("Cấu hình đã được lưu và xác thực thành công.");
     } catch (err) {
       setError(err.message || "Lưu cấu hình thất bại");
     } finally {
       setIsSavingConfig(false);
     }
   }, [configForm]);
+
 
   const exportEvaluationData = useCallback(() => {
     if (!evaluation) return;
@@ -490,142 +562,280 @@ export function AdminPage() {
           )}
 
           {activeTab === "config" && (
-            <div className="card" style={{ padding: "1rem" }}>
-              <h3 style={{ marginTop: 0 }}>Cấu hình hệ thống</h3>
-              <p style={{ color: "#6b7280", marginTop: 0 }}>
-                Cập nhật tham số vận hành cho metadata source, LLM, embedding và pipeline.
-              </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              {/* Header with mode indicator and default settings button */}
+              <div className="card" style={{ padding: "1rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem" }}>
+                  <div>
+                    <h3 style={{ marginTop: 0, marginBottom: "0.25rem" }}>Cấu hình hệ thống</h3>
+                    <p style={{ color: "#6b7280", margin: 0, fontSize: "0.875rem" }}>
+                      Cập nhật tham số vận hành. Hệ thống sẽ kiểm tra kết nối trước khi lưu.
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                    <span style={{
+                      padding: "0.25rem 0.75rem", borderRadius: "999px", fontSize: "0.8rem", fontWeight: 500,
+                      background: config?.source === "env_default" ? "#dcfce7" : "#dbeafe",
+                      color: config?.source === "env_default" ? "#166534" : "#1e40af",
+                    }}>
+                      {config?.source === "env_default" ? "⚙️ Default (.env)" : "🔧 Custom config"}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn--secondary"
+                      onClick={switchToDefaults}
+                      disabled={isSavingConfig || config?.source === "env_default"}
+                      style={{ fontSize: "0.85rem", padding: "0.5rem 1rem", minHeight: "auto" }}
+                    >
+                      Dùng Default Settings
+                    </button>
+                  </div>
+                </div>
 
-              <div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-                <label>
-                  LLM provider
-                  <select
-                    value={configForm.llm_provider}
-                    onChange={(e) => updateConfigField("llm_provider", e.target.value)}
-                    style={{ width: "100%" }}
-                  >
-                    <option value="gemini">gemini</option>
-                    <option value="ollama">ollama</option>
-                  </select>
-                </label>
-
-                <label>
-                  LLM model
-                  <input
-                    type="text"
-                    value={configForm.llm_model}
-                    onChange={(e) => updateConfigField("llm_model", e.target.value)}
-                    style={{ width: "100%" }}
-                  />
-                </label>
-
-                <label>
-                  Embedding model
-                  <input
-                    type="text"
-                    value={configForm.embedding_model}
-                    onChange={(e) => updateConfigField("embedding_model", e.target.value)}
-                    style={{ width: "100%" }}
-                  />
-                </label>
-
-                <label>
-                  Metadata match threshold
-                  <input
-                    type="number"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={configForm.metadata_match_threshold}
-                    onChange={(e) => updateConfigField("metadata_match_threshold", e.target.value)}
-                    style={{ width: "100%" }}
-                  />
-                </label>
-
-                <label>
-                  Pipeline retry limit
-                  <input
-                    type="number"
-                    min={0}
-                    max={10}
-                    value={configForm.pipeline_retry_limit}
-                    onChange={(e) => updateConfigField("pipeline_retry_limit", e.target.value)}
-                    style={{ width: "100%" }}
-                  />
-                </label>
-
-                <label>
-                  Pipeline timeout (seconds)
-                  <input
-                    type="number"
-                    min={10}
-                    max={3600}
-                    value={configForm.pipeline_timeout_seconds}
-                    onChange={(e) => updateConfigField("pipeline_timeout_seconds", e.target.value)}
-                    style={{ width: "100%" }}
-                  />
-                </label>
-
-                <label>
-                  Telegram chat id
-                  <input
-                    type="text"
-                    value={configForm.telegram_chat_id}
-                    onChange={(e) => updateConfigField("telegram_chat_id", e.target.value)}
-                    style={{ width: "100%" }}
-                  />
-                </label>
-
-                <label>
-                  Semantic Scholar API key (nhập mới để cập nhật)
-                  <input
-                    type="password"
-                    value={configForm.semantic_scholar_api_key}
-                    onChange={(e) => updateConfigField("semantic_scholar_api_key", e.target.value)}
-                    style={{ width: "100%" }}
-                  />
-                </label>
-
-                <label>
-                  Telegram bot token (nhập mới để cập nhật)
-                  <input
-                    type="password"
-                    value={configForm.telegram_bot_token}
-                    onChange={(e) => updateConfigField("telegram_bot_token", e.target.value)}
-                    style={{ width: "100%" }}
-                  />
-                </label>
+                {configSuccess && (
+                  <div style={{ marginTop: "0.75rem", padding: "0.6rem 1rem", borderRadius: "8px", background: "#dcfce7", color: "#166534", fontSize: "0.875rem" }}>
+                    ✅ {configSuccess}
+                  </div>
+                )}
+                {config?.updated_at && (
+                  <div style={{ marginTop: "0.5rem", color: "#6b7280", fontSize: "0.8rem" }}>
+                    Cập nhật gần nhất: {formatDate(config.updated_at)} bởi {config.updated_by || "-"}
+                  </div>
+                )}
               </div>
 
-              <label style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", marginTop: "0.75rem" }}>
-                <input
-                  type="checkbox"
-                  checked={configForm.telegram_enabled}
-                  onChange={(e) => updateConfigField("telegram_enabled", e.target.checked)}
-                />
-                Bật Telegram notification
-              </label>
+              {/* LLM Configuration Section */}
+              <div className="card" style={{ padding: "1rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                  <h4 style={{ margin: 0 }}>🤖 LLM Provider</h4>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    {validationResults.llm && (
+                      <span style={{
+                        padding: "0.2rem 0.6rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 500,
+                        background: validationResults.llm.ok ? "#dcfce7" : "#fee2e2",
+                        color: validationResults.llm.ok ? "#166534" : "#b91c1c",
+                      }}>
+                        {validationResults.llm.ok ? "✓ Kết nối OK" : "✕ Lỗi"}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => testService("llm")}
+                      disabled={validatingService !== null}
+                      style={{ fontSize: "0.8rem", padding: "0.35rem 0.75rem", cursor: "pointer", borderRadius: "8px", border: "1px solid #d1d5db", background: validatingService === "llm" ? "#f3f4f6" : "#fff" }}
+                    >
+                      {validatingService === "llm" ? "Đang kiểm tra..." : "Test kết nối"}
+                    </button>
+                  </div>
+                </div>
+                {validationResults.llm && !validationResults.llm.ok && (
+                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#fef2f2", color: "#b91c1c", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                    {validationResults.llm.message}
+                  </div>
+                )}
+                {validationResults.llm && validationResults.llm.ok && (
+                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#f0fdf4", color: "#166534", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                    {validationResults.llm.message}
+                  </div>
+                )}
+                <div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "1fr 1fr" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                    Provider
+                    <select value={configForm.llm_provider} onChange={(e) => updateConfigField("llm_provider", e.target.value)} style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db" }}>
+                      <option value="gemini">Gemini</option>
+                      <option value="ollama">Ollama</option>
+                    </select>
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                    Model name
+                    <input type="text" value={configForm.llm_model} onChange={(e) => updateConfigField("llm_model", e.target.value)} placeholder="e.g. gemini-2.5-pro" style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                  </label>
+                </div>
+              </div>
 
-              <div style={{ marginTop: "1rem", color: "#6b7280", fontSize: "0.875rem" }}>
-                <div>
+              {/* Semantic Scholar Section */}
+              <div className="card" style={{ padding: "1rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                  <h4 style={{ margin: 0 }}>📚 Semantic Scholar</h4>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    {validationResults.semantic_scholar && (
+                      <span style={{
+                        padding: "0.2rem 0.6rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 500,
+                        background: validationResults.semantic_scholar.ok ? "#dcfce7" : "#fee2e2",
+                        color: validationResults.semantic_scholar.ok ? "#166534" : "#b91c1c",
+                      }}>
+                        {validationResults.semantic_scholar.ok ? "✓ API key hợp lệ" : "✕ Lỗi"}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => testService("semantic_scholar")}
+                      disabled={validatingService !== null}
+                      style={{ fontSize: "0.8rem", padding: "0.35rem 0.75rem", cursor: "pointer", borderRadius: "8px", border: "1px solid #d1d5db", background: validatingService === "semantic_scholar" ? "#f3f4f6" : "#fff" }}
+                    >
+                      {validatingService === "semantic_scholar" ? "Đang kiểm tra..." : "Test kết nối"}
+                    </button>
+                  </div>
+                </div>
+                {validationResults.semantic_scholar && !validationResults.semantic_scholar.ok && (
+                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#fef2f2", color: "#b91c1c", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                    {validationResults.semantic_scholar.message}
+                  </div>
+                )}
+                {validationResults.semantic_scholar && validationResults.semantic_scholar.ok && (
+                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#f0fdf4", color: "#166534", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                    {validationResults.semantic_scholar.message}
+                  </div>
+                )}
+                <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                  API key (nhập mới để cập nhật)
+                  <input type="password" value={configForm.semantic_scholar_api_key} onChange={(e) => updateConfigField("semantic_scholar_api_key", e.target.value)} placeholder="Nhập API key..." style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                </label>
+                <div style={{ marginTop: "0.5rem", color: "#6b7280", fontSize: "0.8rem" }}>
                   Key hiện tại: {config?.semantic_scholar_api_key_masked || "(chưa cấu hình)"}
                 </div>
-                <div>
-                  Telegram token hiện tại: {config?.telegram_bot_token_masked || "(chưa cấu hình)"}
+              </div>
+
+              {/* Embedding Section */}
+              <div className="card" style={{ padding: "1rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                  <h4 style={{ margin: 0 }}>🧠 Embedding Model</h4>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    {validationResults.embedding && (
+                      <span style={{
+                        padding: "0.2rem 0.6rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 500,
+                        background: validationResults.embedding.ok ? "#dcfce7" : "#fee2e2",
+                        color: validationResults.embedding.ok ? "#166534" : "#b91c1c",
+                      }}>
+                        {validationResults.embedding.ok ? "✓ Model OK" : "✕ Lỗi"}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => testService("embedding")}
+                      disabled={validatingService !== null}
+                      style={{ fontSize: "0.8rem", padding: "0.35rem 0.75rem", cursor: "pointer", borderRadius: "8px", border: "1px solid #d1d5db", background: validatingService === "embedding" ? "#f3f4f6" : "#fff" }}
+                    >
+                      {validatingService === "embedding" ? "Đang kiểm tra..." : "Test kết nối"}
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  Cập nhật gần nhất: {config?.updated_at ? `${formatDate(config.updated_at)} bởi ${config.updated_by || "-"}` : "-"}
+                {validationResults.embedding && !validationResults.embedding.ok && (
+                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#fef2f2", color: "#b91c1c", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                    {validationResults.embedding.message}
+                  </div>
+                )}
+                {validationResults.embedding && validationResults.embedding.ok && (
+                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#f0fdf4", color: "#166534", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                    {validationResults.embedding.message}
+                  </div>
+                )}
+                <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                  Model name
+                  <input type="text" value={configForm.embedding_model} onChange={(e) => updateConfigField("embedding_model", e.target.value)} placeholder="e.g. BAAI/bge-small-en-v1.5" style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                </label>
+              </div>
+
+              {/* Telegram Section */}
+              <div className="card" style={{ padding: "1rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                  <h4 style={{ margin: 0 }}>📨 Telegram Bot</h4>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    {validationResults.telegram && (
+                      <span style={{
+                        padding: "0.2rem 0.6rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 500,
+                        background: validationResults.telegram.ok ? "#dcfce7" : "#fee2e2",
+                        color: validationResults.telegram.ok ? "#166534" : "#b91c1c",
+                      }}>
+                        {validationResults.telegram.ok ? "✓ Bot OK" : "✕ Lỗi"}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => testService("telegram")}
+                      disabled={validatingService !== null}
+                      style={{ fontSize: "0.8rem", padding: "0.35rem 0.75rem", cursor: "pointer", borderRadius: "8px", border: "1px solid #d1d5db", background: validatingService === "telegram" ? "#f3f4f6" : "#fff" }}
+                    >
+                      {validatingService === "telegram" ? "Đang kiểm tra..." : "Test kết nối"}
+                    </button>
+                  </div>
+                </div>
+                {validationResults.telegram && !validationResults.telegram.ok && (
+                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#fef2f2", color: "#b91c1c", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                    {validationResults.telegram.message}
+                  </div>
+                )}
+                {validationResults.telegram && validationResults.telegram.ok && (
+                  <div style={{ padding: "0.5rem 0.75rem", borderRadius: "8px", background: "#f0fdf4", color: "#166534", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                    {validationResults.telegram.message}
+                  </div>
+                )}
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem", fontSize: "0.85rem", fontWeight: 500 }}>
+                  <input type="checkbox" checked={configForm.telegram_enabled} onChange={(e) => updateConfigField("telegram_enabled", e.target.checked)} />
+                  Bật Telegram notification
+                </label>
+                <div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "1fr 1fr" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                    Bot token (nhập mới để cập nhật)
+                    <input type="password" value={configForm.telegram_bot_token} onChange={(e) => updateConfigField("telegram_bot_token", e.target.value)} placeholder="Nhập bot token..." style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                    Chat ID
+                    <input type="text" value={configForm.telegram_chat_id} onChange={(e) => updateConfigField("telegram_chat_id", e.target.value)} placeholder="e.g. -1001234567890" style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                  </label>
+                </div>
+                <div style={{ marginTop: "0.5rem", color: "#6b7280", fontSize: "0.8rem" }}>
+                  Token hiện tại: {config?.telegram_bot_token_masked || "(chưa cấu hình)"}
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={saveConfig}
-                disabled={isSavingConfig}
-                style={{ marginTop: "1rem" }}
-              >
-                {isSavingConfig ? "Đang lưu..." : "Lưu cấu hình"}
-              </button>
+              {/* Pipeline Parameters */}
+              <div className="card" style={{ padding: "1rem" }}>
+                <h4 style={{ margin: "0 0 0.75rem" }}>⚡ Pipeline Parameters</h4>
+                <div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "1fr 1fr 1fr" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                    Metadata match threshold
+                    <input type="number" min={0} max={1} step={0.01} value={configForm.metadata_match_threshold} onChange={(e) => updateConfigField("metadata_match_threshold", e.target.value)} style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                    Retry limit
+                    <input type="number" min={0} max={10} value={configForm.pipeline_retry_limit} onChange={(e) => updateConfigField("pipeline_retry_limit", e.target.value)} style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.85rem", fontWeight: 500, color: "#374151" }}>
+                    Timeout (seconds)
+                    <input type="number" min={10} max={3600} value={configForm.pipeline_timeout_seconds} onChange={(e) => updateConfigField("pipeline_timeout_seconds", e.target.value)} style={{ width: "100%", padding: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db", boxSizing: "border-box" }} />
+                  </label>
+                </div>
+              </div>
+
+              {/* Save Actions */}
+              <div className="card" style={{ padding: "1rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem" }}>
+                  <div style={{ fontSize: "0.85rem", color: "#6b7280" }}>
+                    Lưu sẽ tự động xác thực tất cả kết nối. Nếu bất kỳ dịch vụ nào sai, cấu hình sẽ không được lưu.
+                  </div>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <button
+                      type="button"
+                      onClick={() => testService("all")}
+                      disabled={validatingService !== null || isSavingConfig}
+                      className="btn btn--secondary"
+                      style={{ fontSize: "0.85rem", padding: "0.5rem 1rem", minHeight: "auto" }}
+                    >
+                      {validatingService === "all" ? "Đang kiểm tra tất cả..." : "Kiểm tra tất cả"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveConfig}
+                      disabled={isSavingConfig || validatingService !== null}
+                      className="btn btn--primary"
+                      style={{ fontSize: "0.85rem", padding: "0.5rem 1.2rem", minHeight: "auto" }}
+                    >
+                      {isSavingConfig ? "Đang lưu và xác thực..." : "Lưu cấu hình"}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

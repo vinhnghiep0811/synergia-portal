@@ -19,6 +19,15 @@ async function patch(url, payload) {
   }
 }
 
+async function post(url, payload) {
+  try {
+    const response = await apiClient.post(url, payload);
+    return response.data;
+  } catch (error) {
+    throw new Error(await parseApiError(error));
+  }
+}
+
 export async function getAdminOverview() {
   return get("/api/admin/overview");
 }
@@ -67,9 +76,14 @@ export async function updateAdminConfiguration(payload) {
   return patch("/api/admin/configuration", payload);
 }
 
+export async function validateAdminConfiguration(payload) {
+  return post("/api/admin/configuration/validate", payload);
+}
+
 export async function getAdminEvaluationReport(windowDays = 7, searchSampleLimit = 20) {
   return get("/api/admin/evaluation-report", {
     window_days: windowDays,
     search_sample_limit: searchSampleLimit,
   });
 }
+

@@ -17,6 +17,7 @@ from app.services.llm.prompt_builder import LLMPromptBuilder
 from app.services.llm.constants import PROMPT_VERSION
 from app.services.llm.provider_factory import LLMProviderFactory
 from app.services.pdf_parse_service import extract_pdf_text_for_llm
+from app.services.runtime_config_service import RuntimeConfigService
 from app.services.storage_service import StorageService
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,13 @@ class LLMExtractionService:
     def __init__(self, db: Session):
         self.db = db
         self.repo = ExtractionRunRepository(db)
-        self.provider = LLMProviderFactory.create()
+        runtime_config = RuntimeConfigService.get(db)
+        self.provider = LLMProviderFactory.create(
+            provider_name=runtime_config.llm_provider,
+            model_name=runtime_config.llm_model,
+            retry_limit=runtime_config.pipeline_retry_limit,
+            timeout_seconds=runtime_config.pipeline_timeout_seconds,
+        )
         self.input_builder = LLMInputBuilder()
         self.prompt_builder = LLMPromptBuilder()
 

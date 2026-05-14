@@ -8,6 +8,8 @@ from app.schemas.admin import (
     AdminConfigResponse,
     AdminConfigUpdateRequest,
     AdminEvaluationReportResponse,
+    ConfigValidateRequest,
+    ConfigValidateResponse,
 )
 from app.services.admin_config_service import AdminConfigService
 from app.services.admin_reporting_service import AdminReportingService
@@ -34,6 +36,18 @@ def update_admin_configuration(
     return service.update_configuration(payload=payload, actor_user=current_user)
 
 
+@router.post("/configuration/validate", response_model=ConfigValidateResponse)
+def validate_admin_configuration(
+    payload: ConfigValidateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Test service connections without saving. Validates LLM, Semantic Scholar,
+    Telegram, or Embedding individually or all at once."""
+    service = AdminConfigService(db)
+    return service.validate_services(payload)
+
+
 @router.get("/evaluation-report", response_model=AdminEvaluationReportResponse)
 def get_admin_evaluation_report(
     window_days: int = Query(7, ge=1, le=365),
@@ -46,3 +60,4 @@ def get_admin_evaluation_report(
         window_days=window_days,
         search_sample_limit=search_sample_limit,
     )
+
