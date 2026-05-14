@@ -46,14 +46,15 @@ function formatLLMProvider(provider, modelName) {
   const normalizedProvider = (provider || "").toLowerCase();
   const normalizedModel = (modelName || "").toLowerCase();
 
+  if (normalizedProvider === "regex_parsing") return "Regex parsing";
   if (normalizedProvider === "gemini") return "Gemini";
   if (normalizedProvider === "ollama" && normalizedModel.includes("gemma")) {
     return "Gemma (Ollama)";
   }
   if (normalizedProvider === "ollama") return "Ollama";
+  if (provider) return provider;
   if (normalizedModel.includes("gemini")) return "Gemini";
   if (normalizedModel.includes("gemma")) return "Gemma";
-  if (provider) return provider;
   return "-";
 }
 

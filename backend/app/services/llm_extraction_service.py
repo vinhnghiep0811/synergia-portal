@@ -21,6 +21,7 @@ from app.services.runtime_config_service import RuntimeConfigService
 from app.services.storage_service import StorageService
 
 logger = logging.getLogger(__name__)
+REGEX_FALLBACK_MODEL = "deterministic_regex"
 
 
 class LLMExtractionService:
@@ -599,6 +600,7 @@ class LLMExtractionService:
         not from the LLM."""
         overridden = dict(provider_result)
         overridden["provider"] = "regex_parsing"
+        overridden["model"] = REGEX_FALLBACK_MODEL
         return overridden
 
     @staticmethod
@@ -632,9 +634,7 @@ class LLMExtractionService:
 
             degraded_provider_result = {
                 "provider": "regex_parsing",
-                "model": getattr(self.provider, "ollama_model", None)
-                or getattr(self.provider, "model", None)
-                or "unknown",
+                "model": REGEX_FALLBACK_MODEL,
                 "raw_text": None,
                 "usage": {},
             }
