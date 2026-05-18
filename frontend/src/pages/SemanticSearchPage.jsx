@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { semanticSearch } from "../services/searchApi.js";
+import { semanticSearch, keywordSearch } from "../services/searchApi.js";
 import { AppHeader } from "../components/AppHeader.jsx";
 import "../styles/SematicSearchPage.css";
 
@@ -12,6 +12,7 @@ export function SemanticSearchPage() {
   const [error, setError] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
   const [expandedEvidence, setExpandedEvidence] = useState({});
+  const [searchMode, setSearchMode] = useState("semantic"); // "semantic" or "keyword"
   const navigate = useNavigate();
 
   const handleSearch = async (e) => {
@@ -22,10 +23,17 @@ export function SemanticSearchPage() {
       setLoading(true);
       setError("");
       setHasSearched(true);
-      const data = await semanticSearch(query.trim(), topK);
+      
+      let data;
+      if (searchMode === "semantic") {
+        data = await semanticSearch(query.trim(), topK);
+      } else {
+        data = await keywordSearch(query.trim(), topK);
+      }
+      
       // Sort by similarity_score descending
       const sortedResults = (data.results || []).sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
-      console.log("🔍 Semantic search results:", sortedResults);
+      console.log(`🔍 ${searchMode} search results:`, sortedResults);
       setResults(sortedResults);
     } catch (err) {
       setError(err.message || "Tìm kiếm thất bại");
@@ -67,8 +75,8 @@ export function SemanticSearchPage() {
   return (
     <div className="app-shell">
       <AppHeader
-        title="Tìm kiếm ngữ nghĩa"
-        subtitle="Tìm kiếm tài liệu dựa trên ý nghĩa ngữ cảnh."
+        title={searchMode === "semantic" ? "Tìm kiếm ngữ nghĩa" : "Tìm kiếm từ khóa"}
+        subtitle={searchMode === "semantic" ? "Tìm kiếm tài liệu dựa trên ý nghĩa ngữ cảnh." : "Tìm kiếm tài liệu dựa trên từ khóa chính xác."}
       />
 
       <main className="app-main app-main--papers">
@@ -76,22 +84,53 @@ export function SemanticSearchPage() {
           <section className="card list-card">
             <header className="card__header card__header--with-actions">
               <div>
-                <h2 className="card__title">Tìm kiếm ngữ nghĩa</h2>
+                <h2 className="card__title">
+                  {searchMode === "semantic" ? "Tìm kiếm ngữ nghĩa" : "Tìm kiếm từ khóa"}
+                </h2>
                 <p className="card__subtitle">
-                  Nhập câu truy vấn để tìm các tài liệu liên quan theo ngữ nghĩa.
+                  {searchMode === "semantic" 
+                    ? "Nhập câu truy vấn để tìm các tài liệu liên quan theo ngữ nghĩa."
+                    : "Nhập từ khóa để tìm các tài liệu chứa từ khóa chính xác."}
                 </p>
               </div>
             </header>
+
+            {/* Search Mode Toggle */}
+            <div className="semantic-search-mode-group">
+              <label className="semantic-search-label">
+                Chế độ tìm kiếm
+              </label>
+              <div className="semantic-search-mode-toggle">
+                <button
+                  type="button"
+                  className={`semantic-search-mode-button ${
+                    searchMode === "semantic" ? "active" : ""
+                  }`}
+                  onClick={() => setSearchMode("semantic")}
+                >
+                  Tìm kiếm ngữ nghĩa
+                </button>
+                <button
+                  type="button"
+                  className={`semantic-search-mode-button ${
+                    searchMode === "keyword" ? "active" : ""
+                  }`}
+                  onClick={() => setSearchMode("keyword")}
+                >
+                  Tìm kiếm từ khóa
+                </button>
+              </div>
+            </div>
 
             {/* Search Form */}
             <form onSubmit={handleSearch} className="semantic-search-form">
               <div className="semantic-search-input-group">
                 <label className="semantic-search-label">
-                  Câu truy vấn
+                  {searchMode === "semantic" ? "Câu truy vấn" : "Từ khóa"}
                 </label>
                 <input
                   type="search"
-                  placeholder="Ví dụ: task planning in robotics..."
+                  placeholder={searchMode === "semantic" ? "Ví dụ: task planning in robotics..." : "Ví dụ: bio, machine learning..."}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   className="semantic-search-input"
@@ -100,7 +139,7 @@ export function SemanticSearchPage() {
 
               <div className="semantic-search-topk-group">
                 <label className="semantic-search-label">
-                  Top K
+                  {searchMode === "semantic" ? "Top K" : "Số kết quả"}
                 </label>
                 <input
                   type="number"

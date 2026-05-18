@@ -11,19 +11,24 @@ from sqlalchemy.orm import Session
 
 from app.models.canonical_document import CanonicalDocument
 from app.models.paper_record import PaperRecord
+from app.services.runtime_config_service import RuntimeConfigService
 
 
 logger = logging.getLogger(__name__)
 
 SS_API_BASE = "https://api.semanticscholar.org/graph/v1"
 SS_LOG_BODY_MAX_CHARS = 4000
-SS_MAX_ATTEMPTS = max(1, int(os.getenv("SEMANTIC_SCHOLAR_MAX_ATTEMPTS", "1")))
+SS_MAX_ATTEMPTS_DEFAULT = max(1, int(os.getenv("SEMANTIC_SCHOLAR_MAX_ATTEMPTS", "1")))
 SS_RETRY_DELAY_SECONDS = max(1.0, float(os.getenv("SEMANTIC_SCHOLAR_RETRY_DELAY_SECONDS", "60")))
-SS_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
+SS_API_KEY_DEFAULT = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
+SS_REQUEST_TIMEOUT_SECONDS_DEFAULT = max(
+    1.0,
+    float(os.getenv("SEMANTIC_SCHOLAR_TIMEOUT_SECONDS", "15")),
+)
 SS_MIN_INTERVAL_SECONDS = max(1.0, float(os.getenv("SEMANTIC_SCHOLAR_MIN_INTERVAL_SECONDS", "1.05")))
 
 SS_FIELDS = "title,authors,year,venue,abstract,externalIds"
-TITLE_MATCH_THRESHOLD = 0.82
+TITLE_MATCH_THRESHOLD_DEFAULT = 0.82
 
 _ss_rate_lock = threading.Lock()
 _last_ss_request_ts = 0.0
@@ -32,9 +37,38 @@ _last_ss_request_ts = 0.0
 class SemanticScholarService:
     def __init__(self, db: Session):
         self.db = db
+        runtime_config = RuntimeConfigService.get(db)
+        self.env_api_key = SS_API_KEY_DEFAULT or None
+        configured_api_key = (runtime_config.semantic_scholar_api_key or "").strip() or None
+        self.api_key = configured_api_key or self.env_api_key
+        self.max_attempts = max(1, int(runtime_config.pipeline_retry_limit or SS_MAX_ATTEMPTS_DEFAULT))
+        self.request_timeout_seconds = max(
+            1.0,
+            float(runtime_config.pipeline_timeout_seconds or SS_REQUEST_TIMEOUT_SECONDS_DEFAULT),
+        )
+        self.title_match_threshold = max(
+            0.0,
+            min(1.0, float(runtime_config.metadata_match_threshold)),
+        )
+
+    def _fallback_to_env_key_if_needed(self, status_code: int, context: str) -> bool:
+        if status_code not in {401, 403}:
+            return False
+        if not self.env_api_key:
+            return False
+        if self.api_key == self.env_api_key:
+            return False
+
+        logger.warning(
+            "[SS AUTH] Received status=%s for %s. Falling back to .env SEMANTIC_SCHOLAR_API_KEY.",
+            status_code,
+            context,
+        )
+        self.api_key = self.env_api_key
+        return True
 
     def run_for_canonical_document(self, canonical: CanonicalDocument) -> str:
-        if not SS_API_KEY:
+        if not self.api_key:
             logger.warning(
                 "[SS enrich] SEMANTIC_SCHOLAR_API_KEY is not set; requests may be heavily rate-limited."
             )
@@ -89,7 +123,7 @@ class SemanticScholarService:
         self.db.refresh(canonical)
         logger.info(
             "[SS enrich] Rate limited after %s attempts. Please retry after 5 minutes: %s",
-            SS_MAX_ATTEMPTS,
+            self.max_attempts,
             canonical.id,
         )
 
@@ -132,7 +166,7 @@ class SemanticScholarService:
             url,
             json.dumps(params, ensure_ascii=True),
             attempt,
-            bool(SS_API_KEY),
+            bool(self.api_key),
         )
 
     def _log_ss_response(self, method: str, url: str, status_code: int, body_text: str) -> None:
@@ -161,9 +195,9 @@ class SemanticScholarService:
             _last_ss_request_ts = time.monotonic()
 
     def _ss_headers(self) -> dict[str, str]:
-        if not SS_API_KEY:
+        if not self.api_key:
             return {}
-        return {"x-api-key": SS_API_KEY}
+        return {"x-api-key": self.api_key}
 
     def _normalize_title(self, title: str) -> str:
         import re
@@ -191,13 +225,21 @@ class SemanticScholarService:
     def _get_by_doi(self, doi: str) -> tuple[dict[str, Any] | None, bool]:
         url = f"{SS_API_BASE}/paper/{doi}"
         params = {"fields": SS_FIELDS}
-        headers = self._ss_headers()
+        effective_max_attempts = self.max_attempts + (
+            1 if (self.env_api_key and self.api_key != self.env_api_key) else 0
+        )
 
-        for attempt in range(SS_MAX_ATTEMPTS):
+        for attempt in range(effective_max_attempts):
             try:
                 self._wait_for_rate_slot()
+                headers = self._ss_headers()
                 self._log_ss_request("GET", url, params, attempt + 1)
-                resp = httpx.get(url, params=params, headers=headers, timeout=15)
+                resp = httpx.get(
+                    url,
+                    params=params,
+                    headers=headers,
+                    timeout=self.request_timeout_seconds,
+                )
                 self._log_ss_response("GET", str(resp.request.url), resp.status_code, resp.text)
 
                 if resp.status_code == 200:
@@ -205,28 +247,37 @@ class SemanticScholarService:
                 if resp.status_code == 404:
                     logger.info("[SS] DOI not found: %s", doi)
                     return None, False
+                if resp.status_code in {401, 403}:
+                    if self._fallback_to_env_key_if_needed(resp.status_code, f"doi={doi}"):
+                        continue
+                    logger.warning(
+                        "[SS AUTH] Unauthorized for DOI %s with current API key. status=%s",
+                        doi,
+                        resp.status_code,
+                    )
+                    return None, False
                 if resp.status_code == 429:
-                    if attempt < SS_MAX_ATTEMPTS - 1:
+                    if attempt < effective_max_attempts - 1:
                         logger.warning(
                             "[SS] Rate limited for DOI %s, waiting %ss before retry (%s/%s)",
                             doi,
                             SS_RETRY_DELAY_SECONDS,
                             attempt + 1,
-                            SS_MAX_ATTEMPTS,
+                            effective_max_attempts,
                         )
                         time.sleep(SS_RETRY_DELAY_SECONDS)
                         continue
                     logger.warning("[SS] Exhausted retries for DOI %s", doi)
                     return None, True
                 if 500 <= resp.status_code < 600:
-                    if attempt < SS_MAX_ATTEMPTS - 1:
+                    if attempt < effective_max_attempts - 1:
                         logger.warning(
                             "[SS] Server error status=%s for DOI %s, waiting %ss before retry (%s/%s)",
                             resp.status_code,
                             doi,
                             SS_RETRY_DELAY_SECONDS,
                             attempt + 1,
-                            SS_MAX_ATTEMPTS,
+                            effective_max_attempts,
                         )
                         time.sleep(SS_RETRY_DELAY_SECONDS)
                         continue
@@ -248,7 +299,7 @@ class SemanticScholarService:
                     json.dumps(params, ensure_ascii=True),
                     e,
                 )
-                if attempt < SS_MAX_ATTEMPTS - 1:
+                if attempt < effective_max_attempts - 1:
                     time.sleep(SS_RETRY_DELAY_SECONDS)
                 else:
                     logger.warning("[SS] Exhausted request-error retries for DOI %s", doi)
@@ -262,13 +313,21 @@ class SemanticScholarService:
             "limit": 5,
             "fields": SS_FIELDS,
         }
-        headers = self._ss_headers()
+        effective_max_attempts = self.max_attempts + (
+            1 if (self.env_api_key and self.api_key != self.env_api_key) else 0
+        )
 
-        for attempt in range(SS_MAX_ATTEMPTS):
+        for attempt in range(effective_max_attempts):
             try:
                 self._wait_for_rate_slot()
+                headers = self._ss_headers()
                 self._log_ss_request("GET", url, params, attempt + 1)
-                resp = httpx.get(url, params=params, headers=headers, timeout=15)
+                resp = httpx.get(
+                    url,
+                    params=params,
+                    headers=headers,
+                    timeout=self.request_timeout_seconds,
+                )
                 self._log_ss_response("GET", str(resp.request.url), resp.status_code, resp.text)
 
                 if resp.status_code == 200:
@@ -291,7 +350,7 @@ class SemanticScholarService:
                             "[SS SEARCH CANDIDATE] rank=%s score=%.4f threshold=%.2f paper_id=%s title=%s",
                             idx,
                             score,
-                            TITLE_MATCH_THRESHOLD,
+                            self.title_match_threshold,
                             paper.get("paperId"),
                             self._truncate(ss_title, 220),
                         )
@@ -302,12 +361,12 @@ class SemanticScholarService:
                     logger.info(
                         "[SS SEARCH BEST] best_score=%.4f threshold=%.2f best_paper_id=%s best_title=%s",
                         best_score,
-                        TITLE_MATCH_THRESHOLD,
+                        self.title_match_threshold,
                         (best_paper or {}).get("paperId"),
                         self._truncate((best_paper or {}).get("title", ""), 220),
                     )
 
-                    if best_score >= TITLE_MATCH_THRESHOLD:
+                    if best_score >= self.title_match_threshold:
                         best_paper["_match_score"] = best_score
                         logger.info(
                             "[SS] Title match: score=%.2f query='%s' matched='%s'",
@@ -324,14 +383,24 @@ class SemanticScholarService:
                     )
                     return None, False
 
+                if resp.status_code in {401, 403}:
+                    if self._fallback_to_env_key_if_needed(resp.status_code, f"title={title[:60]}"):
+                        continue
+                    logger.warning(
+                        "[SS AUTH] Unauthorized for title query '%s' with current API key. status=%s",
+                        title[:60],
+                        resp.status_code,
+                    )
+                    return None, False
+
                 if resp.status_code == 429:
-                    if attempt < SS_MAX_ATTEMPTS - 1:
+                    if attempt < effective_max_attempts - 1:
                         logger.warning(
                             "[SS] Rate limited for title query '%s', waiting %ss before retry (%s/%s)",
                             title[:60],
                             SS_RETRY_DELAY_SECONDS,
                             attempt + 1,
-                            SS_MAX_ATTEMPTS,
+                            effective_max_attempts,
                         )
                         time.sleep(SS_RETRY_DELAY_SECONDS)
                         continue
@@ -339,14 +408,14 @@ class SemanticScholarService:
                     return None, True
 
                 if 500 <= resp.status_code < 600:
-                    if attempt < SS_MAX_ATTEMPTS - 1:
+                    if attempt < effective_max_attempts - 1:
                         logger.warning(
                             "[SS] Server error status=%s for title query '%s', waiting %ss before retry (%s/%s)",
                             resp.status_code,
                             title[:60],
                             SS_RETRY_DELAY_SECONDS,
                             attempt + 1,
-                            SS_MAX_ATTEMPTS,
+                            effective_max_attempts,
                         )
                         time.sleep(SS_RETRY_DELAY_SECONDS)
                         continue
@@ -368,7 +437,7 @@ class SemanticScholarService:
                     json.dumps(params, ensure_ascii=True),
                     e,
                 )
-                if attempt < SS_MAX_ATTEMPTS - 1:
+                if attempt < effective_max_attempts - 1:
                     time.sleep(SS_RETRY_DELAY_SECONDS)
                 else:
                     logger.warning(

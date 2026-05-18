@@ -128,7 +128,7 @@ def score_citation_graph(
     payload: CitationScoreRequest,
     db: Session = Depends(get_db),
 ):
-    queue_service = QueueService()
+    queue_service = QueueService(db)
 
     canonical_ids = payload.source_canonical_ids or []
 
@@ -189,7 +189,7 @@ def score_citation_graph_by_paper(
     db: Session = Depends(get_db),
 ):
     service = CitationGraphService(db)
-    queue_service = QueueService()
+    queue_service = QueueService(db)
 
     try:
         canonical_id = service.get_canonical_id_by_paper_id(paper_id)

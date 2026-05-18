@@ -2,9 +2,9 @@ import logging
 from uuid import UUID
 
 from app.core.database import SessionLocal
-from app.core.queue import parse_queue
 from app.models.canonical_document import CanonicalDocument
 from app.models.paper_record import PaperRecord
+from app.services.queue_service import QueueService
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +80,7 @@ def try_enqueue_llm_if_ready(canonical_document_id: str) -> bool:
             )
             return False
 
-        parse_queue.enqueue(
-            "worker_app.tasks.llm_extract.llm_extract",
-            str(canonical.id),
-        )
+        QueueService(db).enqueue_llm_extract(str(canonical.id))
         logger.info("[LLM ENQUEUE] Enqueued LLM for canonical_id=%s", canonical.id)
         return True
 

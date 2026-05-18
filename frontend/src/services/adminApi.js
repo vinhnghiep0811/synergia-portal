@@ -1,62 +1,89 @@
-// services/adminApi.js
-import axios from "axios";
+import { apiClient } from "./apiClient";
+import { parseApiError } from "../utils/api";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+async function get(url, params) {
+  try {
+    const response = await apiClient.get(url, { params });
+    return response.data;
+  } catch (error) {
+    throw new Error(await parseApiError(error));
+  }
+}
 
-// Tạo axios instance chung cho toàn bộ admin API
-const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
-  withCredentials: true,           // ← QUAN TRỌNG: gửi cookie (OAuth session)
-});
+async function patch(url, payload) {
+  try {
+    const response = await apiClient.patch(url, payload);
+    return response.data;
+  } catch (error) {
+    throw new Error(await parseApiError(error));
+  }
+}
 
-// Interceptor tự động thêm Bearer token (nếu có trong localStorage)
-apiClient.interceptors.request.use(
-  (config) => {
-    const token =
-      localStorage.getItem("token") ||
-      localStorage.getItem("access_token") ||
-      localStorage.getItem("auth_token");
+async function post(url, payload) {
+  try {
+    const response = await apiClient.post(url, payload);
+    return response.data;
+  } catch (error) {
+    throw new Error(await parseApiError(error));
+  }
+}
 
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
+export async function getAdminOverview() {
+  return get("/api/admin/overview");
+}
 
-// ==================== ADMIN API ====================
-export const getAdminOverview = async () => {
-  const response = await apiClient.get("/api/admin/overview");
-  return response.data;
-};
+export async function getAdminPapers(page = 1, pageSize = 20, q = "") {
+  return get("/api/admin/papers", { page, page_size: pageSize, q });
+}
 
-export const getAdminPapers = async (page = 1, pageSize = 20, q = "") => {
-  const response = await apiClient.get("/api/admin/papers", {
-    params: { page, page_size: pageSize, q },
-  });
-  return response.data;
-};
-
-export const getAdminCanonicalDocuments = async (
+export async function getAdminCanonicalDocuments(
   page = 1,
   pageSize = 20,
   sort_by = "created_at",
   sort_order = "desc"
-) => {
-  const response = await apiClient.get("/api/admin/canonical-documents", {
-    params: { page, page_size: pageSize, sort_by, sort_order },
+) {
+  return get("/api/admin/canonical-documents", {
+    page,
+    page_size: pageSize,
+    sort_by,
+    sort_order,
   });
-  return response.data;
-};
+}
 
-export const getAdminActivities = async (page = 1, pageSize = 20) => {
+export async function getAdminActivities(page = 1, pageSize = 20, options = {}) {
   const skip = (page - 1) * pageSize;
-  const response = await apiClient.get("/api/admin/activity", {
-    params: { skip, limit: pageSize },
+  return get("/api/admin/activity", {
+    skip,
+    limit: pageSize,
+    ...options,
   });
-  return response.data;
-};
+}
+
+export async function getAdminProcessingLogs(page = 1, pageSize = 20, options = {}) {
+  const skip = (page - 1) * pageSize;
+  return get("/api/admin/processing-logs", {
+    skip,
+    limit: pageSize,
+    ...options,
+  });
+}
+
+export async function getAdminConfiguration() {
+  return get("/api/admin/configuration");
+}
+
+export async function updateAdminConfiguration(payload) {
+  return patch("/api/admin/configuration", payload);
+}
+
+export async function validateAdminConfiguration(payload) {
+  return post("/api/admin/configuration/validate", payload);
+}
+
+export async function getAdminEvaluationReport(windowDays = 7, searchSampleLimit = 20) {
+  return get("/api/admin/evaluation-report", {
+    window_days: windowDays,
+    search_sample_limit: searchSampleLimit,
+  });
+}
+

@@ -3,7 +3,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.queue import parse_queue
 from app.core.database import get_db
 from app.models.canonical_document import CanonicalDocument
 from app.models.extraction_run import ExtractionRun
@@ -13,6 +12,7 @@ from app.schemas.extraction import (
     ExtractionRunListItemResponse,
     ExtractionRunResponse,
 )
+from app.services.queue_service import QueueService
 
 router = APIRouter(prefix="/extraction-runs", tags=["extraction-runs"])
 
@@ -269,10 +269,7 @@ def retry_llm_extraction_by_paper(
 
     db.commit()
 
-    job = parse_queue.enqueue(
-        "worker_app.tasks.llm_extract.llm_extract",
-        str(paper.canonical_document_id),
-    )
+    job = QueueService(db).enqueue_llm_extract(str(paper.canonical_document_id))
 
     return ExtractionRetryResponse(
         message="LLM retry job queued successfully.",

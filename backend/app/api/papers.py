@@ -290,11 +290,17 @@ def update_publish_metadata_draft(
     paper_id: UUID,
     payload: PublishMetadataUpdateRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     service = PublishService(db)
 
     try:
-        return service.update_publish_draft(paper_id, payload)
+        return service.update_publish_draft(
+            paper_id,
+            payload,
+            actor_user_id=current_user.id,
+            actor_email=current_user.email,
+        )
     except ValueError as error:
         _raise_publish_http_error(error)
 
@@ -312,7 +318,11 @@ def publish_paper(
     service = PublishService(db)
 
     try:
-        return service.publish(paper_id, published_by=current_user.email)
+        return service.publish(
+            paper_id,
+            published_by=current_user.email,
+            actor_user_id=current_user.id,
+        )
     except ValueError as error:
         _raise_publish_http_error(error)
 
