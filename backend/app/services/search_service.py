@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any
 
 import numpy as np
@@ -59,6 +60,16 @@ class SearchService:
         runtime_config = RuntimeConfigService.get(db)
         self.embedding_service = EmbeddingService(model_name=runtime_config.embedding_model)
 
+    def _has_published_paper_for_canonical(self, canonical_id_column):
+        return (
+            self.db.query(PaperRecord.id)
+            .filter(
+                PaperRecord.canonical_document_id == canonical_id_column,
+                PaperRecord.publication_status == "published",
+            )
+            .exists()
+        )
+
     def semantic_search(self, query: str, top_k: int = 5, canonical_document_id: str | None = None,) -> list[SearchResultItem]:
         if not query or not query.strip():
             return []
@@ -86,9 +97,10 @@ class SearchService:
         distance = DocumentChunk.embedding.cosine_distance(query_vector)
         candidate_limit = max(top_k * 12, 40)
 
-        rows = (
+        rows_query = (
             self.db.query(
                 DocumentChunk,
+                CanonicalDocument.title,
                 CanonicalDocument.title_candidate,
                 distance.label("distance"),
             )
@@ -99,17 +111,20 @@ class SearchService:
             .filter(DocumentChunk.embedding.isnot(None))
             .filter(DocumentChunk.is_retrievable == True)
             .filter(~DocumentChunk.section_type.in_(EXCLUDED_SECTION_TYPES))
-            .order_by(distance)
-            .limit(candidate_limit)
-            .all()
+            .filter(self._has_published_paper_for_canonical(DocumentChunk.canonical_document_id))
         )
+
+        if canonical_document_id:
+            rows_query = rows_query.filter(DocumentChunk.canonical_document_id == canonical_document_id)
+
+        rows = rows_query.order_by(distance).limit(candidate_limit).all()
 
         if not rows:
             return []
 
         candidates: list[dict[str, Any]] = []
 
-        for chunk, title_candidate, dist in rows:
+        for chunk, title, title_candidate, dist in rows:
             if chunk.embedding is None:
                 continue
 
@@ -127,7 +142,7 @@ class SearchService:
             candidates.append(
                 {
                     "chunk": chunk,
-                    "title": title_candidate,
+                    "title": title or title_candidate,
                     "similarity": similarity,
                     "relevance": final_relevance,
                     "embedding": chunk.embedding,
@@ -157,8 +172,13 @@ class SearchService:
                 chunk_id=item["chunk"].id,
                 canonical_document_id=item["chunk"].canonical_document_id,
                 title=item["title"],
-                content=item["chunk"].content,
+                content=self._semantic_evidence_snippet(raw_query, item["chunk"].content),
                 similarity_score=round(item["relevance"], 4),
+                source="semantic",
+                section=item["chunk"].section,
+                section_type=item["chunk"].section_type,
+                page_from=item["chunk"].page_from,
+                page_to=item["chunk"].page_to,
             )
             for item in selected[:top_k]
         ]
@@ -441,6 +461,64 @@ class SearchService:
             return 0.0
 
         return float(np.dot(a, b) / (norm_a * norm_b))
+
+    @staticmethod
+    def _search_tokens(value: str) -> set[str]:
+        return {
+            token
+            for token in re.findall(r"[a-z0-9]+", (value or "").lower())
+            if len(token) > 2
+        }
+
+    def _semantic_evidence_snippet(self, query: str, content: str | None, window: int = 520) -> str:
+        if not content:
+            return ""
+
+        content_clean = " ".join(content.split())
+        if len(content_clean) <= window:
+            return content_clean
+
+        query_tokens = self._search_tokens(query)
+        if not query_tokens:
+            return content_clean[:window].strip() + "..."
+
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", content_clean)
+            if sentence.strip()
+        ]
+
+        best_sentence = ""
+        best_score = 0.0
+        for sentence in sentences:
+            sentence_tokens = self._search_tokens(sentence)
+            if not sentence_tokens:
+                continue
+
+            overlap = len(query_tokens & sentence_tokens)
+            coverage = overlap / max(len(query_tokens), 1)
+            score = coverage + min(overlap * 0.08, 0.4)
+            if score > best_score:
+                best_score = score
+                best_sentence = sentence
+
+        if not best_sentence:
+            return content_clean[:window].strip() + "..."
+
+        index = content_clean.find(best_sentence)
+        if index < 0:
+            snippet = best_sentence[:window].strip()
+            return snippet + ("..." if len(best_sentence) > window else "")
+
+        start = max(0, index - window // 4)
+        end = min(len(content_clean), index + len(best_sentence) + window // 4)
+        snippet = content_clean[start:end].strip()
+        if len(snippet) > window:
+            snippet = snippet[:window].strip()
+
+        prefix = "..." if start > 0 else ""
+        suffix = "..." if end < len(content_clean) else ""
+        return f"{prefix}{snippet}{suffix}"
     
     def keyword_search(self, query: str, limit: int = 20) -> list[SearchResultItem]:
         if not query or not query.strip():
@@ -461,6 +539,7 @@ class SearchService:
                 CanonicalDocument,
                 PaperRecord.canonical_document_id == CanonicalDocument.id,
             )
+            .filter(PaperRecord.publication_status == "published")
             .filter(
                 or_(
                     PaperRecord.original_filename.ilike(pattern),
@@ -543,6 +622,7 @@ class SearchService:
                     DocumentChunk.canonical_document_id == CanonicalDocument.id,
                 )
                 .filter(DocumentChunk.is_retrievable == True)
+                .filter(self._has_published_paper_for_canonical(DocumentChunk.canonical_document_id))
                 .filter(DocumentChunk.content.ilike(pattern))
                 .order_by(DocumentChunk.created_at.desc())
                 .limit(remaining * 3)
@@ -572,6 +652,10 @@ class SearchService:
                             content=chunk.content,
                         ),
                         source="chunk",
+                        section=chunk.section,
+                        section_type=chunk.section_type,
+                        page_from=chunk.page_from,
+                        page_to=chunk.page_to,
                     )
                 )
 
