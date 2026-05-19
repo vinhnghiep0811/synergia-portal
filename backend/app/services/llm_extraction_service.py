@@ -22,6 +22,44 @@ from app.services.storage_service import StorageService
 
 logger = logging.getLogger(__name__)
 REGEX_FALLBACK_MODEL = "deterministic_regex"
+PAGE_MATCH_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "that",
+    "this",
+    "these",
+    "those",
+    "into",
+    "onto",
+    "are",
+    "was",
+    "were",
+    "been",
+    "being",
+    "has",
+    "have",
+    "had",
+    "our",
+    "their",
+    "its",
+    "can",
+    "may",
+    "will",
+    "would",
+    "should",
+    "could",
+    "using",
+    "use",
+    "used",
+    "based",
+    "paper",
+    "method",
+    "model",
+    "approach",
+}
 
 
 class LLMExtractionService:
@@ -866,7 +904,7 @@ class LLMExtractionService:
                 if best_candidate is None or len(line) > len(best_candidate["snippet"]):
                     best_candidate = {
                         "snippet": re.sub(r"\s+", " ", line)[:180],
-                        "page": page_num if isinstance(page_num, int) else None,
+                        "page": self._coerce_page_number(page_num),
                         "section": None,
                     }
 
@@ -1167,6 +1205,57 @@ class LLMExtractionService:
 
         return False
 
+    @staticmethod
+    def _coerce_page_number(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+
+        if isinstance(value, int):
+            return value if value > 0 else None
+
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            match = re.fullmatch(r"(?:p(?:age)?\.?[:\s]*)?(\d+)", normalized)
+            if match:
+                page_number = int(match.group(1))
+                return page_number if page_number > 0 else None
+
+        return None
+
+    @staticmethod
+    def _normalize_text_for_page_match(value: str) -> str:
+        if not isinstance(value, str):
+            return ""
+
+        text = (value or "").lower()
+        text = re.sub(r"(?<=[a-z])-\s+(?=[a-z])", "", text)
+        text = re.sub(r"[\W_]+", " ", text, flags=re.UNICODE)
+        return re.sub(r"\s+", " ", text).strip()
+
+    @staticmethod
+    def _significant_match_tokens(normalized_text: str) -> list[str]:
+        return [
+            token
+            for token in normalized_text.split()
+            if len(token) > 2 and token not in PAGE_MATCH_STOPWORDS
+        ]
+
+    @staticmethod
+    def _contains_token_window(page_text: str, snippet_tokens: list[str]) -> bool:
+        if len(snippet_tokens) < 4:
+            return False
+
+        for window_size in (8, 6, 4):
+            if len(snippet_tokens) < window_size:
+                continue
+
+            for index in range(0, len(snippet_tokens) - window_size + 1):
+                phrase = " ".join(snippet_tokens[index:index + window_size])
+                if phrase in page_text:
+                    return True
+
+        return False
+
     def _normalize_evidence(self, value: Any) -> list[dict[str, Any]]:
         if not isinstance(value, list):
             return []
@@ -1218,7 +1307,7 @@ class LLMExtractionService:
             normalized.append(
                 {
                     "snippet": snippet,
-                    "page": item.get("page") if isinstance(item.get("page"), int) else None,
+                    "page": self._coerce_page_number(item.get("page")),
                     "section": item.get("section") if isinstance(item.get("section"), str) else None,
                 }
             )
@@ -1495,14 +1584,44 @@ class LLMExtractionService:
         if not snippet:
             return None
 
+        normalized_snippet = self._normalize_text_for_page_match(snippet)
+        if not normalized_snippet:
+            return None
+
+        snippet_words = normalized_snippet.split()
+        snippet_tokens = self._significant_match_tokens(normalized_snippet)
+        best_fuzzy_match: tuple[float, int] | None = None
+
         for page in pages:
-            page_num = page.get("page")
+            page_num = self._coerce_page_number(page.get("page"))
+            if page_num is None:
+                continue
+
             page_text = (page.get("text") or "").strip()
 
             if page_text and snippet in page_text:
                 return page_num
 
-        return None
+            normalized_page_text = self._normalize_text_for_page_match(page_text)
+            if not normalized_page_text:
+                continue
+
+            if normalized_snippet in normalized_page_text:
+                return page_num
+
+            if self._contains_token_window(normalized_page_text, snippet_words):
+                return page_num
+
+            if len(snippet_tokens) >= 4:
+                page_tokens = set(normalized_page_text.split())
+                overlap = sum(1 for token in snippet_tokens if token in page_tokens)
+                coverage = overlap / len(snippet_tokens)
+                if coverage >= 0.75 and (
+                    best_fuzzy_match is None or coverage > best_fuzzy_match[0]
+                ):
+                    best_fuzzy_match = (coverage, page_num)
+
+        return best_fuzzy_match[1] if best_fuzzy_match else None
     
     def _fill_missing_pages(
         self,
