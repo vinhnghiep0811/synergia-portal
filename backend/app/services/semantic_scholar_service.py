@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 import httpx
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.canonical_document import CanonicalDocument
@@ -29,6 +30,7 @@ SS_MIN_INTERVAL_SECONDS = max(1.0, float(os.getenv("SEMANTIC_SCHOLAR_MIN_INTERVA
 
 SS_FIELDS = "title,authors,year,venue,abstract,externalIds"
 TITLE_MATCH_THRESHOLD_DEFAULT = 0.82
+DOI_TITLE_MISMATCH_THRESHOLD = 0.60
 
 _ss_rate_lock = threading.Lock()
 _last_ss_request_ts = 0.0
@@ -90,7 +92,11 @@ class SemanticScholarService:
         if canonical.doi:
             paper_data, is_rate_limited = self._get_by_doi(canonical.doi)
             if paper_data:
-                match_type = "matched_by_doi"
+                if self._is_doi_title_mismatch(canonical, paper_data):
+                    canonical = self._fallback_canonical_to_fingerprint(canonical)
+                    paper_data = None
+                else:
+                    match_type = "matched_by_doi"
 
         if paper_data is None and canonical.title_candidate:
             paper_data, title_rate_limited = self._search_by_title(canonical.title_candidate)
@@ -153,6 +159,114 @@ class SemanticScholarService:
                 or paper.detected_title == canonical.title_candidate
             ):
                 paper.detected_title = ss_title
+
+    def _is_doi_title_mismatch(
+        self,
+        canonical: CanonicalDocument,
+        paper_data: dict[str, Any],
+    ) -> bool:
+        expected_title = canonical.title_candidate
+        ss_title = paper_data.get("title")
+        if not expected_title or not ss_title:
+            return False
+
+        normalized_expected = self._normalize_title(expected_title)
+        if len(normalized_expected.split()) < 3:
+            return False
+
+        score = self._title_similarity(expected_title, ss_title)
+        if score >= DOI_TITLE_MISMATCH_THRESHOLD:
+            return False
+
+        logger.warning(
+            "[SS enrich] Rejecting DOI match due to title mismatch: canonical_id=%s doi=%s score=%.4f parsed_title=%s ss_title=%s",
+            canonical.id,
+            canonical.doi,
+            score,
+            self._truncate(expected_title, 220),
+            self._truncate(ss_title, 220),
+        )
+        return True
+
+    def _fallback_canonical_to_fingerprint(self, canonical: CanonicalDocument) -> CanonicalDocument:
+        papers = (
+            self.db.query(PaperRecord)
+            .filter(PaperRecord.canonical_document_id == canonical.id)
+            .order_by(PaperRecord.created_at.asc())
+            .all()
+        )
+        fingerprint = canonical.fingerprint or next(
+            (paper.detected_fingerprint for paper in papers if paper.detected_fingerprint),
+            None,
+        )
+
+        if not fingerprint:
+            canonical.enrichment_status = "unmatched"
+            canonical.match_status = "doi_title_mismatch"
+            canonical.metadata_source = "semantic_scholar"
+            self.db.add(canonical)
+            self.db.commit()
+            self.db.refresh(canonical)
+            logger.warning(
+                "[SS enrich] DOI mismatch found but no fingerprint is available for canonical_id=%s",
+                canonical.id,
+            )
+            return canonical
+
+        target = (
+            self.db.query(CanonicalDocument)
+            .filter(
+                or_(
+                    CanonicalDocument.canonical_key == fingerprint,
+                    CanonicalDocument.fingerprint == fingerprint,
+                )
+            )
+            .first()
+        )
+
+        for paper in papers:
+            paper.detected_doi = None
+            paper.detected_fingerprint = paper.detected_fingerprint or fingerprint
+
+        if target and target.id != canonical.id:
+            if not target.title_candidate:
+                target.title_candidate = canonical.title_candidate
+            if not target.fingerprint:
+                target.fingerprint = fingerprint
+
+            for paper in papers:
+                paper.canonical_document_id = target.id
+
+            canonical.doi = None
+            canonical.enrichment_status = "unmatched"
+            canonical.match_status = "doi_title_mismatch_superseded"
+            canonical.metadata_source = "semantic_scholar"
+            self.db.add(target)
+            self.db.add(canonical)
+            self.db.commit()
+            self.db.refresh(target)
+            logger.info(
+                "[SS enrich] Moved papers from rejected DOI canonical_id=%s to fingerprint canonical_id=%s",
+                canonical.id,
+                target.id,
+            )
+            return target
+
+        canonical.canonical_key = fingerprint
+        canonical.canonical_type = "fingerprint"
+        canonical.fingerprint = fingerprint
+        canonical.doi = None
+        canonical.enrichment_status = "pending"
+        canonical.match_status = "doi_title_mismatch"
+        canonical.metadata_source = "semantic_scholar"
+        self.db.add(canonical)
+        self.db.commit()
+        self.db.refresh(canonical)
+        logger.info(
+            "[SS enrich] Re-keyed canonical_id=%s from rejected DOI to fingerprint",
+            canonical.id,
+        )
+        return canonical
 
     def _truncate(self, text: str, max_chars: int = SS_LOG_BODY_MAX_CHARS) -> str:
         if len(text) <= max_chars:

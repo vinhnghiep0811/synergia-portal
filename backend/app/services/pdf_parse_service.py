@@ -8,6 +8,12 @@ import pdfplumber
 logger = logging.getLogger(__name__)
 
 DOI_REGEX = re.compile(r"(?<![\d.])10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", re.IGNORECASE)
+REFERENCE_HEADING_REGEX = re.compile(
+    r"(?im)^\s*(references|bibliography|works\s+cited|literature\s+cited)\s*$"
+)
+DOI_CONTEXT_MARKERS = ("doi", "doi.org/", "dx.doi.org/")
+DOI_SCAN_CHARS = 12000
+DOI_CONTEXT_CHARS = 90
 
 class PageText(TypedDict):
     page: int
@@ -526,12 +532,32 @@ def normalize_doi(raw_doi: str) -> str:
     return doi
 
 
+def _text_before_references(text: str) -> str:
+    match = REFERENCE_HEADING_REGEX.search(text)
+    if not match:
+        return text
+    return text[: match.start()]
+
+
+def _has_doi_context(text: str, start: int, end: int) -> bool:
+    context_start = max(0, start - DOI_CONTEXT_CHARS)
+    context_end = min(len(text), end + DOI_CONTEXT_CHARS)
+    context = text[context_start:context_end].lower()
+    return any(marker in context for marker in DOI_CONTEXT_MARKERS)
+
+
 def detect_doi(text: str) -> Optional[str]:
     text = strip_nul_chars(text)
-    match = DOI_REGEX.search(text)
-    if not match:
+    candidate_text = _text_before_references(text)[:DOI_SCAN_CHARS]
+    matches = list(DOI_REGEX.finditer(candidate_text))
+    if not matches:
         return None
-    return normalize_doi(match.group(0))
+
+    for match in matches:
+        if _has_doi_context(candidate_text, match.start(), match.end()):
+            return normalize_doi(match.group(0))
+
+    return normalize_doi(matches[0].group(0))
 
 
 def clean_line(line: str) -> str:
