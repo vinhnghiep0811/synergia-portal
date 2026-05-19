@@ -6,6 +6,7 @@ import {
   getPublishMetadataPreview,
   publishPaper,
   updatePublishMetadataDraft,
+  getExtractionRunDetail,
 } from "../services/paperApi.js";
 
 function listToMultiline(values) {
@@ -71,11 +72,100 @@ function formatStatus(value) {
   return value.replace(/_/g, " ");
 }
 
+function renderEvidence(evidence) {
+  if (!Array.isArray(evidence) || !evidence.length)
+    return null;
+
+  return (
+    <div style={{ marginTop: "1rem" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+          marginBottom: ".75rem",
+          paddingBottom: ".5rem",
+          borderBottom: "2px solid #e2e8f0"
+        }}
+      >
+        <span style={{ fontSize: "1rem" }}>📄</span>
+        <h5
+          style={{
+            margin: 0,
+            color: "#475569",
+            fontSize: ".85rem",
+            fontWeight: "600",
+            textTransform: "uppercase",
+            letterSpacing: "0.5px"
+          }}
+        >
+          Evidence ({evidence.length})
+        </h5>
+      </div>
+
+      {evidence.map((item, index) => (
+        <div
+          key={index}
+          style={{
+            background: "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
+            border: "1px solid #cbd5e1",
+            borderRadius: "12px",
+            padding: "1rem",
+            marginBottom: ".75rem",
+            boxShadow: "0 2px 4px rgba(0,0,0,0.05)"
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              fontSize: ".75rem",
+              color: "#64748b",
+              marginBottom: ".75rem",
+              fontWeight: "500"
+            }}
+          >
+            <span style={{ 
+              background: "#3b82f6", 
+              color: "white",
+              padding: "0.2rem 0.5rem",
+              borderRadius: "4px",
+              fontSize: ".7rem",
+              fontWeight: "600"
+            }}>
+              Page {item.page || "N/A"}
+            </span>
+            <span>•</span>
+            <span>{item.section || "N/A"}</span>
+          </div>
+
+          <div
+            style={{
+              background: "white",
+              padding: "1rem",
+              borderLeft: "4px solid #3b82f6",
+              borderRadius: "8px",
+              fontSize: ".9rem",
+              lineHeight: "1.6",
+              color: "#334155",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.1)"
+            }}
+          >
+            {item.snippet}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function PublishConfirmPage() {
   const { paperId } = useParams();
   const navigate = useNavigate();
 
   const [preview, setPreview] = useState(null);
+  const [extractionData, setExtractionData] = useState(null);
   const [form, setForm] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -106,11 +196,24 @@ export function PublishConfirmPage() {
         setLoading(true);
         setLoadError("");
         setNotice(null);
+        
         const data = await getPublishMetadataPreview(paperId);
         if (!isMounted) return;
 
         setPreview(data);
         setForm(mapPreviewToForm(data));
+
+        if (data.source_extraction_id) {
+          try {
+            const extData = await getExtractionRunDetail(data.source_extraction_id);
+            if (isMounted) {
+              setExtractionData(extData);
+            }
+          } catch (extErr) {
+            console.warn("Không thể tải chi tiết extraction run cho evidence:", extErr);
+          }
+        }
+
       } catch (err) {
         if (!isMounted) return;
         setLoadError(err.message || "Không thể tải metadata publish");
@@ -226,19 +329,10 @@ export function PublishConfirmPage() {
               }}>
                 ⚡
               </div>
-              <h3 style={{
-                fontSize: "1.1rem",
-                fontWeight: "600",
-                color: "#374151",
-                margin: "0 0 0.5rem"
-              }}>
+              <h3 style={{ fontSize: "1.1rem", fontWeight: "600", color: "#374151", margin: "0 0 0.5rem" }}>
                 Đang tải metadata...
               </h3>
-              <p style={{
-                fontSize: "0.9rem",
-                color: "#6b7280",
-                margin: 0
-              }}>
+              <p style={{ fontSize: "0.9rem", color: "#6b7280", margin: 0 }}>
                 Vui lòng chờ trong giây lát.
               </p>
             </div>
@@ -258,19 +352,10 @@ export function PublishConfirmPage() {
               }}>
                 ❌
               </div>
-              <h3 style={{
-                fontSize: "1.1rem",
-                fontWeight: "600",
-                color: "#dc2626",
-                margin: "0 0 0.5rem"
-              }}>
+              <h3 style={{ fontSize: "1.1rem", fontWeight: "600", color: "#dc2626", margin: "0 0 0.5rem" }}>
                 Lỗi tải metadata
               </h3>
-              <p style={{
-                fontSize: "0.9rem",
-                color: "#991b1b",
-                margin: 0
-              }}>
+              <p style={{ fontSize: "0.9rem", color: "#991b1b", margin: 0 }}>
                 {loadError}
               </p>
             </div>
@@ -286,7 +371,7 @@ export function PublishConfirmPage() {
               </header>
 
               {preview && (
-                <div className="detail-section">
+                <div className="detail-section" style={{ marginBottom: "1.5rem" }}>
                   <h3 className="detail-section__title">Thông tin tài liệu</h3>
                   <dl className="detail-list">
                     <div className="detail-list__item">
@@ -329,10 +414,7 @@ export function PublishConfirmPage() {
                     backgroundColor: notice.type === "error" ? "#fef2f2" : "#f0fdf4"
                   }}
                 >
-                  <span style={{ 
-                    fontWeight: "500", 
-                    color: notice.type === "error" ? "#dc2626" : "#059669" 
-                  }}>
+                  <span style={{ fontWeight: "500", color: notice.type === "error" ? "#dc2626" : "#059669" }}>
                     {notice.message}
                   </span>
                 </div>
@@ -343,22 +425,22 @@ export function PublishConfirmPage() {
                   {/* Academic Header */}
                   <div style={{
                     borderBottom: "2px solid #1e3a5f",
-                    paddingBottom: "1.5rem",
-                    marginBottom: "2rem"
+                    paddingBottom: "1rem",
+                    marginBottom: "1.5rem"
                   }}>
                     <h2 style={{
                       fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                      fontSize: "1.75rem",
+                      fontSize: "1.5rem",
                       fontWeight: "600",
                       color: "#1e3a5f",
-                      margin: "0 0 0.5rem 0",
+                      margin: "0 0 0.35rem 0",
                       letterSpacing: "-0.02em"
                     }}>
                       📄 Biểu mẫu metadata bài báo khoa học
                     </h2>
                     <p style={{
                       fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                      fontSize: "0.95rem",
+                      fontSize: "0.9rem",
                       color: "#4a5568",
                       margin: 0,
                       fontStyle: "italic"
@@ -367,39 +449,105 @@ export function PublishConfirmPage() {
                     </p>
                   </div>
 
-                  <div className="detail-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem" }}>
-                    {/* Left Column - Basic Metadata */}
-                    <div className="detail-section" style={{
-                      backgroundColor: "#fafbfc",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: "8px",
-                      padding: "1.5rem",
-                      boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
+                  {/* ========================================================= */}
+                  {/* Khối 1: THÔNG TIN CƠ BẢN (Đưa lên trên cùng - Trải rộng full width) */}
+                  {/* ========================================================= */}
+                  <div className="detail-section" style={{
+                    backgroundColor: "#fafbfc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "8px",
+                    padding: "1.5rem",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                    marginBottom: "2rem"
+                  }}>
+                    <div style={{
+                      borderLeft: "4px solid #2c5282",
+                      paddingLeft: "1rem",
+                      marginBottom: "1.25rem"
                     }}>
-                      <div style={{
-                        borderLeft: "4px solid #2c5282",
-                        paddingLeft: "1rem",
-                        marginBottom: "1.5rem"
+                      <h3 style={{
+                        fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                        fontSize: "1.1rem",
+                        fontWeight: "600",
+                        color: "#2c5282",
+                        margin: "0 0 0.25rem 0"
                       }}>
-                        <h3 style={{
-                          fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                          fontSize: "1.1rem",
-                          fontWeight: "600",
-                          color: "#2c5282",
-                          margin: "0 0 0.25rem 0"
-                        }}>
-                          Thông tin cơ bản
-                        </h3>
-                        <p style={{
-                          fontSize: "0.8rem",
-                          color: "#718096",
-                          margin: 0
-                        }}>
-                          Thông tin bibliographic chính của bài báo
-                        </p>
-                      </div>
+                        Thông tin cơ bản
+                      </h3>
+                      <p style={{ fontSize: "0.8rem", color: "#718096", margin: 0 }}>
+                        Thông tin bibliographic chính của bài báo
+                      </p>
+                    </div>
 
-                      <div style={{ marginBottom: "1.25rem" }}>
+                    {/* Tiêu đề */}
+                    <div style={{ marginBottom: "1.25rem" }}>
+                      <label style={{
+                        display: "block",
+                        fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                        fontSize: "0.85rem",
+                        fontWeight: "600",
+                        color: "#2d3748",
+                        marginBottom: "0.5rem",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em"
+                      }}>
+                        Tiêu đề bài báo <span style={{ color: "#e53e3e" }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={form.title}
+                        onChange={(e) => updateForm("title", e.target.value)}
+                        placeholder="Nhập tiêu đề đầy đủ của bài báo"
+                        style={{
+                          width: "100%",
+                          padding: "0.75rem 1rem",
+                          border: "2px solid #cbd5e0",
+                          borderRadius: "6px",
+                          fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                          fontSize: "0.95rem",
+                          backgroundColor: "#fff",
+                          boxSizing: "border-box"
+                        }}
+                      />
+                    </div>
+
+                    {/* Tóm tắt */}
+                    <div style={{ marginBottom: "1.25rem" }}>
+                      <label style={{
+                        display: "block",
+                        fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                        fontSize: "0.85rem",
+                        fontWeight: "600",
+                        color: "#2d3748",
+                        marginBottom: "0.5rem",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em"
+                      }}>
+                        Tóm tắt (Abstract)
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={form.abstract}
+                        onChange={(e) => updateForm("abstract", e.target.value)}
+                        placeholder="Nhập tóm tắt nội dung chính của bài báo..."
+                        style={{
+                          width: "100%",
+                          padding: "0.75rem 1rem",
+                          border: "2px solid #cbd5e0",
+                          borderRadius: "6px",
+                          fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                          fontSize: "0.9rem",
+                          lineHeight: "1.6",
+                          backgroundColor: "#fff",
+                          resize: "vertical",
+                          boxSizing: "border-box"
+                        }}
+                      />
+                    </div>
+
+                    {/* Hội thảo & Năm (Chia đôi hàng ngang) */}
+                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem", marginBottom: "1.25rem" }}>
+                      <div>
                         <label style={{
                           display: "block",
                           fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
@@ -410,36 +558,27 @@ export function PublishConfirmPage() {
                           textTransform: "uppercase",
                           letterSpacing: "0.05em"
                         }}>
-                          Tiêu đề bài báo <span style={{ color: "#e53e3e" }}>*</span>
+                          Hội thảo / Tạp chí
                         </label>
                         <input
                           type="text"
-                          value={form.title}
-                          onChange={(e) => updateForm("title", e.target.value)}
-                          placeholder="Nhập tiêu đề đầy đủ của bài báo"
+                          value={form.venue}
+                          onChange={(e) => updateForm("venue", e.target.value)}
+                          placeholder="VD: NeurIPS, ICML, Nature"
                           style={{
                             width: "100%",
                             padding: "0.75rem 1rem",
                             border: "2px solid #cbd5e0",
                             borderRadius: "6px",
                             fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                            fontSize: "0.95rem",
+                            fontSize: "0.9rem",
                             backgroundColor: "#fff",
-                            transition: "all 0.2s ease",
                             boxSizing: "border-box"
-                          }}
-                          onFocus={(e) => {
-                            e.target.style.borderColor = "#2c5282";
-                            e.target.style.boxShadow = "0 0 0 3px rgba(44, 82, 130, 0.1)";
-                          }}
-                          onBlur={(e) => {
-                            e.target.style.borderColor = "#cbd5e0";
-                            e.target.style.boxShadow = "none";
                           }}
                         />
                       </div>
 
-                      <div style={{ marginBottom: "1.25rem" }}>
+                      <div>
                         <label style={{
                           display: "block",
                           fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
@@ -450,13 +589,15 @@ export function PublishConfirmPage() {
                           textTransform: "uppercase",
                           letterSpacing: "0.05em"
                         }}>
-                          Tóm tắt (Abstract)
+                          Năm xuất bản
                         </label>
-                        <textarea
-                          rows={5}
-                          value={form.abstract}
-                          onChange={(e) => updateForm("abstract", e.target.value)}
-                          placeholder="Nhập tóm tắt nội dung chính của bài báo..."
+                        <input
+                          type="number"
+                          value={form.year}
+                          onChange={(e) => updateForm("year", e.target.value)}
+                          placeholder="2024"
+                          min="1900"
+                          max="2030"
                           style={{
                             width: "100%",
                             padding: "0.75rem 1rem",
@@ -464,345 +605,265 @@ export function PublishConfirmPage() {
                             borderRadius: "6px",
                             fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
                             fontSize: "0.9rem",
-                            lineHeight: "1.6",
                             backgroundColor: "#fff",
-                            resize: "vertical",
-                            transition: "all 0.2s ease",
                             boxSizing: "border-box"
-                          }}
-                          onFocus={(e) => {
-                            e.target.style.borderColor = "#2c5282";
-                            e.target.style.boxShadow = "0 0 0 3px rgba(44, 82, 130, 0.1)";
-                          }}
-                          onBlur={(e) => {
-                            e.target.style.borderColor = "#cbd5e0";
-                            e.target.style.boxShadow = "none";
-                          }}
-                        />
-                      </div>
-
-                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem", marginBottom: "1.25rem" }}>
-                        <div>
-                          <label style={{
-                            display: "block",
-                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                            fontSize: "0.85rem",
-                            fontWeight: "600",
-                            color: "#2d3748",
-                            marginBottom: "0.5rem",
-                            textTransform: "uppercase",
-                            letterSpacing: "0.05em"
-                          }}>
-                            Hội thảo / Tạp chí
-                          </label>
-                          <input
-                            type="text"
-                            value={form.venue}
-                            onChange={(e) => updateForm("venue", e.target.value)}
-                            placeholder="VD: NeurIPS, ICML, Nature"
-                            style={{
-                              width: "100%",
-                              padding: "0.75rem 1rem",
-                              border: "2px solid #cbd5e0",
-                              borderRadius: "6px",
-                              fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                              fontSize: "0.9rem",
-                              backgroundColor: "#fff",
-                              transition: "all 0.2s ease",
-                              boxSizing: "border-box"
-                            }}
-                            onFocus={(e) => {
-                              e.target.style.borderColor = "#2c5282";
-                              e.target.style.boxShadow = "0 0 0 3px rgba(44, 82, 130, 0.1)";
-                            }}
-                            onBlur={(e) => {
-                              e.target.style.borderColor = "#cbd5e0";
-                              e.target.style.boxShadow = "none";
-                            }}
-                          />
-                        </div>
-
-                        <div>
-                          <label style={{
-                            display: "block",
-                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                            fontSize: "0.85rem",
-                            fontWeight: "600",
-                            color: "#2d3748",
-                            marginBottom: "0.5rem",
-                            textTransform: "uppercase",
-                            letterSpacing: "0.05em"
-                          }}>
-                            Năm xuất bản
-                          </label>
-                          <input
-                            type="number"
-                            value={form.year}
-                            onChange={(e) => updateForm("year", e.target.value)}
-                            placeholder="2024"
-                            min="1900"
-                            max="2030"
-                            style={{
-                              width: "100%",
-                              padding: "0.75rem 1rem",
-                              border: "2px solid #cbd5e0",
-                              borderRadius: "6px",
-                              fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                              fontSize: "0.9rem",
-                              backgroundColor: "#fff",
-                              transition: "all 0.2s ease",
-                              boxSizing: "border-box"
-                            }}
-                            onFocus={(e) => {
-                              e.target.style.borderColor = "#2c5282";
-                              e.target.style.boxShadow = "0 0 0 3px rgba(44, 82, 130, 0.1)";
-                            }}
-                            onBlur={(e) => {
-                              e.target.style.borderColor = "#cbd5e0";
-                              e.target.style.boxShadow = "none";
-                            }}
-                          />
-                        </div>
-                      </div>
-
-                      <div style={{ marginBottom: "1.25rem" }}>
-                        <label style={{
-                          display: "block",
-                          fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                          fontSize: "0.85rem",
-                          fontWeight: "600",
-                          color: "#2d3748",
-                          marginBottom: "0.5rem",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.05em"
-                        }}>
-                          Tác giả (mỗi tác giả một dòng)
-                        </label>
-                        <textarea
-                          rows={5}
-                          value={form.authorsText}
-                          onChange={(e) => updateForm("authorsText", e.target.value)}
-                          placeholder="Nguyễn Văn A&#10;Trần Thị B&#10;Lê Văn C"
-                          style={{
-                            width: "100%",
-                            padding: "0.75rem 1rem",
-                            border: "2px solid #cbd5e0",
-                            borderRadius: "6px",
-                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                            fontSize: "0.9rem",
-                            lineHeight: "1.6",
-                            backgroundColor: "#fff",
-                            resize: "vertical",
-                            transition: "all 0.2s ease",
-                            boxSizing: "border-box"
-                          }}
-                          onFocus={(e) => {
-                            e.target.style.borderColor = "#2c5282";
-                            e.target.style.boxShadow = "0 0 0 3px rgba(44, 82, 130, 0.1)";
-                          }}
-                          onBlur={(e) => {
-                            e.target.style.borderColor = "#cbd5e0";
-                            e.target.style.boxShadow = "none";
                           }}
                         />
                       </div>
                     </div>
 
-                    {/* Right Column - AI Metadata */}
+                    {/* Tác giả */}
                     <div>
+                      <label style={{
+                        display: "block",
+                        fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                        fontSize: "0.85rem",
+                        fontWeight: "600",
+                        color: "#2d3748",
+                        marginBottom: "0.5rem",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em"
+                      }}>
+                        Tác giả (mỗi tác giả một dòng)
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={form.authorsText}
+                        onChange={(e) => updateForm("authorsText", e.target.value)}
+                        placeholder="Nguyễn Văn A&#10;Trần Thị B&#10;Lê Văn C"
+                        style={{
+                          width: "100%",
+                          padding: "0.75rem 1rem",
+                          border: "2px solid #cbd5e0",
+                          borderRadius: "6px",
+                          fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                          fontSize: "0.9rem",
+                          lineHeight: "1.6",
+                          backgroundColor: "#fff",
+                          resize: "vertical",
+                          boxSizing: "border-box"
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Tiêu đề phụ phân tách phần AI */}
+                  <div style={{
+                    borderLeft: "4px solid #744210",
+                    paddingLeft: "1rem",
+                    marginBottom: "1.5rem"
+                  }}>
+                    <h3 style={{
+                      fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                      fontSize: "1.2rem",
+                      fontWeight: "600",
+                      color: "#744210",
+                      margin: "0 0 0.25rem 0"
+                    }}>
+                      🔬 Phân tích nội dung & Đánh giá dữ liệu (AI)
+                    </h3>
+                    <p style={{ fontSize: "0.8rem", color: "#718096", margin: 0 }}>
+                      Các thông tin chi tiết kèm bằng chứng (evidence) trích xuất tự động bởi AI.
+                    </p>
+                  </div>
+
+                  {/* ========================================================= */}
+                  {/* Khối 2: CHIA HAI CỘT CÂN ĐỐI (Dành riêng cho dữ liệu AI & Evidence) */}
+                  {/* ========================================================= */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem", alignItems: "start" }}>
+                    
+                    {/* --- CỘT TRÁI --- */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+                      
+                      {/* Trở ngại nghiên cứu */}
                       <div className="detail-section" style={{
                         backgroundColor: "#fafbfc",
                         border: "1px solid #e2e8f0",
                         borderRadius: "8px",
                         padding: "1.5rem",
-                        marginBottom: "1.5rem",
                         boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
                       }}>
-                        <div style={{
-                          borderLeft: "4px solid #744210",
-                          paddingLeft: "1rem",
-                          marginBottom: "1.5rem"
+                        <label style={{
+                          display: "block",
+                          fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                          fontSize: "0.9rem",
+                          fontWeight: "600",
+                          color: "#744210",
+                          marginBottom: "0.5rem"
                         }}>
-                          <h3 style={{
+                          I. TRỞ NGẠI NGHIÊN CỨU 
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={form.problemStatement}
+                          onChange={(e) => updateForm("problemStatement", e.target.value)}
+                          placeholder="Mô tả vấn đề chính mà bài báo giải quyết..."
+                          style={{
+                            width: "100%",
+                            padding: "0.75rem 1rem",
+                            border: "2px solid #d69e2e",
+                            borderRadius: "6px",
                             fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                            fontSize: "1.1rem",
-                            fontWeight: "600",
-                            color: "#744210",
-                            margin: "0 0 0.25rem 0"
-                          }}>
-                            🔬 Phân tích nội dung (AI)
-                          </h3>
-                          <p style={{
-                            fontSize: "0.8rem",
-                            color: "#718096",
-                            margin: 0
-                          }}>
-                            Các thông tin được trích xuất tự động từ nội dung bài báo
-                          </p>
-                        </div>
-
-                        <div style={{ marginBottom: "1.25rem" }}>
-                          <label style={{
-                            display: "block",
-                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                            fontSize: "0.85rem",
-                            fontWeight: "600",
-                            color: "#2d3748",
-                            marginBottom: "0.5rem"
-                          }}>
-                            Trở ngại nghiên cứu (Research Problem)
-                          </label>
-                          <textarea
-                            rows={3}
-                            value={form.problemStatement}
-                            onChange={(e) => updateForm("problemStatement", e.target.value)}
-                            placeholder="Mô tả vấn đề chính mà bài báo giải quyết..."
-                            style={{
-                              width: "100%",
-                              padding: "0.75rem 1rem",
-                              border: "2px solid #d69e2e",
-                              borderRadius: "6px",
-                              fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                              fontSize: "0.9rem",
-                              lineHeight: "1.6",
-                              backgroundColor: "#fffbeb",
-                              resize: "vertical",
-                              transition: "all 0.2s ease",
-                              boxSizing: "border-box"
-                            }}
-                            onFocus={(e) => {
-                              e.target.style.borderColor = "#975a16";
-                              e.target.style.boxShadow = "0 0 0 3px rgba(151, 90, 22, 0.1)";
-                            }}
-                            onBlur={(e) => {
-                              e.target.style.borderColor = "#d69e2e";
-                              e.target.style.boxShadow = "none";
-                            }}
-                          />
-                        </div>
-
-                        <div style={{ marginBottom: "1.25rem" }}>
-                          <label style={{
-                            display: "block",
-                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                            fontSize: "0.85rem",
-                            fontWeight: "600",
-                            color: "#2d3748",
-                            marginBottom: "0.5rem"
-                          }}>
-                            Phương pháp chính (Methodology)
-                          </label>
-                          <textarea
-                            rows={3}
-                            value={form.mainMethod}
-                            onChange={(e) => updateForm("mainMethod", e.target.value)}
-                            placeholder="Mô tả phương pháp, kỹ thuật đề xuất..."
-                            style={{
-                              width: "100%",
-                              padding: "0.75rem 1rem",
-                              border: "2px solid #d69e2e",
-                              borderRadius: "6px",
-                              fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                              fontSize: "0.9rem",
-                              lineHeight: "1.6",
-                              backgroundColor: "#fffbeb",
-                              resize: "vertical",
-                              transition: "all 0.2s ease",
-                              boxSizing: "border-box"
-                            }}
-                            onFocus={(e) => {
-                              e.target.style.borderColor = "#975a16";
-                              e.target.style.boxShadow = "0 0 0 3px rgba(151, 90, 22, 0.1)";
-                            }}
-                            onBlur={(e) => {
-                              e.target.style.borderColor = "#d69e2e";
-                              e.target.style.boxShadow = "none";
-                            }}
-                          />
-                        </div>
-
-                        <div style={{ marginBottom: "1.25rem" }}>
-                          <label style={{
-                            display: "block",
-                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                            fontSize: "0.85rem",
-                            fontWeight: "600",
-                            color: "#2d3748",
-                            marginBottom: "0.5rem"
-                          }}>
-                            Đóng góp (Contributions)
-                          </label>
-                          <textarea
-                            rows={4}
-                            value={form.contributionsText}
-                            onChange={(e) => updateForm("contributionsText", e.target.value)}
-                            placeholder="Liệt kê các đóng góp chính (mỗi dòng một đóng góp)..."
-                            style={{
-                              width: "100%",
-                              padding: "0.75rem 1rem",
-                              border: "2px solid #d69e2e",
-                              borderRadius: "6px",
-                              fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                              fontSize: "0.9rem",
-                              lineHeight: "1.6",
-                              backgroundColor: "#fffbeb",
-                              resize: "vertical",
-                              transition: "all 0.2s ease",
-                              boxSizing: "border-box"
-                            }}
-                            onFocus={(e) => {
-                              e.target.style.borderColor = "#975a16";
-                              e.target.style.boxShadow = "0 0 0 3px rgba(151, 90, 22, 0.1)";
-                            }}
-                            onBlur={(e) => {
-                              e.target.style.borderColor = "#d69e2e";
-                              e.target.style.boxShadow = "none";
-                            }}
-                          />
-                        </div>
-
-                        <div style={{ marginBottom: "0" }}>
-                          <label style={{
-                            display: "block",
-                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                            fontSize: "0.85rem",
-                            fontWeight: "600",
-                            color: "#2d3748",
-                            marginBottom: "0.5rem"
-                          }}>
-                            Hạn chế (Limitations)
-                          </label>
-                          <textarea
-                            rows={4}
-                            value={form.limitationsText}
-                            onChange={(e) => updateForm("limitationsText", e.target.value)}
-                            placeholder="Liệt kê các hạn chế và phạm vi áp dụng..."
-                            style={{
-                              width: "100%",
-                              padding: "0.75rem 1rem",
-                              border: "2px solid #d69e2e",
-                              borderRadius: "6px",
-                              fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                              fontSize: "0.9rem",
-                              lineHeight: "1.6",
-                              backgroundColor: "#fffbeb",
-                              resize: "vertical",
-                              transition: "all 0.2s ease",
-                              boxSizing: "border-box"
-                            }}
-                            onFocus={(e) => {
-                              e.target.style.borderColor = "#975a16";
-                              e.target.style.boxShadow = "0 0 0 3px rgba(151, 90, 22, 0.1)";
-                            }}
-                            onBlur={(e) => {
-                              e.target.style.borderColor = "#d69e2e";
-                              e.target.style.boxShadow = "none";
-                            }}
-                          />
-                        </div>
+                            fontSize: "0.9rem",
+                            lineHeight: "1.6",
+                            backgroundColor: "#fffbeb",
+                            resize: "vertical",
+                            boxSizing: "border-box"
+                          }}
+                        />
+                        {extractionData?.problem_statement?.evidence && renderEvidence(extractionData.problem_statement.evidence)}
                       </div>
 
-                      {/* Evaluation Section */}
+                      {/* Phương pháp chính */}
+                      <div className="detail-section" style={{
+                        backgroundColor: "#fafbfc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "8px",
+                        padding: "1.5rem",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
+                      }}>
+                        <label style={{
+                          display: "block",
+                          fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                          fontSize: "0.9rem",
+                          fontWeight: "600",
+                          color: "#744210",
+                          marginBottom: "0.5rem"
+                        }}>
+                          II.PHƯƠNG PHÁP CHÍNH
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={form.mainMethod}
+                          onChange={(e) => updateForm("mainMethod", e.target.value)}
+                          placeholder="Mô tả phương pháp, kỹ thuật đề xuất..."
+                          style={{
+                            width: "100%",
+                            padding: "0.75rem 1rem",
+                            border: "2px solid #d69e2e",
+                            borderRadius: "6px",
+                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                            fontSize: "0.9rem",
+                            lineHeight: "1.6",
+                            backgroundColor: "#fffbeb",
+                            resize: "vertical",
+                            boxSizing: "border-box"
+                          }}
+                        />
+                        {extractionData?.main_method?.evidence && renderEvidence(extractionData.main_method.evidence)}
+                      </div>
+                        {/* Đóng góp */}
+                      <div className="detail-section" style={{
+                        backgroundColor: "#fafbfc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "8px",
+                        padding: "1.5rem",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
+                      }}>
+                        <label style={{
+                          display: "block",
+                          fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                          fontSize: "0.9rem",
+                          fontWeight: "600",
+                          color: "#744210",
+                          marginBottom: "0.5rem"
+                        }}>
+                          III.ĐÓNG GÓP
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={form.contributionsText}
+                          onChange={(e) => updateForm("contributionsText", e.target.value)}
+                          placeholder="Liệt kê các đóng góp chính..."
+                          style={{
+                            width: "100%",
+                            padding: "0.75rem 1rem",
+                            border: "2px solid #d69e2e",
+                            borderRadius: "6px",
+                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                            fontSize: "0.9rem",
+                            lineHeight: "1.6",
+                            backgroundColor: "#fffbeb",
+                            resize: "vertical",
+                            boxSizing: "border-box"
+                          }}
+                        />
+                        {extractionData?.contributions && extractionData.contributions.length > 0 && extractionData.contributions.some(c => c.evidence) && (
+                          <div style={{ marginTop: "1rem" }}>
+                            {extractionData.contributions.map((item, idx) => 
+                              item.evidence && item.evidence.length > 0 ? (
+                                <div key={idx} style={{ marginBottom: "1rem" }}>
+                                  <div style={{ fontSize: "0.8rem", color: "#64748b", marginBottom: "0.5rem", fontWeight: "600" }}>
+                                    Đóng góp #{idx + 1}
+                                  </div>
+                                  {renderEvidence(item.evidence)}
+                                </div>
+                              ) : null
+                            ).filter(Boolean)}
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
+
+                    {/* --- CỘT PHẢI --- */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+                      
+                    
+
+                      {/* Hạn chế */}
+                      <div className="detail-section" style={{
+                        backgroundColor: "#fafbfc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "8px",
+                        padding: "1.5rem",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
+                      }}>
+                        <label style={{
+                          display: "block",
+                          fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                          fontSize: "0.9rem",
+                          fontWeight: "600",
+                          color: "#744210",
+                          marginBottom: "0.5rem"
+                        }}>
+                         IV.HẠN CHẾ
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={form.limitationsText}
+                          onChange={(e) => updateForm("limitationsText", e.target.value)}
+                          placeholder="Liệt kê các hạn chế..."
+                          style={{
+                            width: "100%",
+                            padding: "0.75rem 1rem",
+                            border: "2px solid #d69e2e",
+                            borderRadius: "6px",
+                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
+                            fontSize: "0.9rem",
+                            lineHeight: "1.6",
+                            backgroundColor: "#fffbeb",
+                            resize: "vertical",
+                            boxSizing: "border-box"
+                          }}
+                        />
+                        {extractionData?.limitations && extractionData.limitations.length > 0 && extractionData.limitations.some(l => l.evidence) && (
+                          <div style={{ marginTop: "1rem" }}>
+                            {extractionData.limitations.map((item, idx) => 
+                              item.evidence && item.evidence.length > 0 ? (
+                                <div key={idx} style={{ marginBottom: "1rem" }}>
+                                  <div style={{ fontSize: "0.8rem", color: "#64748b", marginBottom: "0.5rem", fontWeight: "600" }}>
+                                    Hạn chế #{idx + 1}
+                                  </div>
+                                  {renderEvidence(item.evidence)}
+                                </div>
+                              ) : null
+                            ).filter(Boolean)}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Thiết lập đánh giá thực nghiệm */}
                       <div className="detail-section" style={{
                         backgroundColor: "#f0fff4",
                         border: "1px solid #9ae6b4",
@@ -810,38 +871,20 @@ export function PublishConfirmPage() {
                         padding: "1.5rem",
                         boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
                       }}>
-                        <div style={{
-                          borderLeft: "4px solid " + "#276749",
-                          paddingLeft: "1rem",
-                          marginBottom: "1.5rem"
-                        }}>
+                        <div style={{ borderLeft: "4px solid #276749", paddingLeft: "1rem", marginBottom: "1rem" }}>
                           <h4 style={{
                             fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
                             fontSize: "1rem",
                             fontWeight: "600",
                             color: "#276749",
-                            margin: "0 0 0.25rem 0"
+                            margin: 0
                           }}>
                             📊 Cài đặt đánh giá thực nghiệm
                           </h4>
-                          <p style={{
-                            fontSize: "0.8rem",
-                            color: "#718096",
-                            margin: 0
-                          }}>
-                            Dataset, metrics và benchmarks được sử dụng
-                          </p>
                         </div>
 
-                        <div style={{ marginBottom: "1rem" }}>
-                          <label style={{
-                            display: "block",
-                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                            fontSize: "0.8rem",
-                            fontWeight: "600",
-                            color: "#2d3748",
-                            marginBottom: "0.375rem"
-                          }}>
+                        <div style={{ marginBottom: "0.75rem" }}>
+                          <label style={{ display: "block", fontSize: "0.8rem", fontWeight: "600", color: "#2d3748", marginBottom: "0.25rem" }}>
                             Dataset
                           </label>
                           <textarea
@@ -851,37 +894,17 @@ export function PublishConfirmPage() {
                             placeholder="ImageNet, COCO, SQuAD..."
                             style={{
                               width: "100%",
-                              padding: "0.625rem 0.875rem",
+                              padding: "0.5rem 0.75rem",
                               border: "2px solid #9ae6b4",
                               borderRadius: "6px",
-                              fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
                               fontSize: "0.85rem",
-                              lineHeight: "1.5",
-                              backgroundColor: "#fff",
-                              resize: "vertical",
-                              transition: "all 0.2s ease",
                               boxSizing: "border-box"
-                            }}
-                            onFocus={(e) => {
-                              e.target.style.borderColor = "#276749";
-                              e.target.style.boxShadow = "0 0 0 3px rgba(39, 103, 73, 0.1)";
-                            }}
-                            onBlur={(e) => {
-                              e.target.style.borderColor = "#9ae6b4";
-                              e.target.style.boxShadow = "none";
                             }}
                           />
                         </div>
 
-                        <div style={{ marginBottom: "1rem" }}>
-                          <label style={{
-                            display: "block",
-                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                            fontSize: "0.8rem",
-                            fontWeight: "600",
-                            color: "#2d3748",
-                            marginBottom: "0.375rem"
-                          }}>
+                        <div style={{ marginBottom: "0.75rem" }}>
+                          <label style={{ display: "block", fontSize: "0.8rem", fontWeight: "600", color: "#2d3748", marginBottom: "0.25rem" }}>
                             Metrics
                           </label>
                           <textarea
@@ -891,68 +914,45 @@ export function PublishConfirmPage() {
                             placeholder="Accuracy, F1-score, BLEU..."
                             style={{
                               width: "100%",
-                              padding: "0.625rem 0.875rem",
+                              padding: "0.5rem 0.75rem",
                               border: "2px solid #9ae6b4",
                               borderRadius: "6px",
-                              fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
                               fontSize: "0.85rem",
-                              lineHeight: "1.5",
-                              backgroundColor: "#fff",
-                              resize: "vertical",
-                              transition: "all 0.2s ease",
                               boxSizing: "border-box"
-                            }}
-                            onFocus={(e) => {
-                              e.target.style.borderColor = "#276749";
-                              e.target.style.boxShadow = "0 0 0 3px rgba(39, 103, 73, 0.1)";
-                            }}
-                            onBlur={(e) => {
-                              e.target.style.borderColor = "#9ae6b4";
-                              e.target.style.boxShadow = "none";
                             }}
                           />
                         </div>
 
-                        <div>
-                          <label style={{
-                            display: "block",
-                            fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
-                            fontSize: "0.8rem",
-                            fontWeight: "600",
-                            color: "#2d3748",
-                            marginBottom: "0.375rem"
-                          }}>
+                        <div style={{ marginBottom: "1rem" }}>
+                          <label style={{ display: "block", fontSize: "0.8rem", fontWeight: "600", color: "#2d3748", marginBottom: "0.25rem" }}>
                             Benchmarks
                           </label>
                           <textarea
                             rows={2}
                             value={form.benchmarksText}
                             onChange={(e) => updateForm("benchmarksText", e.target.value)}
-                            placeholder="GLUE, SuperGLUE, SQuAD 2.0..."
+                            placeholder="GLUE, SuperGLUE..."
                             style={{
                               width: "100%",
-                              padding: "0.625rem 0.875rem",
+                              padding: "0.5rem 0.75rem",
                               border: "2px solid #9ae6b4",
                               borderRadius: "6px",
-                              fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
                               fontSize: "0.85rem",
-                              lineHeight: "1.5",
-                              backgroundColor: "#fff",
-                              resize: "vertical",
-                              transition: "all 0.2s ease",
                               boxSizing: "border-box"
-                            }}
-                            onFocus={(e) => {
-                              e.target.style.borderColor = "#276749";
-                              e.target.style.boxShadow = "0 0 0 3px rgba(39, 103, 73, 0.1)";
-                            }}
-                            onBlur={(e) => {
-                              e.target.style.borderColor = "#9ae6b4";
-                              e.target.style.boxShadow = "none";
                             }}
                           />
                         </div>
+
+                        {extractionData?.evaluation_setup?.evidence && extractionData.evaluation_setup.evidence.length > 0 && (
+                          <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px dashed #9ae6b4" }}>
+                            <div style={{ fontSize: "0.8rem", color: "#276749", marginBottom: "0.5rem", fontWeight: "600" }}>
+                              Evidence cho Evaluation Setup
+                            </div>
+                            {renderEvidence(extractionData.evaluation_setup.evidence)}
+                          </div>
+                        )}
                       </div>
+
                     </div>
                   </div>
                 </>
@@ -1000,18 +1000,6 @@ export function PublishConfirmPage() {
                       transition: "all 0.2s ease",
                       boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
                     }}
-                    onMouseEnter={(e) => {
-                      if (!e.target.disabled) {
-                        e.target.style.backgroundColor = "#f7fafc";
-                        e.target.style.borderColor = "#2d3748";
-                        e.target.style.color = "#2d3748";
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.backgroundColor = "#fff";
-                      e.target.style.borderColor = "#4a5568";
-                      e.target.style.color = "#4a5568";
-                    }}
                   >
                     💾 {saving ? "Đang lưu..." : "Lưu bản nháp"}
                   </button>
@@ -1031,20 +1019,6 @@ export function PublishConfirmPage() {
                       cursor: "pointer",
                       transition: "all 0.2s ease",
                       boxShadow: "0 2px 4px rgba(44, 82, 130, 0.2)"
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!e.target.disabled) {
-                        e.target.style.backgroundColor = "#1a365d";
-                        e.target.style.borderColor = "#1a365d";
-                        e.target.style.transform = "translateY(-1px)";
-                        e.target.style.boxShadow = "0 4px 6px rgba(44, 82, 130, 0.3)";
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.backgroundColor = "#2c5282";
-                      e.target.style.borderColor = "#2c5282";
-                      e.target.style.transform = "translateY(0)";
-                      e.target.style.boxShadow = "0 2px 4px rgba(44, 82, 130, 0.2)";
                     }}
                   >
                     📤 {publishing ? "Đang xuất bản..." : "Xuất bản bài báo"}
