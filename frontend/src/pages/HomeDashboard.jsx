@@ -48,7 +48,7 @@ export function HomeDashboard() {
               độ tương đồng và xếp hạng kết quả.
             </p>
           </section>
-          <section className="card stats-card">
+          {/* <section className="card stats-card">
             <header className="card__header">
               <div>
                 <h2 className="card__title">Thống kê nhanh</h2>
@@ -75,7 +75,7 @@ export function HomeDashboard() {
                 <div className="stat-label">Lỗi</div>
               </div>
             </div>
-          </section>
+          </section> */}
         </div>
 
         <div className="app-main__right">
@@ -118,7 +118,7 @@ export function HomeDashboard() {
             </p>
           </section>
 
-          <section className="card activity-card">
+          {/* <section className="card activity-card">
             <header className="card__header">
               <div>
                 <h2 className="card__title">Hoạt động gần đây</h2>
@@ -150,7 +150,7 @@ export function HomeDashboard() {
                 </div>
               </div>
             </div>
-          </section>
+          </section> */}
         </div>
       </main>
     </div>
