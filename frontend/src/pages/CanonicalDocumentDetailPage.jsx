@@ -361,82 +361,45 @@ export function CanonicalDocumentDetailPage() {
 
               {/* Extraction Runs */}
               <div className="detail-section">
-                <h3 className="detail-section__title">Extraction Runs</h3>
+                <h3 className="detail-section__title">
+                  Quá trình trích xuất
+                </h3>
+
                 {extractionRuns.length > 0 ? (
-                  <div className="extraction-runs-table">
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead>
-                        <tr style={{ backgroundColor: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                          <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>ID</th>
-                          <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Provider</th>
-                          <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Model</th>
-                          <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Chi tiết</th>
-                          <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Status</th>
-                          {/* <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Tokens</th> */}
-                          <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: "600", fontSize: "0.875rem" }}>Ngày tạo</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {extractionRuns.map((run) => (
-                          <tr key={run.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                            <td style={{ padding: "0.75rem", fontFamily: "monospace", fontSize: "0.8rem" }}>
-                              {run.id}
-                            </td>
-                            <td style={{ padding: "0.75rem" }}>
-                              <span
-                                style={{
-                                  backgroundColor: "#e2e8f0",
-                                  color: "#0f172a",
-                                  padding: "0.2rem 0.5rem",
-                                  borderRadius: "999px",
-                                  fontSize: "0.75rem",
-                                  fontWeight: "600",
-                                  whiteSpace: "nowrap"
-                                }}
-                              >
-                                {formatLLMProvider(run.provider, run.model_name)}
-                              </span>
-                            </td>
-                            <td style={{ padding: "0.75rem" }}>
-                              {run.model_name || "-"}
-                            </td>
-                            <td style={{ padding: "0.75rem" }}>
-                              <button
-                                className="btn btn--link"
-                                style={{ fontSize: "0.8rem", padding: "0.25rem 0.5rem" }}
-                                onClick={() => navigate(`/extraction-runs/${run.id}`)}
-                              >
-                                Chi tiết
-                              </button>
-                            </td>
-                            <td style={{ padding: "0.75rem" }}>
-                              <span
-                                style={{
-                                  backgroundColor: run.status === 'completed' ? '#22c55e' : '#f59e0b',
-                                  color: 'white',
-                                  padding: '0.25rem 0.5rem',
-                                  borderRadius: '4px',
-                                  fontSize: '0.75rem',
-                                  textTransform: 'uppercase'
-                                }}
-                              >
-                                {run.status}
-                              </span>
-                            </td>
-                            {/* <td style={{ padding: "0.75rem", fontFamily: "monospace", fontSize: "0.8rem" }}>
-                              {run.token_input} → {run.token_output}
-                            </td> */}
-                            <td style={{ padding: "0.75rem", fontSize: "0.8rem" }}>
-                              {formatDate(run.created_at)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "1rem",
+                      justifyContent: "center",
+                    alignItems: "center"
+                    }}
+                  >
+                    {extractionRuns.map((run) => (
+                      <button
+                        key={run.id}
+                        className="btn btn--primary"
+                        style={{
+                          padding: "0.75rem 1.5rem",
+                          borderRadius: "10px"
+                        }}
+                        onClick={() =>
+                          navigate(`/extraction-runs/${run.id}`)
+                        }
+                      >
+                        Xem chi tiết quá trình trích xuất 
+                      </button>
+                    ))}
                   </div>
                 ) : (
-                  <div style={{ padding: "1rem", textAlign: "center", color: "#6b7280" }}>
-                    Không có extraction runs nào cho canonical document này.
+                  <div
+                    style={{
+                      padding: "2rem",
+                      textAlign: "center",
+                      color: "#6b7280"
+                    }}
+                  >
+                    Không có quá trình trích xuất nào.
                   </div>
                 )}
               </div>
