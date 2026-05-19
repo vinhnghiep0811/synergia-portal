@@ -120,25 +120,31 @@ Field-specific limits:
 - problem.evidence: at most 1 item
 - method.value: one concise sentence or null
 - method.evidence: at most 1 item
+- method: describe the paper's own proposed method, not cited prior work
 - contributions.value: 0 to 3 short strings
 - contributions.evidence: each contribution must have exactly 1 evidence item
+- contributions: use only the authors' own claims/results; ignore cited prior-work claims
 - limitations.value: 0 to 2 short strings
 - limitations.evidence: each limitation must have exactly 1 evidence item
+- limitations: return [] when only prior-work/baseline weaknesses or generic motivation are present
 - evaluation_setup.value.datasets: at most 3 dataset names
 - evaluation_setup.value.metrics: at most 4 metric names
 - evaluation_setup.value.benchmarks: at most 3 benchmark/baseline names
 - evaluation_setup.evidence: at most 1 item
+- evaluation_setup: use experiment/evaluation context only; do not treat citation venues such as ACL/EMNLP/NIPS as datasets
 
 Evidence rules:
 - snippet must be an exact short quote from paper text
 - if value is null or empty, evidence must be []
 - contributions and limitations items cannot share fake evidence
+- do not use an introduction paragraph about prior methods as limitation evidence
+- do not use sentences about "X et al." as method/contribution evidence unless the sentence states this paper's comparison result
 
 Field interpretation:
 - problem: the research problem/gap/task addressed by the paper
 - method: the main technical approach proposed by the paper
 - contributions: explicit claims/findings/main additions by the paper
-- limitations: explicit weaknesses, assumptions, constraints, or future-work caveats
+- limitations: only author-stated limitations of the proposed work, scope constraints, caveats, or future-work items; do not list weaknesses of prior work/baselines
 - evaluation_setup: datasets/metrics/benchmarks explicitly mentioned in evaluation context
 
 Prompt version: {PROMPT_VERSION}-gemini
@@ -168,16 +174,16 @@ HARD OUTPUT RULES:
 
 FIELD BEHAVIOR:
 - problem.value: one short sentence describing the main task/problem.
-- method.value: one short sentence describing the proposed method/model.
-- contributions: up to 3 concrete contribution claims.
+- method.value: one short sentence describing this paper's proposed method/model, not a cited baseline.
+- contributions: up to 3 concrete claims by the authors about their method or results.
 - limitations: up to 2 limitations/assumptions/future-work caveats.
-- evaluation_setup: include datasets/metrics/benchmarks only when explicitly stated.
+- evaluation_setup: include datasets/metrics/benchmarks only from experiment/evaluation context; reject citation venues as datasets.
 
 RECALL RULES (IMPORTANT):
 1. Do not return contributions: [] when abstract/introduction clearly states claims (e.g., "we propose", "we present", "we show", "we achieve").
 2. Prefer 2-3 contribution items when supported.
-3. Prefer at least 1 limitation item when paper mentions assumptions, constraints, failure cases, resource costs, or future work.
-4. If no dedicated "limitations" section exists, infer conservative limitations from explicit constraint language in the text.
+3. Return limitations: [] unless the authors explicitly state a limitation, scope constraint, caveat, or future-work item.
+4. Do not infer limitations from generic problem motivation or weaknesses of prior work/baselines in the introduction.
 
 ANTI-NOISE RULES (CRITICAL):
 1. Do not copy long abstract paragraphs into contributions or limitations.
@@ -195,18 +201,25 @@ EVIDENCE RULES:
 CONTRIBUTIONS FILTER:
 - GOOD: "Introduces attention-only Transformer architecture."
 - BAD: full abstract copied as one contribution.
+- BAD: "Vaswani et al. propose..." unless this paper is Vaswani et al.
+
+EVALUATION FILTER:
+- GOOD datasets: WMT 2014 English-to-German, WMT 2014 English-to-French, newstest 2013, ImageNet, COCO.
+- GOOD metrics: BLEU, ROUGE, accuracy, F1.
+- BAD datasets: ACL 2017, EMNLP 2014, NIPS 2014, arXiv IDs, references.
 
 LIMITATIONS FILTER:
 - Prefer explicit caveats from limitations/discussion/future-work context.
-- If no explicit limitation sentence exists, you may use clearly implied constraints (compute cost, data dependency, domain assumptions, robustness caveats) from the provided text.
+- If no explicit limitation sentence exists, return limitations: [].
+- Do not turn prior-work or baseline weaknesses into limitations of the paper.
 - Never invent facts outside PAPER_CONTENT.
 
 FINAL CHECKLIST:
 1. Exactly 5 top-level keys.
 2. No irrelevant bibliographic keys.
 3. Contributions are concise claims, not copied paragraphs.
-4. Limitations are concise caveats grounded in text.
-5. Avoid empty contributions/limitations when supported by PAPER_CONTENT.
+4. Limitations are concise author-stated caveats grounded in text, or [].
+5. Avoid empty contributions when supported by PAPER_CONTENT.
 
 Prompt version: {PROMPT_VERSION}-gemma
 
@@ -248,6 +261,10 @@ Rules:
 5. If data is missing, use null or empty lists.
 6. Ensure every non-null scalar and non-empty list item has evidence.
 7. Never output placeholders like "string" or "string | null".
+8. Keep limitations empty unless an author-stated limitation, caveat, scope constraint, or future-work item is explicit.
+9. Do not use prior-work or baseline weaknesses from the introduction as limitations.
+10. Method and contributions must describe this paper's own method/results, not cited prior work.
+11. Evaluation datasets must be actual datasets/tasks, not conference or citation venue names.
 
 REQUIRED_SHAPE:
 {json.dumps(shape, ensure_ascii=False, indent=2)}
@@ -295,10 +312,13 @@ STRICT RULES:
 3. Never output placeholder literals ("string", "string | null", ...).
 4. Contributions must be concise contribution claims (up to 3 items), not copied abstract blocks.
 5. Avoid returning contributions: [] if PAPER_CONTENT clearly contains contribution claims.
-6. Limitations should include explicit caveats/assumptions/future-work, and may include clearly implied constraints from text.
+6. Limitations should include only explicit author-stated caveats/assumptions/scope constraints/future-work; otherwise use [].
 7. Drop OCR-corrupted/no-space text and irrelevant content.
 8. Every non-null scalar/list item must include evidence snippet.
 9. If evidence is weak, keep only conservative, well-supported items.
+10. Do not use prior-work or baseline weaknesses from the introduction as limitations.
+11. Do not use cited prior work as this paper's method/contribution.
+12. Do not treat citation venues such as ACL/EMNLP/NIPS as datasets.
 
 PAPER_CONTENT:
 {input_text or ""}

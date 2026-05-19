@@ -27,16 +27,20 @@ class ExtractionRunRepository:
     def get_latest_completed_by_canonical_document_id(
         self,
         canonical_document_id: UUID,
+        prompt_version: str | None = None,
     ) -> Optional[ExtractionRun]:
-        return (
+        query = (
             self.db.query(ExtractionRun)
             .filter(
                 ExtractionRun.canonical_document_id == canonical_document_id,
                 ExtractionRun.status == "completed",
             )
-            .order_by(ExtractionRun.created_at.desc())
-            .first()
         )
+
+        if prompt_version:
+            query = query.filter(ExtractionRun.prompt_version == prompt_version)
+
+        return query.order_by(ExtractionRun.created_at.desc()).first()
 
     def get_latest_by_canonical_document_id(
         self,

@@ -180,6 +180,321 @@ class LLMExtractionService:
 
         return deduped
 
+    def _has_limitation_signal(self, text: str) -> bool:
+        lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+        if not lowered:
+            return False
+
+        signal_patterns = [
+            r"\blimit(?:ation|ations|ed|s)?\b",
+            r"\bfuture (?:work|research|direction|directions)\b",
+            r"\bwe (?:plan|intend|leave|hope|will investigate|aim) to\b",
+            r"\bremain(?:s)? (?:an|a)? ?(?:open )?(?:problem|question|challenge)\b",
+            r"\b(?:constraint|constraints|assumption|assumptions|caveat|drawback|weakness|shortcoming)\b",
+            r"\b(?:cannot|can't|unable to|fails? to|struggles? to|does not|do not|did not)\b",
+            r"\b(?:expensive|costly|latency|scalability|memory constraints?|memory consumption|compute cost|computational cost|resource intensive)\b",
+            r"\bprecludes? parallelization\b",
+            r"\brequires?\b.{0,80}\b(?:human|manual|annotation|labels|labeled|compute|memory|resources?|pretraining|training data)\b",
+            r"\b(?:only|solely) (?:evaluated|tested|trained|demonstrated|considered|studied|reported)\b",
+            r"\b(?:restricted|confined|limited) to\b",
+        ]
+
+        return any(re.search(pattern, lowered) for pattern in signal_patterns)
+
+    def _is_prior_work_context(self, text: str) -> bool:
+        lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+        if not lowered:
+            return False
+
+        prior_markers = [
+            r"\bprior work\b",
+            r"\bprevious work\b",
+            r"\bexisting (?:work|methods?|models?|approaches?)\b",
+            r"\bbaseline(?:s)?\b",
+            r"\btraditional (?:methods?|models?|approaches?)\b",
+            r"\brecurrent neural networks?\b",
+            r"\brecurrent models?\b",
+            r"\bconvolutional neural networks?\b",
+        ]
+        current_scope_markers = [
+            r"\bwe\b",
+            r"\bour\b",
+            r"\bthis (?:paper|work|study)\b",
+            r"\bproposed\b",
+            r"\btransformer\b",
+            r"\bfuture (?:work|research|direction|directions)\b",
+        ]
+
+        has_prior_marker = any(re.search(pattern, lowered) for pattern in prior_markers)
+        has_current_scope_marker = any(re.search(pattern, lowered) for pattern in current_scope_markers)
+        return has_prior_marker and not has_current_scope_marker
+
+    def _is_valid_limitation_item(self, item: dict[str, Any]) -> bool:
+        value = item.get("value")
+        if not isinstance(value, str) or not value.strip():
+            return False
+
+        evidence = item.get("evidence")
+        evidence_text = " ".join(
+            ev.get("snippet", "")
+            for ev in evidence
+            if isinstance(ev, dict) and isinstance(ev.get("snippet"), str)
+        ) if isinstance(evidence, list) else ""
+
+        combined = re.sub(r"\s+", " ", f"{value} {evidence_text}").strip()
+        lowered = combined.lower()
+
+        if re.match(
+            r"^#+\s*\d*(?:\.\d+)?\s*(abstract|introduction|background|related work|method|approach|experiments?|results?)\b",
+            lowered,
+        ):
+            return False
+
+        if not self._has_limitation_signal(combined):
+            return False
+
+        if self._is_prior_work_context(combined):
+            return False
+
+        positive_only_markers = [
+            "state of the art",
+            "state-of-the-art",
+            "we propose",
+            "we present",
+            "we introduce",
+            "we achieve",
+            "outperform",
+        ]
+        if any(marker in lowered for marker in positive_only_markers) and not re.search(
+            r"\b(?:however|although|but|future|limit|cannot|unable|fails?|requires?|only|restricted|confined)\b",
+            lowered,
+        ):
+            return False
+
+        return True
+
+    def _normalize_limitations_field(self, raw: Any) -> list[dict[str, Any]]:
+        candidates = self._normalize_list_field(raw, max_items=6)
+        filtered = [item for item in candidates if self._is_valid_limitation_item(item)]
+        return self._dedupe_list_items(filtered, max_items=2)
+
+    @staticmethod
+    def _repair_joined_extraction_text(text: str) -> str:
+        if not isinstance(text, str):
+            return ""
+
+        repaired = text
+        repaired = repaired.replace("\u2019", "'").replace("`", "'")
+        repaired = re.sub("[\u2010-\u2015]", "-", repaired)
+        joined_we_verbs = (
+            "propose|present|introduce|replace|achieve|show|report|benchmark|"
+            "evaluate|obtain|develop|train|use|found|plan|improve"
+        )
+        repaired = re.sub(
+            rf"\b([Ww]e)({joined_we_verbs})\b",
+            r"\1 \2",
+            repaired,
+        )
+        repaired = re.sub(
+            r"\b([Oo]ur)(model|method|architecture|approach|network|proposed|results?|experiments?)\b",
+            r"\1 \2",
+            repaired,
+        )
+        repaired = re.sub(r"\b([Tt]his)(paper|work|study)\b", r"\1 \2", repaired)
+        repaired = re.sub(r"\b([Ii]n)(this)(work|paper)\b", r"\1 \2 \3", repaired)
+        repaired = re.sub(r"\b([Ii]n)(future)\b", r"\1 \2", repaired)
+        repaired = re.sub(
+            r"\b(to)(investigate|extend|explore|study|address|improve)\b",
+            r"\1 \2",
+            repaired,
+            flags=re.IGNORECASE,
+        )
+        repaired = re.sub(r"\b([A-Za-z])etal\.?", r"\1 et al.", repaired)
+        repaired = re.sub(r"(?<=[,;:])(?=[A-Za-z])", " ", repaired)
+        return repaired
+
+    def _has_current_paper_signal(self, text: str) -> bool:
+        lowered = self._repair_joined_extraction_text(text).lower()
+        signal_patterns = [
+            r"\bwe\s+(?:propose|present|introduce|replace|achieve|show|report|benchmark|evaluate|obtain|develop|train|use|improve)\b",
+            r"\bin this (?:work|paper|study)\b",
+            r"\bour (?:model|method|architecture|approach|network|proposed|experiments?|results?)\b",
+            r"\bthis (?:paper|work|study) (?:proposes|presents|introduces|reports|shows|evaluates)\b",
+        ]
+        return any(re.search(pattern, lowered) for pattern in signal_patterns)
+
+    def _is_external_work_statement(self, text: str) -> bool:
+        lowered = self._repair_joined_extraction_text(text).lower()
+        if self._has_current_paper_signal(lowered):
+            return False
+
+        external_patterns = [
+            r"\b[a-z][a-z-]+ et al\.?\s*(?:\(\d{4}\))?",
+            r"\b(?:vaswani|sutskever|bahdanau|luong|wu|gehring|kaiser|sennrich)\b",
+            r"\b(?:previous|prior|existing|baseline|original) (?:work|model|method|architecture|approach|network)\b",
+            r"^while the proposed (?:architecture|model|method|approach|network)\b",
+        ]
+        return any(re.search(pattern, lowered) for pattern in external_patterns)
+
+    def _is_noisy_extraction_sentence(self, text: str) -> bool:
+        lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+        if not lowered:
+            return True
+
+        if len(lowered.split()) < 4:
+            return True
+
+        if "@" in lowered or "proceedings of" in lowered or "arxiv:" in lowered:
+            return True
+
+        if re.match(r"^\[page \d+\]", lowered) and not self._has_current_paper_signal(lowered):
+            return True
+
+        if " abstract " in f" {lowered} " and not self._has_current_paper_signal(lowered):
+            return True
+
+        if re.match(r"^#+\s*\d*(?:\.\d+)?\s*(references|appendix)\b", lowered):
+            return True
+
+        return False
+
+    def _is_valid_method_sentence(self, text: str) -> bool:
+        lowered = self._repair_joined_extraction_text(text).lower()
+        if self._is_noisy_extraction_sentence(lowered):
+            return False
+        if self._is_external_work_statement(lowered):
+            return False
+
+        method_patterns = [
+            r"\bwe\s+(?:propose|present|introduce|develop|replace|use)\b",
+            r"\bin this (?:work|paper),?\s+we\s+(?:propose|present|introduce|develop)\b",
+            r"\bour (?:model|method|architecture|approach|network)\b",
+        ]
+        return any(re.search(pattern, lowered) for pattern in method_patterns)
+
+    def _is_valid_contribution_sentence(self, text: str) -> bool:
+        lowered = self._repair_joined_extraction_text(text).lower()
+        if self._is_noisy_extraction_sentence(lowered):
+            return False
+        if self._is_external_work_statement(lowered):
+            return False
+
+        has_claim_owner = (
+            self._has_current_paper_signal(lowered)
+            or re.search(
+                r"\b(?:weighted transformer|fast-forward|f-f connections?|deep-att|deep-ed|our|proposed)\b",
+                lowered,
+            )
+        )
+        if not has_claim_owner:
+            return False
+
+        contribution_patterns = [
+            r"\bwe\s+(?:propose|present|introduce|develop|replace|show|report|achieve|obtain|improve|outperform|benchmark)\b",
+            r"\bour (?:model|method|architecture|approach|network|results?)\b",
+            r"\bthe proposed (?:model|method|architecture|approach|network)\b",
+            r"\b(?:achieves?|improves?|outperforms?|converges?)\b.{0,80}\b(?:bleu|accuracy|f1|state-of-the-art|baseline)\b",
+        ]
+        return any(re.search(pattern, lowered) for pattern in contribution_patterns)
+
+    def _pick_method_sentence(self, sentences: list[str]) -> str | None:
+        for sentence in sentences:
+            if self._is_valid_method_sentence(sentence):
+                return sentence
+        return None
+
+    def _pick_contribution_sentences(self, sentences: list[str], max_items: int = 3) -> list[str]:
+        candidates: list[str] = []
+        seen: set[str] = set()
+        for sentence in sentences:
+            if not self._is_valid_contribution_sentence(sentence):
+                continue
+
+            key = re.sub(r"\s+", " ", sentence).strip().lower()
+            if key in seen:
+                continue
+
+            candidates.append(sentence)
+            seen.add(key)
+            if len(candidates) >= max_items:
+                break
+
+        return candidates
+
+    def _normalize_method_field(self, raw: Any) -> dict[str, Any]:
+        field = self._normalize_scalar_field(raw)
+        value = field.get("value")
+        if not isinstance(value, str) or not value.strip():
+            return field
+
+        if self._is_noisy_extraction_sentence(value) or self._is_external_work_statement(value):
+            return {"value": None, "evidence": []}
+
+        return field
+
+    def _is_valid_contribution_item(self, item: dict[str, Any]) -> bool:
+        value = item.get("value")
+        if not isinstance(value, str) or not value.strip():
+            return False
+
+        evidence = item.get("evidence")
+        evidence_text = " ".join(
+            ev.get("snippet", "")
+            for ev in evidence
+            if isinstance(ev, dict) and isinstance(ev.get("snippet"), str)
+        ) if isinstance(evidence, list) else ""
+
+        combined = re.sub(r"\s+", " ", f"{value} {evidence_text}").strip()
+        if self._is_noisy_extraction_sentence(combined):
+            return False
+        if self._is_external_work_statement(combined):
+            return False
+        if self._is_valid_contribution_sentence(combined):
+            return True
+
+        lowered = self._repair_joined_extraction_text(combined).lower()
+        has_claim_owner = (
+            self._has_current_paper_signal(lowered)
+            or re.search(
+                r"\b(?:weighted transformer|fast-forward|f-f connections?|deep-att|deep-ed|our|proposed)\b",
+                lowered,
+            )
+        )
+        if not has_claim_owner:
+            return False
+
+        compact_claim_patterns = [
+            r"^(?:introduces?|proposes?|replaces?|improves?|outperforms?|achieves?|obtains?|converges?)\b",
+            r"\b(?:bleu|accuracy|f1)\b.{0,80}\b(?:improvement|points?|score)\b",
+        ]
+        return any(re.search(pattern, lowered) for pattern in compact_claim_patterns)
+
+    def _normalize_contributions_field(self, raw: Any) -> list[dict[str, Any]]:
+        candidates = self._normalize_list_field(raw, max_items=8)
+        filtered = [item for item in candidates if self._is_valid_contribution_item(item)]
+
+        deduped: list[dict[str, Any]] = []
+        seen_token_sets: list[set[str]] = []
+        for item in filtered:
+            value = item.get("value", "")
+            tokens = {
+                token
+                for token in re.findall(r"[a-z0-9]+", value.lower())
+                if len(token) > 3 and token not in PAGE_MATCH_STOPWORDS
+            }
+            if tokens and any(
+                len(tokens & seen) / max(1, min(len(tokens), len(seen))) >= 0.72
+                for seen in seen_token_sets
+            ):
+                continue
+
+            deduped.append(item)
+            seen_token_sets.append(tokens)
+            if len(deduped) >= 3:
+                break
+
+        return deduped
+
     def _extract_metrics_from_text(self, text: str) -> list[str]:
         if not text:
             return []
@@ -193,12 +508,15 @@ class LLMExtractionService:
             ("recall", "recall"),
             ("map", "mAP"),
             ("mrr", "MRR"),
+            ("meteor", "METEOR"),
+            ("ter", "TER"),
+            ("perplexity", "perplexity"),
         ]
 
         normalized = text.lower()
         metrics: list[str] = []
         for needle, label in keywords:
-            if re.search(rf"\\b{re.escape(needle)}\\b", normalized):
+            if re.search(rf"(?<![a-z]){re.escape(needle)}(?![a-z])", normalized):
                 metrics.append(label)
 
         deduped: list[str] = []
@@ -210,6 +528,46 @@ class LLMExtractionService:
             deduped.append(item)
             seen.add(key)
             if len(deduped) >= 4:
+                break
+
+        return deduped
+
+    def _extract_benchmarks_from_text(self, text: str) -> list[str]:
+        if not isinstance(text, str) or not text.strip():
+            return []
+
+        lowered = self._repair_joined_extraction_text(text).lower()
+        candidates: list[str] = []
+
+        benchmark_patterns = [
+            (r"\boriginal transformer\b|\btransformer baseline\b|\bbaseline network\b", "Transformer baseline"),
+            (r"\bstate-of-the-art\b", "state-of-the-art baseline"),
+            (r"\bconventional smt\b|\bsmt system\b", "SMT system"),
+            (r"\benc-dec\b|\bencoder-decoder\b", "encoder-decoder baseline"),
+        ]
+
+        for pattern, label in benchmark_patterns:
+            if re.search(pattern, lowered):
+                candidates.append(label)
+
+        return self._dedupe_strings(candidates, max_items=3)
+
+    @staticmethod
+    def _dedupe_strings(values: list[str], max_items: int) -> list[str]:
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            if not isinstance(value, str):
+                continue
+
+            normalized = re.sub(r"\s+", " ", value).strip()
+            key = normalized.lower()
+            if not normalized or key in seen:
+                continue
+
+            deduped.append(normalized)
+            seen.add(key)
+            if len(deduped) >= max_items:
                 break
 
         return deduped
@@ -262,7 +620,7 @@ class LLMExtractionService:
                 break
 
         limitations_values: list[str] = []
-        if discussion and re.search(r"limitation|future|constraint|assumption|weakness|challenge", discussion, re.IGNORECASE):
+        if discussion and self._is_valid_limitation_item({"value": discussion, "evidence": []}):
             limitations_values.append(discussion)
 
         datasets: list[str] = []
@@ -331,12 +689,24 @@ class LLMExtractionService:
         if not isinstance(text, str) or not text.strip():
             return []
 
-        parts = re.split(r"(?<=[.!?])\s+", text)
+        repaired = self._repair_joined_extraction_text(text)
+        parts = re.split(r"(?<=[.!?])\s+", repaired)
         sentences: list[str] = []
         for part in parts:
-            normalized = self._normalize_free_text(part, max_chars=220)
-            if normalized:
-                sentences.append(normalized)
+            subparts = [part]
+            claim_pattern = (
+                r"\b(?:in this (?:work|paper|study)|"
+                r"we\s+(?:propose|present|introduce|replace|achieve|show|report|benchmark|evaluate|obtain|develop|improve)|"
+                r"our\s+(?:model|method|architecture|approach|network|results?))\b"
+            )
+            for match in re.finditer(claim_pattern, part, flags=re.IGNORECASE):
+                if match.start() > 0:
+                    subparts.append(part[match.start():])
+
+            for subpart in subparts:
+                normalized = self._normalize_free_text(subpart, max_chars=220)
+                if normalized:
+                    sentences.append(normalized)
 
         return sentences
 
@@ -347,16 +717,114 @@ class LLMExtractionService:
                 return sentence
         return None
 
+    @staticmethod
+    def _is_valid_dataset_name(value: str) -> bool:
+        if not isinstance(value, str) or not value.strip():
+            return False
+
+        normalized = re.sub(r"\s+", " ", value).strip()
+        lowered = normalized.lower()
+        rejected = {
+            "acl",
+            "emnlp",
+            "naacl",
+            "nips",
+            "neurips",
+            "iclr",
+            "icml",
+            "cvpr",
+            "proceedings",
+        }
+        if any(lowered == item or lowered.startswith(f"{item} ") for item in rejected):
+            return False
+
+        accepted_patterns = [
+            r"\bwmt\b",
+            r"\bnewstest\b",
+            r"\bimagenet\b",
+            r"\bcoco\b",
+            r"\bsquad\b",
+            r"\bglue\b",
+            r"\bmnli\b",
+            r"\bcifar\b",
+            r"\blibrispeech\b",
+            r"\bwikitext\b",
+            r"\beuroparl\b",
+            r"\bcommon crawl\b",
+            r"\bnews commentary\b",
+            r"\bgigaword\b",
+            r"\bun\b",
+        ]
+        return any(re.search(pattern, lowered) for pattern in accepted_patterns)
+
+    @staticmethod
+    def _normalize_metric_name(value: str) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+
+        lowered = value.strip().lower()
+        metric_map = {
+            "bleu": "BLEU",
+            "bleu score": "BLEU",
+            "rouge": "ROUGE",
+            "f1": "F1",
+            "accuracy": "accuracy",
+            "precision": "precision",
+            "recall": "recall",
+            "map": "mAP",
+            "mrr": "MRR",
+            "meteor": "METEOR",
+            "ter": "TER",
+            "perplexity": "perplexity",
+        }
+        for key, label in metric_map.items():
+            if re.search(rf"(?<![a-z]){re.escape(key)}(?![a-z])", lowered):
+                return label
+
+        return None
+
     def _extract_datasets_from_text(self, text: str) -> list[str]:
         if not isinstance(text, str) or not text.strip():
             return []
 
+        repaired = self._repair_joined_extraction_text(text)
         candidates: list[str] = []
 
-        for match in re.findall(r"\b[A-Z]{2,}\s?\d{4}\b", text):
-            dataset = self._normalize_free_text(match, max_chars=60)
-            if dataset:
-                candidates.append(dataset)
+        language_pair = r"English\s*(?:-|to)?\s*to\s*(?:German|French|Czech|Romanian)|English-to-(?:German|French|Czech|Romanian)"
+        for match in re.finditer(
+            rf"\bWMT'?\s*(?:19|20)?(\d{{2}}|\d{{4}})(?:\s+({language_pair}))?",
+            repaired,
+            flags=re.IGNORECASE,
+        ):
+            year = match.group(1)
+            if len(year) == 2:
+                year = f"20{year}" if int(year) < 50 else f"19{year}"
+
+            pair = match.group(2)
+            if pair:
+                pair_match = re.search(
+                    r"English\s*-?\s*to\s*-?\s*(German|French|Czech|Romanian)",
+                    pair,
+                    flags=re.IGNORECASE,
+                )
+                if pair_match:
+                    candidates.append(f"WMT {year} English-to-{pair_match.group(1).title()}")
+                else:
+                    candidates.append(f"WMT {year}")
+            else:
+                candidates.append(f"WMT {year}")
+
+        for match in re.finditer(r"\bWMT'?\s*(?:19|20)?(\d{2}|\d{4})", repaired, flags=re.IGNORECASE):
+            year = match.group(1)
+            if len(year) == 2:
+                year = f"20{year}" if int(year) < 50 else f"19{year}"
+            window = repaired[match.start():match.start() + 260]
+            for language in ["German", "French", "Czech", "Romanian"]:
+                if re.search(rf"English\s*-?\s*to\s*-?\s*{language}", window, flags=re.IGNORECASE):
+                    candidates.append(f"WMT {year} English-to-{language}")
+
+        for match in re.finditer(r"\bnewstest\s*[- ]?\s*(\d{4})\b", repaired, flags=re.IGNORECASE):
+            candidates.append(f"newstest {match.group(1)}")
 
         known_dataset_tokens = [
             "ImageNet",
@@ -368,17 +836,36 @@ class LLMExtractionService:
             "CIFAR-100",
             "LibriSpeech",
             "WikiText",
-            "WMT",
+            "Europarl",
+            "Common Crawl",
+            "News Commentary",
+            "Gigaword",
         ]
 
-        lowered = text.lower()
+        lowered = repaired.lower()
         for token in known_dataset_tokens:
             if token.lower() in lowered:
                 candidates.append(token)
 
+        if re.search(r"\bUN\b", repaired):
+            candidates.append("UN")
+
+        if "wmt" in lowered and not any(candidate.lower().startswith("wmt ") for candidate in candidates):
+            candidates.append("WMT")
+
         deduped: list[str] = []
         seen: set[str] = set()
+        specific_wmt_years = {
+            match.group(1)
+            for candidate in candidates
+            if (match := re.match(r"^WMT (\d{4}) English-to-", candidate, flags=re.IGNORECASE))
+        }
         for item in candidates:
+            if not self._is_valid_dataset_name(item):
+                continue
+            generic_match = re.match(r"^WMT (\d{4})$", item, flags=re.IGNORECASE)
+            if generic_match and generic_match.group(1) in specific_wmt_years:
+                continue
             key = item.lower()
             if key in seen:
                 continue
@@ -408,45 +895,14 @@ class LLMExtractionService:
             ["problem", "task", "challenge", "goal", "aim"],
         ) or all_sentences[0]
 
-        method_value = self._pick_sentence_by_keywords(
-            all_sentences,
-            [
-                "propose",
-                "present",
-                "introduce",
-                "develop",
-                "method",
-                "model",
-                "approach",
-                "framework",
-                "architecture",
-            ],
-        )
+        method_value = self._pick_method_sentence(all_sentences)
         if method_value is None and len(all_sentences) > 1:
-            method_value = all_sentences[1]
+            method_value = self._pick_sentence_by_keywords(
+                all_sentences,
+                ["method", "model", "approach", "framework", "architecture"],
+            )
 
-        contribution_keywords = [
-            "propose",
-            "present",
-            "introduce",
-            "contribution",
-            "we show",
-            "demonstrate",
-            "achieve",
-            "improve",
-            "outperform",
-            "state-of-the-art",
-            "sota",
-            "novel",
-        ]
-
-        contribution_candidates: list[str] = []
-        for sentence in all_sentences:
-            lowered = sentence.lower()
-            if any(k in lowered for k in contribution_keywords):
-                contribution_candidates.append(sentence)
-            if len(contribution_candidates) >= 3:
-                break
+        contribution_candidates = self._pick_contribution_sentences(all_sentences, max_items=8)
 
         limitation_keywords = [
             "limitation",
@@ -492,13 +948,17 @@ class LLMExtractionService:
                 ]
             )
 
-            if has_limit_keyword or (has_contrast_signal and has_constraint_signal):
+            if (
+                has_limit_keyword
+                or (has_contrast_signal and has_constraint_signal)
+            ) and self._is_valid_limitation_item({"value": sentence, "evidence": []}):
                 limitation_candidates.append(sentence)
             if len(limitation_candidates) >= 2:
                 break
 
         datasets = self._extract_datasets_from_text(source_text)
         metrics = self._extract_metrics_from_text(source_text)
+        benchmarks = self._extract_benchmarks_from_text(source_text)
 
         coerced = {
             "problem": {
@@ -527,7 +987,7 @@ class LLMExtractionService:
                 "value": {
                     "datasets": datasets,
                     "metrics": metrics,
-                    "benchmarks": [],
+                    "benchmarks": benchmarks,
                 },
                 "evidence": [],
             },
@@ -577,10 +1037,7 @@ class LLMExtractionService:
         if not isinstance(contributions, list):
             contributions = []
         if len(contributions) == 0:
-            fallback_contributions = self._normalize_list_field(
-                fallback.get("contributions"),
-                max_items=3,
-            )
+            fallback_contributions = self._normalize_contributions_field(fallback.get("contributions"))
             if fallback_contributions:
                 normalized["contributions"] = fallback_contributions
                 filled_keys.append("contributions")
@@ -589,16 +1046,13 @@ class LLMExtractionService:
         if not isinstance(limitations, list):
             limitations = []
         if len(limitations) == 0:
-            fallback_limitations = self._normalize_list_field(
-                fallback.get("limitations"),
-                max_items=2,
-            )
+            fallback_limitations = self._normalize_limitations_field(fallback.get("limitations"))
             if fallback_limitations:
                 normalized["limitations"] = fallback_limitations
                 filled_keys.append("limitations")
 
         evaluation_setup = normalized.get("evaluation_setup")
-        fallback_eval = self._normalize_evaluation_setup(fallback.get("evaluation_setup"), pages)
+        fallback_eval = self._normalize_evaluation_setup(fallback.get("evaluation_setup"), pages, input_text)
         if (
             isinstance(evaluation_setup, dict)
             and isinstance(fallback_eval, dict)
@@ -961,7 +1415,10 @@ class LLMExtractionService:
     def run_for_canonical_document(self, canonical_document_id: UUID) -> ExtractionRun:
         canonical = self._get_canonical_or_raise(canonical_document_id)
 
-        cached_run = self.repo.get_latest_completed_by_canonical_document_id(canonical.id)
+        cached_run = self.repo.get_latest_completed_by_canonical_document_id(
+            canonical.id,
+            prompt_version=PROMPT_VERSION,
+        )
         if cached_run:
             logger.info("[LLM SERVICE] Cache hit for canonical_document_id=%s", canonical.id)
             setattr(cached_run, "cache_hit", True)
@@ -1447,6 +1904,7 @@ class LLMExtractionService:
         self,
         raw: Any,
         pages: list[dict],
+        source_text: str = "",
     ) -> dict[str, Any]:
         empty_value = {
             "datasets": [],
@@ -1454,31 +1912,47 @@ class LLMExtractionService:
             "benchmarks": [],
         }
 
-        if raw is None:
-            return {"value": empty_value, "evidence": []}
-
         if not isinstance(raw, dict):
-            return {"value": empty_value, "evidence": []}
+            raw = {}
 
         value = raw.get("value")
         if not isinstance(value, dict):
             value = {}
 
-        datasets = [
-            x.strip()
+        raw_datasets = [
+            re.sub(r"\s+", " ", x).strip()
             for x in value.get("datasets", [])
-            if isinstance(x, str) and x.strip() and not self._is_placeholder_text(x)
+            if isinstance(x, str)
+            and x.strip()
+            and not self._is_placeholder_text(x)
+            and self._is_valid_dataset_name(x)
         ]
-        metrics = [
-            x.strip()
-            for x in value.get("metrics", [])
-            if isinstance(x, str) and x.strip() and not self._is_placeholder_text(x)
-        ]
-        benchmarks = [
-            x.strip()
+        datasets = self._dedupe_strings(
+            raw_datasets + self._extract_datasets_from_text(source_text),
+            max_items=3,
+        )
+
+        raw_metrics: list[str] = []
+        for x in value.get("metrics", []):
+            metric = self._normalize_metric_name(x) if isinstance(x, str) else None
+            if metric:
+                raw_metrics.append(metric)
+        metrics = self._dedupe_strings(
+            raw_metrics + self._extract_metrics_from_text(source_text),
+            max_items=4,
+        )
+
+        raw_benchmarks = [
+            normalized
             for x in value.get("benchmarks", [])
-            if isinstance(x, str) and x.strip() and not self._is_placeholder_text(x)
+            if isinstance(x, str)
+            and (normalized := self._normalize_free_text(x, max_chars=80))
+            and not self._is_placeholder_text(normalized)
         ]
+        benchmarks = self._dedupe_strings(
+            raw_benchmarks + self._extract_benchmarks_from_text(source_text),
+            max_items=3,
+        )
 
         evidence = self._normalize_evidence(raw.get("evidence"))
 
@@ -1561,10 +2035,10 @@ class LLMExtractionService:
 
         normalized = {
             "problem": self._normalize_scalar_field(raw.get("problem")),
-            "method": self._normalize_scalar_field(raw.get("method")),
-            "contributions": self._normalize_list_field(raw.get("contributions"), max_items=3),
-            "limitations": self._normalize_list_field(raw.get("limitations"), max_items=2),
-            "evaluation_setup": self._normalize_evaluation_setup(raw.get("evaluation_setup"), pages),
+            "method": self._normalize_method_field(raw.get("method")),
+            "contributions": self._normalize_contributions_field(raw.get("contributions")),
+            "limitations": self._normalize_limitations_field(raw.get("limitations")),
+            "evaluation_setup": self._normalize_evaluation_setup(raw.get("evaluation_setup"), pages, input_text),
         }
         normalized = self._enrich_missing_fields_from_input_text(normalized, input_text, pages)
         normalized = self._ensure_evidence_from_values(normalized, pages)
