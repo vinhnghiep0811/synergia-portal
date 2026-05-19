@@ -35,20 +35,29 @@ class PublishService:
     def get_publish_preview(self, paper_id: UUID) -> PublishMetadataPreviewResponse:
         paper = self._get_paper_or_raise(paper_id)
         canonical = self._get_canonical_for_paper(paper)
-        extraction = self._get_latest_extraction_for_paper(paper)
+        latest_publish = self._get_latest_published_for_canonical(paper)
+        extraction = None
 
-        base_metadata = self._build_base_metadata(
-            paper=paper,
-            canonical=canonical,
-            extraction=extraction,
-        )
+        if latest_publish:
+            base_metadata = self._build_base_metadata_from_publish_version(latest_publish)
+            source_extraction_id = latest_publish.source_extraction_id
+            if source_extraction_id:
+                extraction = self._get_extraction_by_id(source_extraction_id)
+        else:
+            extraction = self._get_latest_extraction_for_paper(paper)
+            base_metadata = self._build_base_metadata(
+                paper=paper,
+                canonical=canonical,
+                extraction=extraction,
+            )
+            source_extraction_id = extraction.id if extraction else None
         is_editing_draft = self._has_draft_metadata(paper)
         merged_metadata = self._apply_draft_overrides(base_metadata, paper)
 
         return PublishMetadataPreviewResponse(
             paper_id=paper.id,
             canonical_document_id=paper.canonical_document_id,
-            source_extraction_id=extraction.id if extraction else None,
+            source_extraction_id=source_extraction_id,
             publication_status=paper.publication_status,
             is_editing_draft=is_editing_draft,
             semantic_status=(canonical.enrichment_status if canonical else None),
@@ -225,6 +234,31 @@ class PublishService:
             .first()
         )
 
+    def _get_latest_published_for_canonical(
+        self,
+        paper: PaperRecord,
+    ) -> PublishVersion | None:
+        if not paper.canonical_document_id:
+            return None
+
+        return (
+            self.db.query(PublishVersion)
+            .join(PaperRecord, PublishVersion.paper_record_id == PaperRecord.id)
+            .filter(
+                PaperRecord.canonical_document_id == paper.canonical_document_id,
+                PublishVersion.status == "published",
+            )
+            .order_by(PublishVersion.published_at.desc(), PublishVersion.created_at.desc())
+            .first()
+        )
+
+    def _get_extraction_by_id(self, extraction_id: UUID) -> ExtractionRun | None:
+        return (
+            self.db.query(ExtractionRun)
+            .filter(ExtractionRun.id == extraction_id)
+            .first()
+        )
+
     def _get_latest_extraction_for_paper(self, paper: PaperRecord) -> ExtractionRun | None:
         if not paper.canonical_document_id:
             return None
@@ -276,6 +310,25 @@ class PublishService:
             contributions=contributions,
             limitations=limitations,
             evaluation_setup=evaluation_setup,
+        )
+
+    def _build_base_metadata_from_publish_version(
+        self,
+        publish_version: PublishVersion,
+    ) -> PublishMetadataPayload:
+        return PublishMetadataPayload(
+            title=self._clean_text(publish_version.title_override),
+            abstract=self._clean_text(publish_version.abstract_override),
+            venue=self._clean_text(publish_version.venue_override),
+            year=publish_version.year_override,
+            authors=self._clean_str_list(publish_version.authors_override),
+            problem_statement=self._extract_scalar_value(publish_version.problem_statement_final),
+            main_method=self._extract_scalar_value(publish_version.main_method_final),
+            contributions=self._extract_list_values(publish_version.contributions_final),
+            limitations=self._extract_list_values(publish_version.limitations_final),
+            evaluation_setup=self._extract_evaluation_setup(
+                publish_version.evaluation_setup_final
+            ),
         )
 
     def _has_draft_metadata(self, paper: PaperRecord) -> bool:
