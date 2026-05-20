@@ -78,6 +78,10 @@ SEARCH_STOPWORDS = {
     "systems",
     "paper",
     "study",
+    "model",
+    "models",
+    "approach",
+    "approaches",
 }
 
 TECHNICAL_METHOD_TERMS = [
@@ -100,6 +104,9 @@ TECHNICAL_METHOD_TERMS = [
     "architecture",
     "technique",
     "techniques",
+    "hyperparameter",
+    "hyperparameters",
+    "batching",
     "sequence-to-sequence",
     "sequence to sequence",
 ]
@@ -113,6 +120,10 @@ TECHNICAL_METHOD_SECTION_TERMS = [
     "inference",
     "implementation",
     "architecture",
+    "training data",
+    "training technique",
+    "batching",
+    "hyperparameter",
     "model",
     "method",
     "approach",
@@ -125,13 +136,52 @@ TECHNICAL_METHOD_CONTENT_TERMS = [
     "warmup",
     "label smoothing",
     "dropout",
+    "adadelta",
+    "rmsprop",
+    "sgd",
     "regularization",
     "regularisation",
     "beam search",
+    "byte-pair",
+    "bpe",
     "batch",
+    "batching",
     "gradient",
+    "gpu",
+    "checkpoint",
+    "epoch",
     "schedule",
     "decoding",
+    "optimization",
+    "optimisation",
+    "technique",
+]
+
+TECHNICAL_METHOD_WEAK_SECTION_TYPES = {
+    "abstract",
+    "introduction",
+    "background",
+    "related_work",
+}
+
+TECHNICAL_METHOD_SECONDARY_SECTION_TYPES = {
+    "evaluation",
+    "results",
+    "discussion",
+    "conclusion",
+}
+
+OPTIMIZATION_EVIDENCE_TERMS = [
+    "optimization",
+    "optimisation",
+    "optimizer",
+    "adam",
+    "adadelta",
+    "rmsprop",
+    "sgd",
+    "learning rate",
+    "warmup",
+    "schedule",
 ]
 
 
@@ -199,6 +249,22 @@ class SearchService:
             rows_query = rows_query.filter(DocumentChunk.canonical_document_id == canonical_document_id)
 
         rows = rows_query.order_by(distance).limit(candidate_limit).all()
+        lexical_rows = self._semantic_lexical_candidate_rows(
+            base_query=rows_query,
+            query=raw_query,
+            query_type=query_type,
+            distance=distance,
+            candidate_limit=candidate_limit,
+        )
+
+        if lexical_rows:
+            rows_by_chunk_id = {
+                str(row[0].id): row
+                for row in rows
+            }
+            for row in lexical_rows:
+                rows_by_chunk_id.setdefault(str(row[0].id), row)
+            rows = list(rows_by_chunk_id.values())
 
         if not rows:
             return []
@@ -219,8 +285,13 @@ class SearchService:
             query_boost = self._query_aware_boost(raw_query, chunk)
             lexical_boost = self._lexical_relevance_boost(raw_query, chunk)
 
-            final_relevance = self._clip_score(
-                similarity + section_boost + section_penalty + query_boost + lexical_boost
+            final_relevance = self._combined_relevance_score(
+                query_type=query_type,
+                similarity=similarity,
+                section_boost=section_boost,
+                section_penalty=section_penalty,
+                query_boost=query_boost,
+                lexical_boost=lexical_boost,
             )
 
             candidates.append(
@@ -294,6 +365,99 @@ class SearchService:
 
         return "general"
 
+    def _semantic_lexical_candidate_rows(
+        self,
+        base_query,
+        query: str,
+        query_type: str,
+        distance,
+        candidate_limit: int,
+    ) -> list[Any]:
+        terms = self._semantic_lexical_terms(query, query_type)
+        if not terms:
+            return []
+
+        filters = []
+        for term in terms:
+            pattern = self._contains_pattern(term)
+            filters.extend(
+                [
+                    DocumentChunk.content.ilike(pattern, escape="\\"),
+                    DocumentChunk.section.ilike(pattern, escape="\\"),
+                    DocumentChunk.section_full_path.ilike(pattern, escape="\\"),
+                ]
+            )
+
+        return (
+            base_query
+            .filter(or_(*filters))
+            .order_by(distance)
+            .limit(candidate_limit)
+            .all()
+        )
+
+    def _semantic_lexical_terms(self, query: str, query_type: str) -> list[str]:
+        q = (query or "").lower()
+        terms: set[str] = set()
+
+        if query_type == "technical_method":
+            if any(term in q for term in ["optimization", "optimisation", "optimize", "optimise", "technique"]):
+                terms.update(OPTIMIZATION_EVIDENCE_TERMS)
+                terms.update(
+                    {
+                        "training",
+                        "training technique",
+                        "batching",
+                        "dropout",
+                        "label smoothing",
+                    }
+                )
+
+            if "sequence" in q or "translation" in q or "decoding" in q or "generation" in q:
+                terms.update(
+                    {
+                        "beam search",
+                        "generation",
+                        "decoding",
+                        "encoder",
+                        "decoder",
+                    }
+                )
+
+            terms.update(
+                term
+                for term in TECHNICAL_METHOD_TERMS
+                if term in q
+            )
+        else:
+            query_tokens = self._search_tokens(query)
+            if len(query_tokens) >= 3:
+                terms.update(
+                    token
+                    for token in query_tokens
+                    if len(token) >= 6
+                )
+
+        return sorted(
+            terms,
+            key=lambda term: (
+                0 if term in OPTIMIZATION_EVIDENCE_TERMS else 1,
+                0 if " " in term else 1,
+                -len(term),
+                term,
+            ),
+        )[:18]
+
+    @staticmethod
+    def _contains_pattern(value: str) -> str:
+        escaped = (
+            (value or "")
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        return f"%{escaped}%"
+
     def _section_boost(self, section_type: str | None) -> float:
         if not section_type:
             return 0.0
@@ -308,6 +472,33 @@ class SearchService:
                 return -0.04
 
         return 0.0
+
+    def _combined_relevance_score(
+        self,
+        query_type: str,
+        similarity: float,
+        section_boost: float,
+        section_penalty: float,
+        query_boost: float,
+        lexical_boost: float,
+    ) -> float:
+        if query_type == "technical_method":
+            base_weight = 0.78
+            positive_cap = 0.24
+            negative_floor = -0.24
+        elif query_type == "comparison":
+            base_weight = 0.84
+            positive_cap = 0.18
+            negative_floor = -0.18
+        else:
+            base_weight = 0.86
+            positive_cap = 0.20
+            negative_floor = -0.20
+
+        adjustments = section_boost + section_penalty + query_boost + lexical_boost
+        adjustments = min(max(adjustments, negative_floor), positive_cap)
+
+        return self._clip_score(similarity * base_weight + adjustments)
 
     def _query_aware_boost(self, query: str, chunk: DocumentChunk) -> float:
         q = query.lower()
@@ -359,29 +550,28 @@ class SearchService:
                 boost += 0.06
 
         if any(t in q for t in TECHNICAL_METHOD_TERMS):
-            searchable_section = f"{section} {full_path}"
-            has_technical_section = any(
-                term in searchable_section
-                for term in TECHNICAL_METHOD_SECTION_TERMS
-            )
-            has_technical_content = any(
-                term in content
-                for term in TECHNICAL_METHOD_CONTENT_TERMS
-            )
+            technical_signal = self._technical_method_signal_score(query, chunk)
+            boost += min(technical_signal * 0.22, 0.22)
 
             if section_type == "method":
-                boost += 0.12
-            if has_technical_section:
-                boost += 0.10
-            if has_technical_content:
-                boost += 0.10
+                boost += 0.04
 
-            if section_type == "abstract" and not has_technical_content:
+            if section_type in TECHNICAL_METHOD_WEAK_SECTION_TYPES:
+                if technical_signal < 0.30:
+                    boost -= 0.16
+                elif technical_signal < 0.50:
+                    boost -= 0.08
+
+            if section_type in TECHNICAL_METHOD_SECONDARY_SECTION_TYPES and technical_signal < 0.30:
                 boost -= 0.08
-            if section_type in {"evaluation", "results"} and not has_technical_content:
-                boost -= 0.07
-            if section_type in {"introduction", "background", "related_work"} and not has_technical_content:
-                boost -= 0.03
+
+            if "optimization" in q or "optimisation" in q:
+                has_optimization_evidence = any(
+                    term in content or term in section or term in full_path
+                    for term in OPTIMIZATION_EVIDENCE_TERMS
+                )
+                if not has_optimization_evidence and section_type in TECHNICAL_METHOD_WEAK_SECTION_TYPES:
+                    boost -= 0.06
 
         # Generic subsection matching
         searchable_section = f"{section} {full_path}"
@@ -409,6 +599,51 @@ class SearchService:
                 boost += 0.06
 
         return boost
+
+    def _technical_method_signal_score(self, query: str, chunk: DocumentChunk) -> float:
+        q = (query or "").lower()
+        section_type = (chunk.section_type or "").lower()
+        section = (chunk.section or "").lower()
+        full_path = (getattr(chunk, "section_full_path", "") or "").lower()
+        content = (chunk.content or "").lower()
+        section_text = f"{section} {full_path}"
+        searchable = f"{section_text} {content}"
+
+        score = 0.0
+
+        if section_type == "method":
+            score += 0.25
+
+        if any(term in section_text for term in TECHNICAL_METHOD_SECTION_TERMS):
+            score += 0.30
+
+        content_hits = sum(
+            1
+            for term in TECHNICAL_METHOD_CONTENT_TERMS
+            if term in content
+        )
+        score += min(content_hits * 0.07, 0.35)
+
+        query_tokens = self._search_tokens(query)
+        searchable_tokens = self._search_tokens(searchable)
+        if query_tokens and searchable_tokens:
+            coverage = len(query_tokens & searchable_tokens) / max(len(query_tokens), 1)
+            score += min(coverage * 0.20, 0.20)
+
+        if "optimization" in q or "optimisation" in q:
+            if any(term in searchable for term in OPTIMIZATION_EVIDENCE_TERMS):
+                score += 0.18
+            else:
+                score -= 0.08
+
+        if "sequence" in q or "translation" in q:
+            if any(term in searchable for term in ["beam search", "generation", "decoding", "encoder", "decoder"]):
+                score += 0.08
+
+        if any(phrase in searchable for phrase in ["optimization technique", "training technique"]):
+            score += 0.12
+
+        return self._clip_score(score)
 
     def _is_hard_excluded_section(self, chunk: DocumentChunk) -> bool:
         section = (chunk.section or "").lower()
@@ -603,6 +838,7 @@ class SearchService:
     def _expanded_search_tokens(self, query: str) -> set[str]:
         tokens = self._search_tokens(query)
         q = (query or "").lower()
+        is_technical_method_query = any(term in q for term in TECHNICAL_METHOD_TERMS)
 
         if any(term in q for term in ["optimization", "optimisation", "optimize", "optimise", "technique"]):
             tokens.update(
@@ -622,7 +858,9 @@ class SearchService:
             )
 
         if "sequence" in q or "translation" in q:
-            tokens.update({"encoder", "decoder", "attention", "bleu", "wmt"})
+            tokens.update({"encoder", "decoder"})
+            if not is_technical_method_query:
+                tokens.update({"attention", "bleu", "wmt"})
 
         return tokens
 
@@ -647,13 +885,18 @@ class SearchService:
 
         overlap = len(query_tokens & chunk_tokens)
         coverage = overlap / max(len(query_tokens), 1)
-        boost = min(coverage * 0.12 + overlap * 0.01, 0.16)
+        query_type = self._detect_query_type(query)
+        if query_type == "technical_method":
+            boost = min(coverage * 0.06 + overlap * 0.006, 0.08)
+            boost += min(self._technical_method_signal_score(query, chunk) * 0.12, 0.14)
+        else:
+            boost = min(coverage * 0.12 + overlap * 0.01, 0.16)
 
         section_text = f"{chunk.section or ''} {getattr(chunk, 'section_full_path', '') or ''}".lower()
         if any(term in section_text for term in TECHNICAL_METHOD_SECTION_TERMS):
             boost += 0.03
 
-        return min(boost, 0.18)
+        return min(boost, 0.20 if query_type == "technical_method" else 0.18)
 
     def _semantic_evidence_snippet(self, query: str, content: str | None, window: int = 520) -> str:
         if not content:
@@ -728,8 +971,8 @@ class SearchService:
 
         best_match: tuple[float, int] | None = None
         for page in pages:
-            page_num = page.get("page")
-            if not isinstance(page_num, int):
+            page_num = self._page_number_from_record(page)
+            if page_num is None:
                 continue
 
             normalized_page = self._normalize_page_match_text(page.get("text") or "")
@@ -756,6 +999,23 @@ class SearchService:
                 best_match = (coverage, page_num)
 
         return best_match[1] if best_match else None
+
+    @staticmethod
+    def _page_number_from_record(page: dict) -> int | None:
+        for key in ("page", "page_number", "page_no", "number"):
+            value = page.get(key)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str) and value.strip().isdigit():
+                return int(value.strip())
+
+        page_index = page.get("page_index")
+        if isinstance(page_index, int):
+            return page_index + 1
+        if isinstance(page_index, str) and page_index.strip().isdigit():
+            return int(page_index.strip()) + 1
+
+        return None
 
     def _load_pages_for_canonical(
         self,
@@ -784,7 +1044,12 @@ class SearchService:
             storage = StorageService()
             pages_bytes = storage.download_by_storage_path(paper.page_text_json_storage_path)
             pages = json.loads(pages_bytes.decode("utf-8"))
-            page_cache[cache_key] = pages if isinstance(pages, list) else []
+            if isinstance(pages, list):
+                page_cache[cache_key] = pages
+            elif isinstance(pages, dict) and isinstance(pages.get("pages"), list):
+                page_cache[cache_key] = pages["pages"]
+            else:
+                page_cache[cache_key] = []
         except Exception as exc:
             logger.warning(
                 "[search] Failed to load pages.json for canonical_id=%s error=%s",
