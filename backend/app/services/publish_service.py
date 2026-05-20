@@ -131,7 +131,8 @@ class PublishService:
 
         latest_version = (
             self.db.query(PublishVersion)
-            .filter(PublishVersion.paper_record_id == paper.id)
+            .join(PaperRecord, PublishVersion.paper_record_id == PaperRecord.id)
+            .filter(PaperRecord.canonical_document_id == paper.canonical_document_id)
             .order_by(PublishVersion.version_number.desc(), PublishVersion.created_at.desc())
             .first()
         )
