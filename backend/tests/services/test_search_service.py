@@ -84,6 +84,9 @@ class SearchServiceEvidenceTests(unittest.TestCase):
             section_penalty=self.service._section_penalty(intro_chunk.section),
             query_boost=self.service._query_aware_boost(query, intro_chunk),
             lexical_boost=self.service._lexical_relevance_boost(query, intro_chunk),
+            query_coverage=self.service._query_coverage_score(query, intro_chunk),
+            aspect_coverage=self.service._technical_aspect_coverage(query, intro_chunk),
+            phrase_score=self.service._phrase_match_score(query, intro_chunk),
         )
         technique_score = self.service._combined_relevance_score(
             query_type="technical_method",
@@ -92,11 +95,60 @@ class SearchServiceEvidenceTests(unittest.TestCase):
             section_penalty=self.service._section_penalty(technique_chunk.section),
             query_boost=self.service._query_aware_boost(query, technique_chunk),
             lexical_boost=self.service._lexical_relevance_boost(query, technique_chunk),
+            query_coverage=self.service._query_coverage_score(query, technique_chunk),
+            aspect_coverage=self.service._technical_aspect_coverage(query, technique_chunk),
+            phrase_score=self.service._phrase_match_score(query, technique_chunk),
         )
 
         self.assertGreater(technique_score, intro_score)
         self.assertLess(technique_score, 1.0)
         self.assertLess(intro_score, 1.0)
+
+    def test_technical_relevance_requires_query_context_not_only_phrase_match(self) -> None:
+        query = "Optimization techniques for sequence-to-sequence translation systems"
+        unrelated_chunk = SimpleNamespace(
+            section="Training",
+            section_full_path="Training",
+            section_type="other",
+            content=(
+                "We tried several optimization techniques such as Adam and "
+                "RMSProp for image classification."
+            ),
+        )
+        contextual_chunk = SimpleNamespace(
+            section="Optimization",
+            section_full_path="Optimization",
+            section_type="other",
+            content=(
+                "For neural machine translation, the encoder decoder model uses "
+                "Adam optimization and a learning rate schedule during training."
+            ),
+        )
+
+        unrelated_score = self.service._combined_relevance_score(
+            query_type="technical_method",
+            similarity=0.86,
+            section_boost=self.service._section_boost(unrelated_chunk.section_type),
+            section_penalty=self.service._section_penalty(unrelated_chunk.section),
+            query_boost=self.service._query_aware_boost(query, unrelated_chunk),
+            lexical_boost=self.service._lexical_relevance_boost(query, unrelated_chunk),
+            query_coverage=self.service._query_coverage_score(query, unrelated_chunk),
+            aspect_coverage=self.service._technical_aspect_coverage(query, unrelated_chunk),
+            phrase_score=self.service._phrase_match_score(query, unrelated_chunk),
+        )
+        contextual_score = self.service._combined_relevance_score(
+            query_type="technical_method",
+            similarity=0.78,
+            section_boost=self.service._section_boost(contextual_chunk.section_type),
+            section_penalty=self.service._section_penalty(contextual_chunk.section),
+            query_boost=self.service._query_aware_boost(query, contextual_chunk),
+            lexical_boost=self.service._lexical_relevance_boost(query, contextual_chunk),
+            query_coverage=self.service._query_coverage_score(query, contextual_chunk),
+            aspect_coverage=self.service._technical_aspect_coverage(query, contextual_chunk),
+            phrase_score=self.service._phrase_match_score(query, contextual_chunk),
+        )
+
+        self.assertGreater(contextual_score, unrelated_score)
 
     def test_technical_query_lexical_terms_focus_on_evidence_terms(self) -> None:
         query = "Optimization techniques for sequence-to-sequence translation systems"

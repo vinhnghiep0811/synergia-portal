@@ -278,12 +278,16 @@ class SearchService:
             if self._is_hard_excluded_section(chunk):
                 continue
 
+            resolved_title = title or title_candidate
             similarity = 1.0 - float(dist if dist is not None else 1.0)
 
             section_boost = self._section_boost(chunk.section_type)
             section_penalty = self._section_penalty(chunk.section)
             query_boost = self._query_aware_boost(raw_query, chunk)
             lexical_boost = self._lexical_relevance_boost(raw_query, chunk)
+            query_coverage = self._query_coverage_score(raw_query, chunk, resolved_title)
+            aspect_coverage = self._technical_aspect_coverage(raw_query, chunk, resolved_title)
+            phrase_score = self._phrase_match_score(raw_query, chunk, resolved_title)
 
             final_relevance = self._combined_relevance_score(
                 query_type=query_type,
@@ -292,12 +296,15 @@ class SearchService:
                 section_penalty=section_penalty,
                 query_boost=query_boost,
                 lexical_boost=lexical_boost,
+                query_coverage=query_coverage,
+                aspect_coverage=aspect_coverage,
+                phrase_score=phrase_score,
             )
 
             candidates.append(
                 {
                     "chunk": chunk,
-                    "title": title or title_candidate,
+                    "title": resolved_title,
                     "similarity": similarity,
                     "relevance": final_relevance,
                     "embedding": chunk.embedding,
@@ -481,24 +488,41 @@ class SearchService:
         section_penalty: float,
         query_boost: float,
         lexical_boost: float,
+        query_coverage: float = 0.0,
+        aspect_coverage: float = 1.0,
+        phrase_score: float = 0.0,
     ) -> float:
         if query_type == "technical_method":
-            base_weight = 0.78
-            positive_cap = 0.24
+            base_score = (
+                similarity * 0.64
+                + query_coverage * 0.16
+                + aspect_coverage * 0.08
+                + phrase_score * 0.04
+            )
+            positive_cap = 0.18
             negative_floor = -0.24
         elif query_type == "comparison":
-            base_weight = 0.84
+            base_score = similarity * 0.82 + query_coverage * 0.10 + phrase_score * 0.03
             positive_cap = 0.18
             negative_floor = -0.18
         else:
-            base_weight = 0.86
+            base_score = similarity * 0.84 + query_coverage * 0.08 + phrase_score * 0.03
             positive_cap = 0.20
             negative_floor = -0.20
 
         adjustments = section_boost + section_penalty + query_boost + lexical_boost
         adjustments = min(max(adjustments, negative_floor), positive_cap)
+        score = base_score + adjustments
 
-        return self._clip_score(similarity * base_weight + adjustments)
+        if query_type == "technical_method":
+            if query_coverage < 0.35:
+                score -= 0.08
+            if aspect_coverage < 0.50:
+                score -= 0.07
+            if aspect_coverage < 0.34:
+                score -= 0.05
+
+        return self._clip_score(score)
 
     def _query_aware_boost(self, query: str, chunk: DocumentChunk) -> float:
         q = query.lower()
@@ -608,19 +632,22 @@ class SearchService:
         content = (chunk.content or "").lower()
         section_text = f"{section} {full_path}"
         searchable = f"{section_text} {content}"
+        normalized_section_text = self._normalize_search_text(section_text)
+        normalized_content = self._normalize_search_text(content)
+        normalized_searchable = self._normalize_search_text(searchable)
 
         score = 0.0
 
         if section_type == "method":
             score += 0.25
 
-        if any(term in section_text for term in TECHNICAL_METHOD_SECTION_TERMS):
+        if any(self._normalized_term_in_text(term, normalized_section_text) for term in TECHNICAL_METHOD_SECTION_TERMS):
             score += 0.30
 
         content_hits = sum(
             1
             for term in TECHNICAL_METHOD_CONTENT_TERMS
-            if term in content
+            if self._normalized_term_in_text(term, normalized_content)
         )
         score += min(content_hits * 0.07, 0.35)
 
@@ -631,19 +658,170 @@ class SearchService:
             score += min(coverage * 0.20, 0.20)
 
         if "optimization" in q or "optimisation" in q:
-            if any(term in searchable for term in OPTIMIZATION_EVIDENCE_TERMS):
+            if any(self._normalized_term_in_text(term, normalized_searchable) for term in OPTIMIZATION_EVIDENCE_TERMS):
                 score += 0.18
             else:
                 score -= 0.08
 
         if "sequence" in q or "translation" in q:
-            if any(term in searchable for term in ["beam search", "generation", "decoding", "encoder", "decoder"]):
+            if any(self._normalized_term_in_text(term, normalized_searchable) for term in ["beam search", "generation", "decoding", "encoder", "decoder"]):
                 score += 0.08
 
-        if any(phrase in searchable for phrase in ["optimization technique", "training technique"]):
+        if any(self._normalized_term_in_text(phrase, normalized_searchable) for phrase in ["optimization technique", "training technique"]):
             score += 0.12
 
         return self._clip_score(score)
+
+    def _query_coverage_score(
+        self,
+        query: str,
+        chunk: DocumentChunk,
+        title: str | None = None,
+    ) -> float:
+        query_tokens = self._search_tokens(query)
+        if not query_tokens:
+            return 0.0
+
+        searchable_tokens = self._search_tokens(self._searchable_text(chunk, title))
+        if not searchable_tokens:
+            return 0.0
+
+        exact_hits = len(query_tokens & searchable_tokens)
+        coverage = exact_hits / max(len(query_tokens), 1)
+        phrase_score = self._phrase_match_score(query, chunk, title)
+
+        return self._clip_score(coverage * 0.85 + phrase_score * 0.15)
+
+    def _technical_aspect_coverage(
+        self,
+        query: str,
+        chunk: DocumentChunk,
+        title: str | None = None,
+    ) -> float:
+        q = self._normalize_search_text(query)
+        searchable = self._normalize_search_text(self._searchable_text(chunk, title))
+        aspects: list[list[str]] = []
+
+        if any(term in q for term in ["optimization", "optimisation", "optimize", "optimise", "technique"]):
+            aspects.append(
+                [
+                    "optimization",
+                    "optimisation",
+                    "optimizer",
+                    "technique",
+                    "adam",
+                    "adadelta",
+                    "rmsprop",
+                    "sgd",
+                    "learning rate",
+                    "warmup",
+                    "schedule",
+                ]
+            )
+
+        if "sequence to sequence" in q or "seq2seq" in q or ("sequence" in q and "translation" in q):
+            aspects.append(
+                [
+                    "sequence to sequence",
+                    "seq2seq",
+                    "encoder decoder",
+                    "encoder",
+                    "decoder",
+                    "neural machine translation",
+                    "machine translation",
+                ]
+            )
+
+        if "translation" in q:
+            aspects.append(
+                [
+                    "translation",
+                    "machine translation",
+                    "neural machine translation",
+                    "wmt",
+                    "bleu",
+                    "english german",
+                    "english to german",
+                    "english french",
+                    "english to french",
+                ]
+            )
+
+        if not aspects:
+            return 1.0
+
+        covered = sum(
+            1
+            for alternatives in aspects
+            if any(term in searchable for term in alternatives)
+        )
+
+        return covered / max(len(aspects), 1)
+
+    def _phrase_match_score(
+        self,
+        query: str,
+        chunk: DocumentChunk,
+        title: str | None = None,
+    ) -> float:
+        normalized_query = self._normalize_search_text(query)
+        searchable = self._normalize_search_text(self._searchable_text(chunk, title))
+        if not normalized_query or not searchable:
+            return 0.0
+
+        if normalized_query in searchable:
+            return 1.0
+
+        query_tokens = [
+            token
+            for token in normalized_query.split()
+            if len(token) > 2 and token not in SEARCH_STOPWORDS
+        ]
+        if len(query_tokens) < 2:
+            return 0.0
+
+        best_window = 0
+        max_window = min(len(query_tokens), 6)
+        for window_size in range(max_window, 1, -1):
+            for index in range(0, len(query_tokens) - window_size + 1):
+                phrase = " ".join(query_tokens[index:index + window_size])
+                if phrase in searchable:
+                    best_window = window_size
+                    break
+            if best_window:
+                break
+
+        return best_window / max(len(query_tokens), 1)
+
+    @staticmethod
+    def _normalize_search_text(value: str | None) -> str:
+        text = (value or "").replace("\u00a0", " ").lower()
+        text = re.sub(r"seq\s*[- ]?\s*to\s*[- ]?\s*seq", "sequence to sequence", text)
+        text = re.sub(r"sequence\s*[- ]\s*to\s*[- ]\s*sequence", "sequence to sequence", text)
+        text = re.sub(r"(?<=[a-z])-\s+(?=[a-z])", "", text)
+        text = re.sub(r"[\W_]+", " ", text, flags=re.UNICODE)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _normalized_term_in_text(self, term: str, normalized_text: str) -> bool:
+        normalized_term = self._normalize_search_text(term)
+        return bool(normalized_term and normalized_term in normalized_text)
+
+    def _searchable_text(
+        self,
+        chunk: DocumentChunk,
+        title: str | None = None,
+    ) -> str:
+        return " ".join(
+            part
+            for part in [
+                title,
+                chunk.section,
+                getattr(chunk, "section_full_path", None),
+                chunk.section_type,
+                chunk.content,
+            ]
+            if isinstance(part, str) and part.strip()
+        )
 
     def _is_hard_excluded_section(self, chunk: DocumentChunk) -> bool:
         section = (chunk.section or "").lower()
