@@ -1,4 +1,5 @@
 import logging
+import json
 import re
 from typing import Any
 
@@ -10,6 +11,7 @@ from app.models.document_chunk import DocumentChunk
 from app.models.canonical_document import CanonicalDocument
 from app.services.embedding_service import EmbeddingService
 from app.services.runtime_config_service import RuntimeConfigService
+from app.services.storage_service import StorageService
 from app.schemas.search import SearchResultItem
 from app.models.paper_record import PaperRecord
 logger = logging.getLogger(__name__)
@@ -51,6 +53,85 @@ EXCLUDED_SECTION_KEYWORDS = [
 SOFT_EXCLUDED_SECTION_KEYWORDS = [
     "qualitative result",
     "case study",
+]
+
+SEARCH_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "that",
+    "this",
+    "into",
+    "onto",
+    "are",
+    "was",
+    "were",
+    "has",
+    "have",
+    "had",
+    "using",
+    "use",
+    "used",
+    "system",
+    "systems",
+    "paper",
+    "study",
+}
+
+TECHNICAL_METHOD_TERMS = [
+    "optimization",
+    "optimisation",
+    "optimize",
+    "optimise",
+    "optimizer",
+    "training",
+    "train",
+    "learning rate",
+    "regularization",
+    "regularisation",
+    "dropout",
+    "label smoothing",
+    "beam search",
+    "decoding",
+    "generation",
+    "inference",
+    "architecture",
+    "technique",
+    "techniques",
+    "sequence-to-sequence",
+    "sequence to sequence",
+]
+
+TECHNICAL_METHOD_SECTION_TERMS = [
+    "training",
+    "optimization",
+    "optimisation",
+    "generation",
+    "decoding",
+    "inference",
+    "implementation",
+    "architecture",
+    "model",
+    "method",
+    "approach",
+]
+
+TECHNICAL_METHOD_CONTENT_TERMS = [
+    "adam",
+    "optimizer",
+    "learning rate",
+    "warmup",
+    "label smoothing",
+    "dropout",
+    "regularization",
+    "regularisation",
+    "beam search",
+    "batch",
+    "gradient",
+    "schedule",
+    "decoding",
 ]
 
 
@@ -95,7 +176,7 @@ class SearchService:
             return []
 
         distance = DocumentChunk.embedding.cosine_distance(query_vector)
-        candidate_limit = max(top_k * 12, 40)
+        candidate_limit = min(300, max(top_k * 30, 120))
 
         rows_query = (
             self.db.query(
@@ -136,8 +217,11 @@ class SearchService:
             section_boost = self._section_boost(chunk.section_type)
             section_penalty = self._section_penalty(chunk.section)
             query_boost = self._query_aware_boost(raw_query, chunk)
+            lexical_boost = self._lexical_relevance_boost(raw_query, chunk)
 
-            final_relevance = similarity + section_boost + section_penalty + query_boost
+            final_relevance = self._clip_score(
+                similarity + section_boost + section_penalty + query_boost + lexical_boost
+            )
 
             candidates.append(
                 {
@@ -155,8 +239,8 @@ class SearchService:
         selected = self._mmr_select(
             candidates=candidates,
             top_k=top_k,
-            lambda_mult=0.65,
-            duplicate_threshold=0.88,
+            lambda_mult=0.82 if query_type == "technical_method" else 0.65,
+            duplicate_threshold=0.94 if query_type == "technical_method" else 0.88,
             query_type=query_type,
         )
 
@@ -167,27 +251,43 @@ class SearchService:
                 top_k=top_k,
             )
 
-        return [
-            SearchResultItem(
+        selected.sort(key=lambda item: item["relevance"], reverse=True)
+
+        page_cache: dict[str, list[dict]] = {}
+        results: list[SearchResultItem] = []
+        for item in selected[:top_k]:
+            chunk = item["chunk"]
+            evidence_snippet = self._semantic_evidence_snippet(raw_query, chunk.content)
+            page_from, page_to = self._resolve_result_pages(
+                chunk,
+                evidence_snippet,
+                page_cache,
+            )
+            results.append(
+                SearchResultItem(
                 chunk_id=item["chunk"].id,
                 canonical_document_id=item["chunk"].canonical_document_id,
                 title=item["title"],
-                content=self._semantic_evidence_snippet(raw_query, item["chunk"].content),
+                content=evidence_snippet,
                 similarity_score=round(item["relevance"], 4),
                 source="semantic",
-                section=item["chunk"].section,
-                section_type=item["chunk"].section_type,
-                page_from=item["chunk"].page_from,
-                page_to=item["chunk"].page_to,
+                section=chunk.section,
+                section_type=chunk.section_type,
+                page_from=page_from,
+                page_to=page_to,
+                )
             )
-            for item in selected[:top_k]
-        ]
+
+        return results
 
     def _detect_query_type(self, query: str) -> str:
         q = query.lower()
 
         if any(w in q for w in ["compare", "difference", "differ", "vs", "versus"]):
             return "comparison"
+
+        if any(term in q for term in TECHNICAL_METHOD_TERMS):
+            return "technical_method"
 
         if any(w in q for w in ["how", "process", "workflow", "pipeline", "mechanism"]):
             return "process"
@@ -214,6 +314,7 @@ class SearchService:
         section_type = (chunk.section_type or "").lower()
         section = (chunk.section or "").lower()
         full_path = (getattr(chunk, "section_full_path", "") or "").lower()
+        content = (chunk.content or "").lower()
 
         boost = 0.0
 
@@ -256,6 +357,31 @@ class SearchService:
         if any(t in q for t in summary_terms):
             if section_type in {"abstract", "introduction"}:
                 boost += 0.06
+
+        if any(t in q for t in TECHNICAL_METHOD_TERMS):
+            searchable_section = f"{section} {full_path}"
+            has_technical_section = any(
+                term in searchable_section
+                for term in TECHNICAL_METHOD_SECTION_TERMS
+            )
+            has_technical_content = any(
+                term in content
+                for term in TECHNICAL_METHOD_CONTENT_TERMS
+            )
+
+            if section_type == "method":
+                boost += 0.12
+            if has_technical_section:
+                boost += 0.10
+            if has_technical_content:
+                boost += 0.10
+
+            if section_type == "abstract" and not has_technical_content:
+                boost -= 0.08
+            if section_type in {"evaluation", "results"} and not has_technical_content:
+                boost -= 0.07
+            if section_type in {"introduction", "background", "related_work"} and not has_technical_content:
+                boost -= 0.03
 
         # Generic subsection matching
         searchable_section = f"{section} {full_path}"
@@ -332,7 +458,7 @@ class SearchService:
                     - (1.0 - lambda_mult) * max_sim_to_selected
                 )
 
-                if self._same_section_root(item["chunk"], selected):
+                if query_type != "technical_method" and self._same_section_root(item["chunk"], selected):
                     mmr_score -= 0.08
 
                 if query_type == "comparison":
@@ -463,12 +589,71 @@ class SearchService:
         return float(np.dot(a, b) / (norm_a * norm_b))
 
     @staticmethod
+    def _clip_score(value: float) -> float:
+        return max(0.0, min(float(value), 1.0))
+
+    @staticmethod
     def _search_tokens(value: str) -> set[str]:
         return {
             token
             for token in re.findall(r"[a-z0-9]+", (value or "").lower())
-            if len(token) > 2
+            if len(token) > 2 and token not in SEARCH_STOPWORDS
         }
+
+    def _expanded_search_tokens(self, query: str) -> set[str]:
+        tokens = self._search_tokens(query)
+        q = (query or "").lower()
+
+        if any(term in q for term in ["optimization", "optimisation", "optimize", "optimise", "technique"]):
+            tokens.update(
+                {
+                    "optimizer",
+                    "adam",
+                    "training",
+                    "dropout",
+                    "regularization",
+                    "smoothing",
+                    "beam",
+                    "decoding",
+                    "generation",
+                    "schedule",
+                    "warmup",
+                }
+            )
+
+        if "sequence" in q or "translation" in q:
+            tokens.update({"encoder", "decoder", "attention", "bleu", "wmt"})
+
+        return tokens
+
+    def _lexical_relevance_boost(self, query: str, chunk: DocumentChunk) -> float:
+        query_tokens = self._expanded_search_tokens(query)
+        if not query_tokens:
+            return 0.0
+
+        searchable = " ".join(
+            part
+            for part in [
+                chunk.section,
+                getattr(chunk, "section_full_path", None),
+                chunk.section_type,
+                chunk.content,
+            ]
+            if isinstance(part, str) and part.strip()
+        )
+        chunk_tokens = self._search_tokens(searchable)
+        if not chunk_tokens:
+            return 0.0
+
+        overlap = len(query_tokens & chunk_tokens)
+        coverage = overlap / max(len(query_tokens), 1)
+        boost = min(coverage * 0.12 + overlap * 0.01, 0.16)
+
+        section_text = f"{chunk.section or ''} {getattr(chunk, 'section_full_path', '') or ''}".lower()
+        if any(term in section_text for term in TECHNICAL_METHOD_SECTION_TERMS):
+            boost += 0.03
+
+        return min(boost, 0.18)
 
     def _semantic_evidence_snippet(self, query: str, content: str | None, window: int = 520) -> str:
         if not content:
@@ -478,7 +663,7 @@ class SearchService:
         if len(content_clean) <= window:
             return content_clean
 
-        query_tokens = self._search_tokens(query)
+        query_tokens = self._expanded_search_tokens(query)
         if not query_tokens:
             return content_clean[:window].strip() + "..."
 
@@ -519,7 +704,113 @@ class SearchService:
         prefix = "..." if start > 0 else ""
         suffix = "..." if end < len(content_clean) else ""
         return f"{prefix}{snippet}{suffix}"
-    
+
+    @staticmethod
+    def _normalize_page_match_text(value: str) -> str:
+        text = (value or "").replace("...", " ")
+        text = text.lower()
+        text = re.sub(r"(?<=[a-z])-\s+(?=[a-z])", "", text)
+        text = re.sub(r"[\W_]+", " ", text, flags=re.UNICODE)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _match_snippet_to_page(self, snippet: str, pages: list[dict]) -> int | None:
+        normalized_snippet = self._normalize_page_match_text(snippet)
+        if not normalized_snippet:
+            return None
+
+        snippet_tokens = [
+            token
+            for token in normalized_snippet.split()
+            if len(token) > 2 and token not in SEARCH_STOPWORDS
+        ]
+        if len(snippet_tokens) < 5:
+            return None
+
+        best_match: tuple[float, int] | None = None
+        for page in pages:
+            page_num = page.get("page")
+            if not isinstance(page_num, int):
+                continue
+
+            normalized_page = self._normalize_page_match_text(page.get("text") or "")
+            if not normalized_page:
+                continue
+
+            if normalized_snippet in normalized_page:
+                return page_num
+
+            for window_size in (10, 8, 6):
+                if len(snippet_tokens) < window_size:
+                    continue
+                for index in range(0, len(snippet_tokens) - window_size + 1):
+                    phrase = " ".join(snippet_tokens[index:index + window_size])
+                    if phrase in normalized_page:
+                        return page_num
+
+            page_tokens = set(normalized_page.split())
+            overlap = sum(1 for token in snippet_tokens if token in page_tokens)
+            coverage = overlap / max(len(snippet_tokens), 1)
+            if coverage >= 0.72 and (
+                best_match is None or coverage > best_match[0]
+            ):
+                best_match = (coverage, page_num)
+
+        return best_match[1] if best_match else None
+
+    def _load_pages_for_canonical(
+        self,
+        canonical_document_id,
+        page_cache: dict[str, list[dict]],
+    ) -> list[dict]:
+        cache_key = str(canonical_document_id)
+        if cache_key in page_cache:
+            return page_cache[cache_key]
+
+        paper = (
+            self.db.query(PaperRecord)
+            .filter(
+                PaperRecord.canonical_document_id == canonical_document_id,
+                PaperRecord.publication_status == "published",
+                PaperRecord.page_text_json_storage_path.isnot(None),
+            )
+            .order_by(PaperRecord.created_at.asc())
+            .first()
+        )
+        if not paper or not paper.page_text_json_storage_path:
+            page_cache[cache_key] = []
+            return []
+
+        try:
+            storage = StorageService()
+            pages_bytes = storage.download_by_storage_path(paper.page_text_json_storage_path)
+            pages = json.loads(pages_bytes.decode("utf-8"))
+            page_cache[cache_key] = pages if isinstance(pages, list) else []
+        except Exception as exc:
+            logger.warning(
+                "[search] Failed to load pages.json for canonical_id=%s error=%s",
+                canonical_document_id,
+                str(exc),
+            )
+            page_cache[cache_key] = []
+
+        return page_cache[cache_key]
+
+    def _resolve_result_pages(
+        self,
+        chunk: DocumentChunk,
+        evidence_snippet: str,
+        page_cache: dict[str, list[dict]],
+    ) -> tuple[int | None, int | None]:
+        if chunk.page_from is not None or chunk.page_to is not None:
+            return chunk.page_from, chunk.page_to
+
+        pages = self._load_pages_for_canonical(chunk.canonical_document_id, page_cache)
+        matched_page = self._match_snippet_to_page(evidence_snippet, pages)
+        if matched_page is None:
+            return None, None
+
+        return matched_page, matched_page
+
     def keyword_search(self, query: str, limit: int = 20) -> list[SearchResultItem]:
         if not query or not query.strip():
             return []
@@ -615,6 +906,7 @@ class SearchService:
         # 2) Search full text chunks
         remaining = max(limit - len(results), 0)
         if remaining > 0:
+            page_cache: dict[str, list[dict]] = {}
             chunk_rows = (
                 self.db.query(DocumentChunk, CanonicalDocument)
                 .join(
@@ -632,6 +924,11 @@ class SearchService:
             for chunk, canonical in chunk_rows:
                 snippet = self._keyword_snippet(chunk.content, raw_query)
                 title = canonical.title or canonical.title_candidate
+                page_from, page_to = self._resolve_result_pages(
+                    chunk,
+                    snippet,
+                    page_cache,
+                )
 
                 key = ("chunk", str(chunk.id))
                 if key in seen:
@@ -654,8 +951,8 @@ class SearchService:
                         source="chunk",
                         section=chunk.section,
                         section_type=chunk.section_type,
-                        page_from=chunk.page_from,
-                        page_to=chunk.page_to,
+                        page_from=page_from,
+                        page_to=page_to,
                     )
                 )
 
