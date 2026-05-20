@@ -184,6 +184,41 @@ OPTIMIZATION_EVIDENCE_TERMS = [
     "schedule",
 ]
 
+TRANSLATION_QUERY_TERMS = [
+    "translation",
+    "machine translation",
+    "neural machine translation",
+    "sequence to sequence",
+    "seq2seq",
+]
+
+TRANSLATION_CONTEXT_TERMS = [
+    "translation",
+    "machine translation",
+    "neural machine translation",
+    "sequence to sequence",
+    "seq2seq",
+    "encoder decoder",
+    "english german",
+    "english to german",
+    "english french",
+    "english to french",
+    "wmt",
+    "bleu",
+]
+
+NON_TRANSLATION_TASK_SECTION_TERMS = [
+    "constituency parsing",
+    "parsing",
+    "question answering",
+    "summarization",
+    "summarisation",
+    "classification",
+    "image recognition",
+    "vision",
+    "speech recognition",
+]
+
 
 class SearchService:
     def __init__(self, db: Session):
@@ -288,6 +323,7 @@ class SearchService:
             query_coverage = self._query_coverage_score(raw_query, chunk, resolved_title)
             aspect_coverage = self._technical_aspect_coverage(raw_query, chunk, resolved_title)
             phrase_score = self._phrase_match_score(raw_query, chunk, resolved_title)
+            task_penalty = self._task_mismatch_penalty(raw_query, chunk, resolved_title)
 
             final_relevance = self._combined_relevance_score(
                 query_type=query_type,
@@ -299,6 +335,7 @@ class SearchService:
                 query_coverage=query_coverage,
                 aspect_coverage=aspect_coverage,
                 phrase_score=phrase_score,
+                task_penalty=task_penalty,
             )
 
             candidates.append(
@@ -327,6 +364,12 @@ class SearchService:
                 selected=selected,
                 candidates=candidates,
                 top_k=top_k,
+            )
+
+        if canonical_document_id is None:
+            selected = self._apply_document_diversity_penalty(
+                selected=selected,
+                query_type=query_type,
             )
 
         selected.sort(key=lambda item: item["relevance"], reverse=True)
@@ -491,6 +534,7 @@ class SearchService:
         query_coverage: float = 0.0,
         aspect_coverage: float = 1.0,
         phrase_score: float = 0.0,
+        task_penalty: float = 0.0,
     ) -> float:
         if query_type == "technical_method":
             base_score = (
@@ -512,7 +556,7 @@ class SearchService:
 
         adjustments = section_boost + section_penalty + query_boost + lexical_boost
         adjustments = min(max(adjustments, negative_floor), positive_cap)
-        score = base_score + adjustments
+        score = base_score + adjustments + task_penalty
 
         if query_type == "technical_method":
             if query_coverage < 0.35:
@@ -758,6 +802,45 @@ class SearchService:
 
         return covered / max(len(aspects), 1)
 
+    def _task_mismatch_penalty(
+        self,
+        query: str,
+        chunk: DocumentChunk,
+        title: str | None = None,
+    ) -> float:
+        q = self._normalize_search_text(query)
+        if not any(term in q for term in TRANSLATION_QUERY_TERMS):
+            return 0.0
+
+        section_text = self._normalize_search_text(
+            f"{chunk.section or ''} {getattr(chunk, 'section_full_path', '') or ''}"
+        )
+        title_text = self._normalize_search_text(title)
+        searchable = self._normalize_search_text(self._searchable_text(chunk, title))
+
+        has_translation_context = any(
+            term in searchable
+            for term in TRANSLATION_CONTEXT_TERMS
+        )
+        section_has_translation_context = any(
+            term in section_text
+            for term in TRANSLATION_CONTEXT_TERMS
+        )
+        section_has_other_task = any(
+            term in section_text
+            for term in NON_TRANSLATION_TASK_SECTION_TERMS
+        )
+
+        if section_has_other_task and not section_has_translation_context:
+            if any(term in title_text for term in TRANSLATION_CONTEXT_TERMS):
+                return -0.08
+            return -0.14
+
+        if not has_translation_context:
+            return -0.06
+
+        return 0.0
+
     def _phrase_match_score(
         self,
         query: str,
@@ -874,6 +957,9 @@ class SearchService:
                 if query_type != "technical_method" and self._same_section_root(item["chunk"], selected):
                     mmr_score -= 0.08
 
+                if query_type != "comparison" and not self._is_new_document(item, selected):
+                    mmr_score -= 0.05 if query_type == "technical_method" else 0.03
+
                 if query_type == "comparison":
                     if self._is_new_document(item, selected):
                         mmr_score += 0.08
@@ -889,6 +975,40 @@ class SearchService:
             remaining.remove(best_item)
 
         return selected
+
+    def _apply_document_diversity_penalty(
+        self,
+        selected: list[dict[str, Any]],
+        query_type: str,
+    ) -> list[dict[str, Any]]:
+        if len(selected) <= 1:
+            return selected
+
+        doc_ids = {
+            item["chunk"].canonical_document_id
+            for item in selected
+        }
+        if len(doc_ids) <= 1:
+            return selected
+
+        penalty_step = 0.055 if query_type == "technical_method" else 0.035
+        seen_counts: dict[str, int] = {}
+        adjusted: list[dict[str, Any]] = []
+
+        for item in sorted(selected, key=lambda x: x["relevance"], reverse=True):
+            doc_id = str(item["chunk"].canonical_document_id)
+            seen_count = seen_counts.get(doc_id, 0)
+
+            if seen_count:
+                item = item.copy()
+                item["relevance"] = self._clip_score(
+                    item["relevance"] - min(seen_count * penalty_step, 0.14)
+                )
+
+            adjusted.append(item)
+            seen_counts[doc_id] = seen_count + 1
+
+        return adjusted
 
     def _ensure_multi_document(
         self,
