@@ -257,8 +257,7 @@ Lý do trọng số:
 > ⚠️ Công thức Chunk Quality là thiết kế nội bộ; các thành phần (length, cleanliness, anchor clarity) phổ biến trong information retrieval nhưng không có paper cụ thể nào định nghĩa chính xác công thức này.
 
 ---
-
-### Công thức 3: Mention Score `[R4, R5, R6]`
+### Công thức 3: Mention Score `[R1, R4, R5]`
 
 $$
 m = \mathrm{clip}_{[0,1]}\left(0.35 \cdot sim + 0.30 \cdot intent + 0.25 \cdot sec + 0.10 \cdot quality\right)\cdot linkConf
@@ -272,12 +271,12 @@ Giá trị:
 5. `linkConf`: từ công thức 1.
 6. `m`: mention score [0,1].
 
-Lý do trọng số:
-1. `sim = 0.35` để giảm bias lexical similarity thuần túy — semantic similarity giữa context snippet và tài liệu đích là tín hiệu nội dung cốt lõi `[R4]`.
-2. `intent = 0.30` để tăng vai trò ngữ nghĩa citation — intent classification (use_method, compare, background...) được nghiên cứu trong SciCite và ACL-ARC `[R5]`.
-3. `sec = 0.25` vì vị trí section là tín hiệu cấu trúc mạnh — citation trong Methods hay Results có giá trị khác với citation trong Introduction `[R6]`.
-4. `quality = 0.10` là lớp vệ sinh dữ liệu.
-5. Nhân `linkConf` để "phạt cứng" các link không chắc `[R1]`.
+Lý do chọn bốn feature này (feature có cơ sở; trọng số là heuristic):
+1. **`sim` — Semantic similarity:** Đo độ tương đồng ngữ nghĩa giữa context snippet và tài liệu đích. Đây là kỹ thuật phổ biến trong information retrieval và citation recommendation, nhưng **hiện chưa có nguồn học thuật trực tiếp** trong danh sách tài liệu tham khảo validate feature này theo nghĩa vector embedding. **Trọng số 0.35 và bản thân feature là quyết định kỹ thuật nội bộ.** Cần bổ sung nguồn trong các phiên bản tài liệu tiếp theo.
+2. **`intent` — Citation intent:** Cohan et al. (2019) `[R5]` chứng minh intent classification (METHOD, BACKGROUND, RESULT_COMPARISON) mang thông tin phân biệt mạnh về vai trò của citation trong bài báo. **Trọng số 0.30 là heuristic nội bộ.**
+3. **`sec` — Section location:** Valenzuela et al. (2015) `[R4]` chứng minh vị trí section là feature quan trọng: citation trong Methods/Results có xác suất cao hơn là citation "quan trọng" so với Introduction hay Related Work. **Trọng số 0.25 và bảng section_weight là heuristic nội bộ.**
+4. **`quality` — Chunk quality:** Lớp vệ sinh dữ liệu để giảm ảnh hưởng của snippet kém chất lượng. **Toàn bộ là thiết kế nội bộ, trọng số 0.10.**
+5. **Nhân `linkConf`:** Cơ chế phạt cứng — mention từ link không chắc sẽ bị kéo điểm xuống tương ứng. Nguyên lý từ Wellner et al. (2004) `[R1]` về việc xử lý uncertainty trong citation linking. **Cơ chế nhân trực tiếp là quyết định kỹ thuật nội bộ.**
 
 ---
 
@@ -292,11 +291,8 @@ Giá trị:
 2. `freq`: [0, 1].
 
 Lý do:
-1. Dùng log để tránh trường hợp spam mention làm điểm tăng tuyến tính vô hạn — logarithm của citation count là kỹ thuật chuẩn trong bibliometrics để xử lý phân phối lệch `[R7]`.
-2. Sau khoảng 10 mention thì lợi ích thêm giảm dần.
-
-> ⚠️ Hằng số chuẩn hóa `ln(11)` (saturation tại n=10) là quyết định thiết kế. Nên căn chỉnh theo phân phối mention thực tế của kho tài liệu.
-
+1. **Normalization cho skewed distribution có cơ sở lý thuyết:** Aksnes et al. (2019) `[R7]` chỉ ra phân phối citation count trong thực tế là highly skewed — đây là động lực lý thuyết để không dùng linear count. Tuy nhiên, paper đó không validate `log(1+n)` như scoring function cụ thể. Kỹ thuật log transformation có tiền lệ rộng trong information retrieval (TF-IDF, BM25) nhưng không có nguồn nào trong danh sách tham khảo validate trực tiếp công thức này trong bối cảnh citation scoring.
+2. **`log(1+n)` và hằng số `ln(11)` đều là quyết định kỹ thuật nội bộ** — saturation tại n=10 cần được căn chỉnh theo phân phối mention thực tế của kho tài liệu.
 ---
 
 ### Công thức 5: Diversity Score `[R8]`
@@ -359,12 +355,9 @@ Lý do trọng số:
 
 
 
-
-
-
 ## Tài liệu tham khảo
 
-> **Lưu ý về cách đọc phần này:** Mỗi nguồn cung cấp *động lực học thuật* (academic motivation) cho việc đưa một feature vào mô hình — tức là xác nhận feature đó có ý nghĩa trong bài toán citation analysis. Tuy nhiên, không nguồn nào đề xuất hay validate các *trọng số cụ thể*, *hằng số kỹ thuật*, hay *công thức aggregation* trong hệ thống. Toàn bộ phần đó là thiết kế heuristic nội bộ và cần được hiệu chỉnh bằng thực nghiệm.
+> **Lưu ý về cách đọc phần này:** Mỗi nguồn cung cấp *động lực học thuật* (academic motivation) cho việc đưa một feature vào mô hình. Tuy nhiên, không nguồn nào đề xuất hay validate các *trọng số cụ thể*, *hằng số kỹ thuật*, hay *công thức aggregation* trong hệ thống. Toàn bộ phần đó là thiết kế heuristic nội bộ và cần được hiệu chỉnh bằng thực nghiệm.
 
 ---
 
@@ -376,9 +369,9 @@ Lý do trọng số:
 | Tiêu đề | *An Integrated, Conditional Model of Information Extraction and Coreference with Application to Citation Graph Construction* |
 | Nơi xuất bản | UAI 2004 (20th Conference on Uncertainty in Artificial Intelligence) |
 | Năm | 2004 |
-| URL | https://people.eecs.berkeley.edu/~russell/papers/nips02-citation.pdf |
+| URL | https://people.cs.umass.edu/~mccallum/papers/integrated04uai.pdf |
 | **Dùng ở đâu trong hệ thống** | Công thức 1 — động lực để đưa author/year vào như tín hiệu linking; Công thức 3 — nguyên lý xử lý uncertainty trong citation link |
-| **Nội dung paper** | Paper trình bày mô hình xác suất có điều kiện tích hợp để giải quyết bài toán *identity uncertainty* trong citation matching: khi cùng một tài liệu được nhắc đến dưới nhiều dạng khác nhau do lỗi OCR, tên tác giả viết tắt, đảo thứ tự, thiếu metadata. Mô hình kết hợp nhiều feature metadata (author, title, year, venue) đồng thời thay vì xử lý riêng lẻ. |
+| **Nội dung paper** | Paper trình bày mô hình CRF (Conditional Random Field) tích hợp để giải quyết bài toán *identity uncertainty* trong citation matching: khi cùng một tài liệu được nhắc đến dưới nhiều dạng khác nhau do lỗi OCR, tên tác giả viết tắt, đảo thứ tự, thiếu metadata. Mô hình kết hợp nhiều feature metadata (author, title, year, venue) đồng thời thay vì xử lý riêng lẻ. |
 | **Phần hỗ trợ hệ thống** | Cung cấp động lực học thuật cho việc sử dụng author và year như các tín hiệu liên kết citation. Hệ thống đơn giản hóa ý tưởng này thành tín hiệu `authorYearMatch` riêng biệt — đây là adaptation nội bộ, không phải pipeline của paper. |
 | **Phần là heuristic nội bộ** | Trọng số 0.10 cho `authorYearMatch`; cấu trúc 3 tín hiệu riêng biệt (DOI → title → author-year); cơ chế nhân `linkConf` trực tiếp vào mention score. |
 
@@ -406,14 +399,13 @@ Lý do trọng số:
 |---|---|
 | Tác giả | Nicholson, J.M.; Mordaunt, M.; Lopez, P.; Bhatt, S.; Lazarovici, M.; Mons, B.; Shankar, K. |
 | Tiêu đề | *scite: A smart citation index that displays the context of citations and classifies their intent using deep learning* |
-| Nơi xuất bản | Quantitative Science Studies (QSS), MIT Press |
+| Nơi xuất bản | Quantitative Science Studies (QSS), MIT Press — DOI: 10.1162/qss_a_00146 |
 | Năm | 2021 |
 | URL | https://direct.mit.edu/qss/article/2/3/882/102990 |
 | **Dùng ở đâu trong hệ thống** | Công thức 1 — động lực để đặt `doiMatch` là tín hiệu đáng tin cậy nhất |
-| **Nội dung paper** | Paper mô tả kiến trúc của hệ thống scite — một citation index quy mô lớn xử lý hàng trăm triệu citation contexts. Hệ thống sử dụng GROBID để extract references từ PDF, kết hợp Crossref API và biblio-glutton để DOI matching, và deep learning để phân loại citation intent (supporting, contradicting, mentioning). |
+| **Nội dung paper** | Paper mô tả kiến trúc của hệ thống scite — một citation index quy mô lớn xử lý hàng trăm triệu citation contexts. Hệ thống sử dụng GROBID để extract references từ PDF, kết hợp Crossref API và biblio-glutton để DOI matching, và deep learning để phân loại citation intent (supporting, contradicting, mentioning). Paper báo cáo ~70% citation contexts từ PDF và ~95% từ XML JATS được gán DOI chính xác — đây là tỷ lệ coverage, không phải F-score của thuật toán matching. |
 | **Phần hỗ trợ hệ thống** | Xác nhận DOI matching là tín hiệu linking chính trong hệ thống production quy mô lớn, cung cấp động lực để đặt `doiMatch` ở vị trí ưu tiên cao nhất. |
 | **Phần là heuristic nội bộ** | Trọng số 0.70 cho `doiMatch`. |
-| ⚠️ **Lưu ý** | Các phiên bản tài liệu trước có trích dẫn "F-score ~95.4% cho DOI matching" — con số này **đã được xóa** vì chưa xác minh được xuất xứ chính xác từ bảng số liệu cụ thể nào trong paper. Không nên dùng con số này trong tài liệu chính thức cho đến khi kiểm chứng lại. |
 
 ---
 
@@ -426,10 +418,11 @@ Lý do trọng số:
 | Nơi xuất bản | AAAI Workshop on Scholarly Big Data |
 | Năm | 2015 |
 | URL | https://www.semanticscholar.org/paper/Identifying-Meaningful-Citations-Valenzuela-Ha/1c7d6c495f1c7dc7e63b89edcae75fe8a0bbeb6c |
-| **Dùng ở đâu trong hệ thống** | Công thức 3 (Mention Score) — động lực cho bộ feature (similarity, section, frequency); Bảng section_weight — thứ tự ưu tiên section |
-| **Nội dung paper** | Paper nghiên cứu bài toán phân biệt "meaningful citation" với "incidental citation". Tác giả huấn luyện binary classifier với các feature: **(1) semantic similarity** giữa context và tài liệu đích, **(2) citation count** của tài liệu đích, **(3) section location** (Methods/Results vs Introduction), **(4) position trong bài**. Đây là paper trực tiếp nhất với bài toán hệ thống đang giải quyết. |
-| **Phần hỗ trợ hệ thống** | Cung cấp động lực học thuật cho việc đưa semantic similarity, section location, và frequency vào như các feature đánh giá mức độ quan trọng của citation. Xác nhận thứ tự ưu tiên section: Methods/Results quan trọng hơn Introduction. |
-| **Phần là heuristic nội bộ** | Mọi trọng số (0.35, 0.25, v.v.); bảng section_weight với giá trị số cụ thể; cơ chế top-3 aggregation trong Công thức 6. |
+| **Dùng ở đâu trong hệ thống** | Công thức 3 (Mention Score) — động lực cho feature `sec` (section location) và `freq`; Bảng section_weight — thứ tự ưu tiên section |
+| **Nội dung paper** | Paper nghiên cứu bài toán phân biệt "meaningful citation" với "incidental citation". Tác giả huấn luyện binary classifier với các feature chính: **(1) citation count** của tài liệu đích, **(2) section name** (Methods/Results vs Related Work/Introduction), **(3) indirect citations**. Paper xác nhận section location và frequency là feature phân biệt mạnh. |
+| **Phần hỗ trợ hệ thống** | Cung cấp động lực học thuật cho việc đưa section location và frequency vào như feature đánh giá mức độ quan trọng của citation. Xác nhận thứ tự ưu tiên section: Methods/Results quan trọng hơn Introduction. |
+| **Phần là heuristic nội bộ** | Mọi trọng số (0.25 cho sec, v.v.); bảng section_weight với giá trị số cụ thể; cơ chế top-3 aggregation trong Công thức 6. |
+| ⚠️ **Lưu ý** | Paper này **không dùng semantic similarity (vector embedding)** như feature — feature chính là citation count và section name. Feature `sim` trong Công thức 3 không được hỗ trợ bởi paper này. Xem ghi chú riêng về feature `sim` bên dưới. |
 
 ---
 
@@ -439,12 +432,12 @@ Lý do trọng số:
 |---|---|
 | Tác giả | Cohan, A.; Ammar, W.; van Zuylen, M.; Cady, F. |
 | Tiêu đề | *Structural Scaffolds for Citation Intent Classification in Scientific Publications* |
-| Nơi xuất bản | NAACL-HLT 2019 (ACL Anthology) |
+| Nơi xuất bản | NAACL-HLT 2019 (ACL Anthology N19-1361) |
 | Năm | 2019 |
 | URL | https://aclanthology.org/N19-1361/ |
 | **Dùng ở đâu trong hệ thống** | Công thức 3 (Mention Score) — động lực cho feature `intent`; Công thức 6 (Edge Score) — động lực cho `intentEdge`; Bảng mapping `intent_score` — taxonomy nhãn gốc |
-| **Nội dung paper** | Paper giới thiệu dataset SciCite (~11.000 citation instances) và mô hình phân loại citation intent với 3 nhãn: **Method**, **Result**, **Background**. Mô hình dùng structural scaffold từ section header để cải thiện phân loại, đạt F1 ~84%. Paper chứng minh intent classification mang thông tin phân biệt mạnh về vai trò của citation. |
-| **Phần hỗ trợ hệ thống** | Cung cấp động lực học thuật cho việc dùng citation intent như feature; cung cấp taxonomy nhãn gốc (Method, Result, Background) mà hệ thống mở rộng thành 6 nhãn nội bộ. |
+| **Nội dung paper** | Paper giới thiệu dataset SciCite (~11.000 citation instances) và mô hình phân loại citation intent với **3 nhãn chính xác: METHOD, BACKGROUND, RESULT_COMPARISON**. Mô hình dùng structural scaffold từ section header để cải thiện phân loại, đạt F1 **~84% trên SciCite** và F1 **~67.9% trên ACL-ARC** (hai tập test khác nhau). Paper chứng minh intent classification mang thông tin phân biệt mạnh về vai trò của citation. |
+| **Phần hỗ trợ hệ thống** | Cung cấp động lực học thuật cho việc dùng citation intent như feature; cung cấp taxonomy nhãn gốc (METHOD, BACKGROUND, RESULT_COMPARISON) mà hệ thống mở rộng thành 6 nhãn nội bộ. |
 | **Phần là heuristic nội bộ** | Điểm số gán cho từng nhãn (use_method=1.00, background=0.40, v.v.) — SciCite chỉ phân loại nhãn, không gán điểm số; việc mở rộng thành 6 nhãn; trọng số 0.30 trong Công thức 3 và 0.05 trong Công thức 6. |
 
 ---
@@ -455,7 +448,7 @@ Lý do trọng số:
 |---|---|
 | Tác giả | Jurgens, D.; Kumar, S.; Hoover, R.; McFarland, D.; Jurafsky, D. |
 | Tiêu đề | *Measuring the Evolution of a Scientific Field through Citation Frames* |
-| Nơi xuất bản | Transactions of the Association for Computational Linguistics (TACL) |
+| Nơi xuất bản | Transactions of the Association for Computational Linguistics (TACL), Vol. 6 |
 | Năm | 2018 |
 | URL | https://aclanthology.org/Q18-1028/ |
 | **Dùng ở đâu trong hệ thống** | Bảng mapping `intent_score` — bổ sung taxonomy nhãn ngoài 3 nhãn SciCite |
@@ -474,10 +467,11 @@ Lý do trọng số:
 | Nơi xuất bản | SAGE Open |
 | Năm | 2019 |
 | URL | https://journals.sagepub.com/doi/10.1177/2158244019829575 |
-| **Dùng ở đâu trong hệ thống** | Công thức 4 (Frequency Score) — động lực cho log transformation; Công thức 6 (Edge Score) — động lực cho `freq` |
-| **Nội dung paper** | Overview tổng hợp lý thuyết về citation count trong bibliometrics. Paper chỉ ra phân phối citation count là **highly skewed** và logarithmic transformation (`log(1+n)`) là kỹ thuật chuẩn để xử lý phân phối lệch khi tính chỉ số bibliometric, tránh outlier kéo méo điểm. |
-| **Phần hỗ trợ hệ thống** | Cung cấp động lực học thuật cho việc dùng log transformation thay vì đếm tuyến tính. |
-| **Phần là heuristic nội bộ** | Hằng số `ln(11)` — saturation tại n=10 là quyết định kỹ thuật nội bộ, không xuất phát từ paper; trọng số 0.20 cho `freq`. |
+| **Dùng ở đâu trong hệ thống** | Công thức 4 (Frequency Score) — động lực lý thuyết cho việc xử lý phân phối lệch của citation count; Công thức 6 (Edge Score) — động lực cho `freq` |
+| **Nội dung paper** | Overview tổng hợp lý thuyết về citation count như chỉ số đánh giá chất lượng nghiên cứu. Paper chỉ ra phân phối citation count là **highly skewed** và thảo luận về các vấn đề khi dùng raw citation count. Đây là paper về citation indicators như performance measure, không phải paper về scoring formula hay information retrieval. |
+| **Phần hỗ trợ hệ thống** | Cung cấp động lực lý thuyết tổng quát: raw citation count bị lệch phân phối, cần normalization. Đây là lý do đủ để không dùng linear count. |
+| **Phần là heuristic nội bộ** | Paper không validate log(1+n) cụ thể như scoring function. Log transformation cho skewed distribution là kỹ thuật chuẩn trong statistics và IR (có tiền lệ trong TF-IDF, BM25) nhưng không xuất phát từ paper này. Hằng số `ln(11)` (saturation tại n=10) là quyết định kỹ thuật nội bộ. |
+| ⚠️ **Lưu ý** | [R7] cung cấp động lực tổng quát (citation count bị skewed) chứ không validate `log(1+n)` như công thức. Nếu cần nguồn học thuật trực tiếp hơn cho log normalization trong scoring, nên bổ sung tham chiếu đến các công trình IR như Robertson & Spärck Jones (1976) về TF-IDF, hoặc các paper về citation recommendation. |
 
 ---
 
@@ -487,13 +481,24 @@ Lý do trọng số:
 |---|---|
 | Tác giả | Leydesdorff, L.; Wagner, C.S.; Bornmann, L. |
 | Tiêu đề | *Interdisciplinarity as diversity in citation patterns among journals: Rao-Stirling diversity, relative variety, and the Gini coefficient* |
-| Nơi xuất bản | Journal of Informetrics |
+| Nơi xuất bản | Journal of Informetrics — DOI: 10.1016/j.joi.2018.12.006 |
 | Năm | 2019 |
 | URL | https://www.sciencedirect.com/science/article/pii/S1751157718303535 |
 | **Dùng ở đâu trong hệ thống** | Công thức 5 (Diversity Score) — lấy cảm hứng từ nguyên lý diversity; Công thức 6 (Edge Score) — động lực cho `div` |
-| **Nội dung paper** | Paper phân tích Rao-Stirling Diversity Index trong citation pattern giữa các journal và discipline. Công thức đầy đủ: $\Delta = \sum_{ij} d_{ij} \cdot p_i \cdot p_j$, đo mức độ phân bố trích dẫn qua nhiều nhóm/danh mục. Nguyên lý cốt lõi: citation phân bố đa dạng qua nhiều nhóm chứng tỏ mối quan hệ phong phú và sâu hơn. |
-| **Phần hỗ trợ hệ thống** | Cung cấp *nguyên lý* học thuật: citation xuất hiện ở nhiều vùng quan trọng khác nhau là tín hiệu đáng tin hơn citation tập trung một chỗ. Paper nghiên cứu diversity giữa các *discipline/journal*, hệ thống **adapt nguyên lý này sang diversity giữa các section** — đây là adaptation nội bộ, không phải ứng dụng trực tiếp. |
-| **Phần là heuristic nội bộ** | Công thức `min(1, k/3)` — không phải Rao-Stirling; mẫu số 3; tập section được chọn; trọng số 0.15 trong Công thức 6. |
+| **Nội dung paper** | Paper phân tích Rao-Stirling Diversity Index trong citation pattern giữa các journal và discipline. Công thức đầy đủ: $\Delta = \sum_{ij} d_{ij} \cdot p_i \cdot p_j$, đo mức độ phân bố trích dẫn qua nhiều nhóm/danh mục. Nguyên lý cốt lõi: citation phân bố đa dạng qua nhiều nhóm chứng tỏ mối quan hệ phong phú và sâu hơn. Paper nghiên cứu diversity giữa các *discipline/journal*, không phải giữa các section trong bài. |
+| **Phần hỗ trợ hệ thống** | Cung cấp *nguyên lý*: citation xuất hiện ở nhiều vùng quan trọng khác nhau là tín hiệu đáng tin hơn citation tập trung một chỗ. Hệ thống **adapt nguyên lý này sang diversity giữa các section** — đây là adaptation nội bộ, không phải ứng dụng trực tiếp. |
+| **Phần là heuristic nội bộ** | Công thức `min(1, k/3)` — không phải Rao-Stirling; mẫu số 3; tập section được chọn `{method, evaluation, results, discussion, conclusion}`; trọng số 0.15 trong Công thức 6. |
+
+---
+
+## Ghi chú bổ sung: Feature `sim` (semantic similarity) trong Công thức 3
+
+Feature `sim` — semantic similarity giữa context snippet và tài liệu đích — **hiện chưa có nguồn học thuật trực tiếp** trong danh sách tài liệu tham khảo của hệ thống. Đây là điểm cần lưu ý khi trình bày với hội đồng kỹ thuật:
+
+- [R4] Valenzuela 2015 hỗ trợ section và frequency, nhưng không dùng semantic similarity (vector embedding) như feature.
+- Semantic similarity là kỹ thuật phổ biến trong information retrieval và citation recommendation, có tiền lệ kỹ thuật rõ ràng, nhưng cần bổ sung nguồn phù hợp nếu muốn claim học thuật đầy đủ.
+- Các nguồn có thể bổ sung trong tương lai: Cohan & Goharian (2015) *"Scientific Article Summarization Using Citation-Context and Article's Discourse Structure"*; hoặc các paper về dense retrieval trong citation recommendation.
+- **Cho đến khi có nguồn bổ sung, feature `sim` nên được trình bày là quyết định kỹ thuật nội bộ có tiền lệ trong IR, chứ không phải feature được validate trực tiếp bởi bất kỳ paper nào trong danh sách.**
 
 ---
 
@@ -504,11 +509,11 @@ Lý do trọng số:
 | Dùng DOI làm tín hiệu linking chính | ✅ Research-motivated | [R3] Nicholson et al. 2021 | DOI matching dùng trong production pipeline quy mô lớn |
 | Dùng title fuzzy matching khi thiếu DOI | ✅ Research-motivated | [R2] Crossref | Phương pháp chính thức của Crossref |
 | Dùng author/year làm tín hiệu fallback | ✅ Research-motivated | [R1] Wellner et al. 2004 | Xử lý identity uncertainty trong citation matching |
-| Dùng semantic similarity đánh giá mention | ✅ Research-motivated | [R4] Valenzuela et al. 2015 | Feature trong meaningful citation classifier |
-| Dùng citation intent như feature | ✅ Research-motivated | [R5] Cohan et al. 2019 | Intent phân biệt vai trò citation mạnh |
+| Dùng citation intent như feature | ✅ Research-motivated | [R5] Cohan et al. 2019 | Intent phân biệt vai trò citation; 3 nhãn gốc: METHOD, BACKGROUND, RESULT_COMPARISON |
 | Dùng section location như feature cấu trúc | ✅ Research-motivated | [R4] Valenzuela et al. 2015 | Methods/Results quan trọng hơn Introduction |
-| Dùng log transform cho frequency | ✅ Research-motivated | [R7] Aksnes et al. 2019 | Chuẩn trong bibliometrics cho skewed distribution |
+| Dùng frequency (với normalization) | ✅ Research-motivated (nguyên lý) | [R7] Aksnes et al. 2019 | Citation count bị skewed → cần normalization; log(1+n) cụ thể là kỹ thuật IR, không xuất phát từ paper này |
 | Dùng diversity qua nhiều nhóm | ✅ Research-motivated (nguyên lý) | [R8] Leydesdorff et al. 2019 | Nguyên lý Rao-Stirling; adaptation sang section là nội bộ |
+| Dùng semantic similarity `sim` | ⚠️ Chưa có nguồn trực tiếp | — | Kỹ thuật phổ biến trong IR nhưng chưa được validate bởi paper nào trong danh sách; cần bổ sung nguồn |
 | Trọng số 0.70 / 0.20 / 0.10 (Công thức 1) | ⚙️ Heuristic nội bộ | — | Cần tune theo dữ liệu |
 | Trọng số 0.35 / 0.30 / 0.25 / 0.10 (Công thức 3) | ⚙️ Heuristic nội bộ | — | Cần tune theo dữ liệu |
 | Trọng số 0.60 / 0.20 / 0.15 / 0.05 (Công thức 6) | ⚙️ Heuristic nội bộ | — | Cần tune theo dữ liệu |
