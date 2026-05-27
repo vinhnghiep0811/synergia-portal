@@ -155,7 +155,7 @@
 
 .citation-graph-svg {
   width: 100%;
-  height: 640px;
+  height: 720px;
   display: block;
   cursor: grab;
   touch-action: none;
@@ -184,6 +184,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .citation-graph-toolbar__controls input[type="range"] {
@@ -203,11 +204,34 @@
   font-weight: 700;
 }
 
+.citation-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.74rem;
+  color: #1e3a8a;
+  background: #eff6ff;
+  font-weight: 700;
+}
+
+.citation-toggle {
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.citation-toggle--active {
+  color: #4338ca !important;
+  border-color: #c7d2fe !important;
+  background: #eef2ff !important;
+}
+
 .citation-edge {
   fill: none;
   cursor: pointer;
   opacity: 0.88;
-  transition: stroke-width 0.15s ease, opacity 0.15s ease;
+  transition: stroke-width 0.18s ease, opacity 0.18s ease;
 }
 
 .citation-edge--low {
@@ -227,10 +251,19 @@
   opacity: 1;
 }
 
+.citation-edge--dim {
+  opacity: 0.16;
+}
+
 .citation-node circle {
   fill: #ffffff;
   stroke: #334155;
   stroke-width: 1.4;
+}
+
+.citation-node {
+  cursor: pointer;
+  transition: transform 0.28s ease;
 }
 
 .citation-node--active circle {
@@ -239,11 +272,25 @@
   stroke-width: 2.2;
 }
 
+.citation-node--dim circle {
+  opacity: 0.35;
+}
+
 .citation-node text {
+  pointer-events: none;
+}
+
+.citation-node__label-bg {
+  fill: rgba(255, 255, 255, 0.9);
+  stroke: #cbd5e1;
+  stroke-width: 1;
+}
+
+.citation-node__label {
   fill: #0f172a;
   font-size: 11px;
-  font-weight: 500;
-  pointer-events: none;
+  font-weight: 600;
+  paint-order: stroke;
 }
 
 .citation-legend {

@@ -141,7 +141,7 @@ export function CanonicalDocumentsPage() {
               <div className="list-filters">
                 <input
                   type="search"
-                  placeholder="Tìm kiếm theo tiêu đề, DOI, tác giả, venue..."
+                  placeholder="Tìm kiếm theo tiêu đề tài liệu"
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
                 />

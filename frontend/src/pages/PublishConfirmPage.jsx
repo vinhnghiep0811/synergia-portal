@@ -865,21 +865,21 @@ export function PublishConfirmPage() {
 
                       {/* Thiết lập đánh giá thực nghiệm */}
                       <div className="detail-section" style={{
-                        backgroundColor: "#f0fff4",
-                        border: "1px solid #9ae6b4",
+                        backgroundColor: "#fafbfc",
+                        border: "1px solid #e2e8f0",
                         borderRadius: "8px",
                         padding: "1.5rem",
                         boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
                       }}>
-                        <div style={{ borderLeft: "4px solid #276749", paddingLeft: "1rem", marginBottom: "1rem" }}>
+                        <div style={{ borderLeft: "4px solid", paddingLeft: "1rem", marginBottom: "1rem" }}>
                           <h4 style={{
                             fontFamily: "Segoe UI, Roboto, system-ui, sans-serif",
                             fontSize: "1rem",
                             fontWeight: "600",
-                            color: "#276749",
+                            color: "#744210",
                             margin: 0
                           }}>
-                            📊 Cài đặt đánh giá thực nghiệm
+                            V.CÀI ĐẶT ĐÁNH GIÁ THỰC NGHIỆM 
                           </h4>
                         </div>
 
@@ -895,8 +895,8 @@ export function PublishConfirmPage() {
                             style={{
                               width: "100%",
                               padding: "0.5rem 0.75rem",
-                              border: "2px solid #9ae6b4",
-                              borderRadius: "6px",
+                              border: "2px solid #d69e2e",
+                              borderRadius: "6px ",
                               fontSize: "0.85rem",
                               boxSizing: "border-box"
                             }}
@@ -915,7 +915,7 @@ export function PublishConfirmPage() {
                             style={{
                               width: "100%",
                               padding: "0.5rem 0.75rem",
-                              border: "2px solid #9ae6b4",
+                              border: "2px solid #d69e2e",
                               borderRadius: "6px",
                               fontSize: "0.85rem",
                               boxSizing: "border-box"
@@ -935,7 +935,7 @@ export function PublishConfirmPage() {
                             style={{
                               width: "100%",
                               padding: "0.5rem 0.75rem",
-                              border: "2px solid #9ae6b4",
+                              border: "2px solid #d69e2e ",
                               borderRadius: "6px",
                               fontSize: "0.85rem",
                               boxSizing: "border-box"
@@ -945,7 +945,7 @@ export function PublishConfirmPage() {
 
                         {extractionData?.evaluation_setup?.evidence && extractionData.evaluation_setup.evidence.length > 0 && (
                           <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px dashed #9ae6b4" }}>
-                            <div style={{ fontSize: "0.8rem", color: "#276749", marginBottom: "0.5rem", fontWeight: "600" }}>
+                            <div style={{ fontSize: "0.8rem", color: "#744210", marginBottom: "0.5rem", fontWeight: "600" }}>
                               Evidence cho Evaluation Setup
                             </div>
                             {renderEvidence(extractionData.evaluation_setup.evidence)}
