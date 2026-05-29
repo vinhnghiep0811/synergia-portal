@@ -106,20 +106,6 @@ class ConfigValidateResponse(BaseModel):
     all_ok: bool
 
 
-class LLMProviderItem(BaseModel):
-    name: str
-    is_fallback: bool = False
-    is_locked: bool = False
-
-
-class LLMProviderListResponse(BaseModel):
-    providers: list[LLMProviderItem]
-
-
-class LLMProviderCreateRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=50)
-
-
 class LLMPromptTemplateItem(BaseModel):
     key: str
     label: str

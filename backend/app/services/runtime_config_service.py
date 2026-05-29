@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.core.config import GEMINI_API_KEY, GEMINI_MODEL, LLM_PROVIDER, OLLAMA_BASE_URL, OLLAMA_MODEL
+from app.core.config import GEMINI_API_KEY, GEMINI_MODEL, LLM_PROVIDER
 from app.models.admin_system_config import AdminSystemConfig
 from app.models.llm_provider_api_key import LLMProviderApiKey
 from app.models.llm_provider_config import LLMProviderConfig
@@ -18,6 +18,7 @@ DEFAULT_PIPELINE_TIMEOUT_SECONDS = 300
 DEFAULT_SEMANTIC_SCHOLAR_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
 GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com"
+ALLOWED_LLM_PROVIDERS = {"gemini", "deepseek"}
 
 
 @dataclass(frozen=True)
@@ -36,20 +37,18 @@ class RuntimeSystemConfig:
 
 def _normalize_provider(provider: str | None) -> str:
     normalized = (provider or "").strip().lower()
-    return normalized or "gemini"
+    if not normalized:
+        return "gemini"
+    return normalized if normalized in ALLOWED_LLM_PROVIDERS else "gemini"
 
 
 def _default_llm_model(provider: str) -> str:
-    if provider == "ollama":
-        return OLLAMA_MODEL
     if provider == "deepseek":
         return "deepseek-v4-pro"
     return GEMINI_MODEL
 
 
 def _default_llm_base_url(provider: str) -> str | None:
-    if provider == "ollama":
-        return OLLAMA_BASE_URL
     if provider == "deepseek":
         return DEEPSEEK_DEFAULT_BASE_URL
     if provider == "gemini":
@@ -114,11 +113,7 @@ class RuntimeConfigService:
             provider_key = _get_provider_api_key(db, defaults.llm_provider)
             llm_api_key = provider_key or _default_llm_api_key(defaults.llm_provider)
             provider_config = _get_provider_config(db, defaults.llm_provider)
-            llm_base_url = (
-                (provider_config.base_url or "").strip()
-                if provider_config and provider_config.base_url
-                else _default_llm_base_url(defaults.llm_provider)
-            )
+            llm_base_url = _default_llm_base_url(defaults.llm_provider)
             llm_extra_params = (
                 provider_config.extra_params
                 if provider_config and isinstance(provider_config.extra_params, dict)
@@ -151,11 +146,7 @@ class RuntimeConfigService:
         provider_key = _get_provider_api_key(db, llm_provider)
         llm_api_key = provider_key or _default_llm_api_key(llm_provider)
 
-        llm_base_url = (
-            (provider_config.base_url or "").strip()
-            if provider_config and provider_config.base_url
-            else _default_llm_base_url(llm_provider)
-        )
+        llm_base_url = _default_llm_base_url(llm_provider)
         llm_extra_params = (
             provider_config.extra_params
             if provider_config and isinstance(provider_config.extra_params, dict)

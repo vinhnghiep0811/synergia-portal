@@ -2,17 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "../components/AppHeader.jsx";
 import "../styles/AdminPage.css";
 import {
-  addAdminLLMProvider,
   getAdminActivities,
   getAdminCanonicalDocuments,
   getAdminConfiguration,
-  getAdminLLMProviders,
   getAdminLLMPrompts,
   getAdminEvaluationReport,
   getAdminOverview,
   getAdminPapers,
   getAdminProcessingLogs,
-  removeAdminLLMProvider,
   updateAdminConfiguration,
   updateAdminLLMPrompts,
   validateAdminConfiguration,
@@ -26,6 +23,11 @@ const TAB_CONFIG = [
   { key: "processing", label: "Processing log" },
   { key: "config", label: "Cấu hình" },
   { key: "evaluation", label: "Dữ liệu đánh giá" },
+];
+
+const PRIMARY_LLM_PROVIDERS = [
+  { name: "gemini", label: "Gemini" },
+  { name: "deepseek", label: "DeepSeek" },
 ];
 
 function formatDate(value) {
@@ -149,7 +151,6 @@ export function AdminPage() {
   const [configForm, setConfigForm] = useState({
     llm_provider: "gemini",
     llm_model: "",
-    llm_base_url: "",
     llm_extra_params: "",
     llm_api_key: "",
     embedding_model: "",
@@ -165,9 +166,6 @@ export function AdminPage() {
   const [validationResults, setValidationResults] = useState({});
   const [validatingService, setValidatingService] = useState(null);
   const [configSuccess, setConfigSuccess] = useState("");
-
-  const [llmProviders, setLlmProviders] = useState([]);
-  const [newProviderName, setNewProviderName] = useState("");
 
   const [promptTemplates, setPromptTemplates] = useState([]);
   const [promptForm, setPromptForm] = useState({});
@@ -234,9 +232,8 @@ export function AdminPage() {
 
   const loadConfig = useCallback(() => {
     return runWithState(async () => {
-      const [data, providerData, promptData] = await Promise.all([
+      const [data, promptData] = await Promise.all([
         getAdminConfiguration(),
-        getAdminLLMProviders(),
         getAdminLLMPrompts(),
       ]);
 
@@ -244,7 +241,6 @@ export function AdminPage() {
       setConfigForm({
         llm_provider: data.llm_provider || "gemini",
         llm_model: data.llm_model || "",
-        llm_base_url: data.llm_base_url || "",
         llm_extra_params: data.llm_extra_params
           ? JSON.stringify(data.llm_extra_params, null, 2)
           : "",
@@ -258,9 +254,6 @@ export function AdminPage() {
         semantic_scholar_api_key: "",
         telegram_bot_token: "",
       });
-
-      const providers = providerData?.providers || [];
-      setLlmProviders(providers);
 
       const templates = promptData?.templates || [];
       setPromptTemplates(templates);
@@ -352,13 +345,7 @@ export function AdminPage() {
     ];
   }, [evaluation]);
 
-  const providerOptions = useMemo(() => {
-    if (llmProviders.length) return llmProviders;
-    return [
-      { name: "gemini", is_fallback: false, is_locked: false },
-      { name: "ollama", is_fallback: true, is_locked: true },
-    ];
-  }, [llmProviders]);
+  const providerOptions = PRIMARY_LLM_PROVIDERS;
 
   const updateConfigField = useCallback((field, value) => {
     setConfigForm((prev) => {
@@ -367,7 +354,6 @@ export function AdminPage() {
           ...prev,
           llm_provider: value,
           llm_model: "",
-          llm_base_url: "",
           llm_extra_params: "",
           llm_api_key: "",
         };
@@ -397,35 +383,6 @@ export function AdminPage() {
       throw new Error("LLM extra params phải là JSON hợp lệ.");
     }
   }, []);
-
-  const handleAddProvider = useCallback(async () => {
-    const trimmed = newProviderName.trim();
-    if (!trimmed) return;
-
-    setError("");
-    try {
-      const data = await addAdminLLMProvider(trimmed);
-      setLlmProviders(data.providers || []);
-      setNewProviderName("");
-    } catch (err) {
-      setError(err.message || "Không thể thêm provider mới");
-    }
-  }, [newProviderName]);
-
-  const handleRemoveProvider = useCallback(async (name) => {
-    setError("");
-    try {
-      const data = await removeAdminLLMProvider(name);
-      const providers = data.providers || [];
-      setLlmProviders(providers);
-      if (configForm.llm_provider === name && providers.length > 0) {
-        const nextProvider = providers.find((item) => !item.is_locked) || providers[0];
-        updateConfigField("llm_provider", nextProvider.name);
-      }
-    } catch (err) {
-      setError(err.message || "Không thể xoá provider");
-    }
-  }, [configForm.llm_provider, updateConfigField]);
 
   const savePrompts = useCallback(async () => {
     setIsSavingPrompts(true);
@@ -463,7 +420,6 @@ export function AdminPage() {
         service,
         llm_provider: configForm.llm_provider,
         llm_model: configForm.llm_model || undefined,
-        llm_base_url: configForm.llm_base_url || undefined,
         llm_extra_params: extraParams || undefined,
         llm_api_key: configForm.llm_api_key || undefined,
         embedding_model: configForm.embedding_model || undefined,
@@ -495,7 +451,6 @@ export function AdminPage() {
       setConfigForm({
         llm_provider: updated.llm_provider || "gemini",
         llm_model: updated.llm_model || "",
-        llm_base_url: updated.llm_base_url || "",
         llm_extra_params: updated.llm_extra_params
           ? JSON.stringify(updated.llm_extra_params, null, 2)
           : "",
@@ -527,7 +482,6 @@ export function AdminPage() {
       const payload = {
         llm_provider: configForm.llm_provider,
         llm_model: configForm.llm_model,
-        llm_base_url: configForm.llm_base_url.trim() ? configForm.llm_base_url.trim() : null,
         embedding_model: configForm.embedding_model,
         metadata_match_threshold: Number(configForm.metadata_match_threshold),
         pipeline_retry_limit: Number(configForm.pipeline_retry_limit),
@@ -881,7 +835,7 @@ export function AdminPage() {
                     <select className="admin-input" value={configForm.llm_provider} onChange={(e) => updateConfigField("llm_provider", e.target.value)}>
                       {providerOptions.map((provider) => (
                         <option key={provider.name} value={provider.name}>
-                          {provider.name}{provider.is_fallback ? " (fallback)" : ""}
+                          {provider.label}
                         </option>
                       ))}
                     </select>
@@ -891,16 +845,6 @@ export function AdminPage() {
                     <input className="admin-input" type="text" value={configForm.llm_model} onChange={(e) => updateConfigField("llm_model", e.target.value)} placeholder="e.g. gemini-2.5-pro" />
                   </label>
                 </div>
-                <label className="admin-label">
-                  Base URL
-                  <input
-                    className="admin-input"
-                    type="text"
-                    value={configForm.llm_base_url}
-                    onChange={(e) => updateConfigField("llm_base_url", e.target.value)}
-                    placeholder="e.g. https://api.deepseek.com"
-                  />
-                </label>
                 <label className="admin-label">
                   Extra params (JSON)
                   <textarea
@@ -923,47 +867,6 @@ export function AdminPage() {
                 </label>
                 <div className="admin-meta-text">
                   Key hiện tại: {config?.llm_api_key_masked || "(chưa cấu hình)"}
-                </div>
-                <div className="admin-provider-manager">
-                  <label className="admin-label">
-                    Thêm provider mới
-                    <div className="admin-provider-add">
-                      <input
-                        className="admin-input"
-                        type="text"
-                        value={newProviderName}
-                        onChange={(e) => setNewProviderName(e.target.value)}
-                        placeholder="e.g. openai"
-                      />
-                      <button
-                        type="button"
-                        className="admin-test-btn"
-                        onClick={handleAddProvider}
-                        disabled={!newProviderName.trim()}
-                      >
-                        Thêm
-                      </button>
-                    </div>
-                  </label>
-                  <div className="admin-provider-list">
-                    {providerOptions.map((provider) => (
-                      <div key={provider.name} className="admin-provider-chip">
-                        <span>{provider.name}</span>
-                        {provider.is_fallback && <span className="admin-provider-tag">fallback</span>}
-                        <button
-                          type="button"
-                          className="admin-provider-remove"
-                          onClick={() => handleRemoveProvider(provider.name)}
-                          disabled={provider.is_locked}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="admin-meta-text">
-                    Ollama luôn được giữ làm fallback khi provider chính thất bại.
-                  </div>
                 </div>
               </div>
 

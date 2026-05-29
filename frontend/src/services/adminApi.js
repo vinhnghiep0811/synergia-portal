@@ -87,22 +87,6 @@ export async function getAdminEvaluationReport(windowDays = 7, searchSampleLimit
   });
 }
 
-export async function getAdminLLMProviders() {
-  return get("/api/admin/llm-providers");
-}
-
-export async function addAdminLLMProvider(name) {
-  return post("/api/admin/llm-providers", { name });
-}
-
-export async function removeAdminLLMProvider(name) {
-  return apiClient.delete(`/api/admin/llm-providers/${encodeURIComponent(name)}`)
-    .then((response) => response.data)
-    .catch(async (error) => {
-      throw new Error(await parseApiError(error));
-    });
-}
-
 export async function getAdminLLMPrompts() {
   return get("/api/admin/llm-prompts");
 }
