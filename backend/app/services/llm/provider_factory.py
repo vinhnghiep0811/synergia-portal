@@ -11,16 +11,9 @@ class LLMProviderFactory:
         model_name: str | None = None,
         retry_limit: int | None = None,
         timeout_seconds: int | None = None,
+        api_key: str | None = None,
     ) -> BaseLLMProvider:
         selected = (provider_name or LLM_PROVIDER or "gemini").lower().strip()
-
-        if selected == "gemini":
-            return GeminiLLMProvider(
-                model_name=model_name,
-                retry_attempts=retry_limit,
-                request_timeout_seconds=timeout_seconds,
-                fallback_timeout_seconds=timeout_seconds,
-            )
 
         if selected == "ollama":
             return OllamaLLMProvider(
@@ -28,4 +21,11 @@ class LLMProviderFactory:
                 timeout_seconds=timeout_seconds,
             )
 
-        raise ValueError(f"Unsupported LLM provider: {selected}")
+        return GeminiLLMProvider(
+            model_name=model_name,
+            retry_attempts=retry_limit,
+            request_timeout_seconds=timeout_seconds,
+            fallback_timeout_seconds=timeout_seconds,
+            provider_alias=selected,
+            api_key=api_key,
+        )

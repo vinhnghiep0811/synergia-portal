@@ -14,6 +14,7 @@ from app.repositories.extraction_run_repository import ExtractionRunRepository
 from app.schemas.extraction_result import ExtractionResultSchema
 from app.services.llm.input_builder import LLMInputBuilder
 from app.services.llm.prompt_builder import LLMPromptBuilder
+from app.services.llm_prompt_template_service import LLMPromptTemplateService
 from app.services.llm.constants import PROMPT_VERSION
 from app.services.llm.provider_factory import LLMProviderFactory
 from app.services.pdf_parse_service import extract_pdf_text_for_llm
@@ -34,9 +35,11 @@ class LLMExtractionService:
             model_name=runtime_config.llm_model,
             retry_limit=runtime_config.pipeline_retry_limit,
             timeout_seconds=runtime_config.pipeline_timeout_seconds,
+            api_key=runtime_config.llm_api_key,
         )
         self.input_builder = LLMInputBuilder()
-        self.prompt_builder = LLMPromptBuilder()
+        prompt_templates = LLMPromptTemplateService(db).get_template_map()
+        self.prompt_builder = LLMPromptBuilder(prompt_templates)
 
     def _has_expected_extraction_schema(self, raw_result: Any) -> bool:
         if not isinstance(raw_result, dict):

@@ -5,8 +5,9 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from app.core.config import GEMINI_MODEL, LLM_PROVIDER, OLLAMA_MODEL
+from app.core.config import GEMINI_API_KEY, GEMINI_MODEL, LLM_PROVIDER, OLLAMA_MODEL
 from app.models.admin_system_config import AdminSystemConfig
+from app.models.llm_provider_api_key import LLMProviderApiKey
 
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_METADATA_MATCH_THRESHOLD = 0.7
@@ -18,6 +19,7 @@ DEFAULT_SEMANTIC_SCHOLAR_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").str
 @dataclass(frozen=True)
 class RuntimeSystemConfig:
     semantic_scholar_api_key: str | None
+    llm_api_key: str | None
     llm_provider: str
     llm_model: str
     embedding_model: str
@@ -28,13 +30,30 @@ class RuntimeSystemConfig:
 
 def _normalize_provider(provider: str | None) -> str:
     normalized = (provider or "").strip().lower()
-    if normalized in {"gemini", "ollama"}:
-        return normalized
-    return "gemini"
+    return normalized or "gemini"
 
 
 def _default_llm_model(provider: str) -> str:
-    return GEMINI_MODEL if provider == "gemini" else OLLAMA_MODEL
+    return OLLAMA_MODEL if provider == "ollama" else GEMINI_MODEL
+
+
+def _default_llm_api_key(provider: str) -> str | None:
+    if provider == "gemini":
+        return GEMINI_API_KEY or None
+    return None
+
+
+def _get_provider_api_key(db: Session, provider: str) -> str | None:
+    normalized = _normalize_provider(provider)
+    row = (
+        db.query(LLMProviderApiKey)
+        .filter(LLMProviderApiKey.provider_name == normalized)
+        .first()
+    )
+    if not row:
+        return None
+    value = (row.api_key or "").strip()
+    return value or None
 
 
 class RuntimeConfigService:
@@ -43,6 +62,7 @@ class RuntimeConfigService:
         default_provider = _normalize_provider(LLM_PROVIDER)
         defaults = RuntimeSystemConfig(
             semantic_scholar_api_key=DEFAULT_SEMANTIC_SCHOLAR_API_KEY or None,
+            llm_api_key=_default_llm_api_key(default_provider),
             llm_provider=default_provider,
             llm_model=_default_llm_model(default_provider),
             embedding_model=DEFAULT_EMBEDDING_MODEL,
@@ -60,11 +80,24 @@ class RuntimeConfigService:
             .first()
         )
         if config is None:
-            return defaults
+            provider_key = _get_provider_api_key(db, defaults.llm_provider)
+            llm_api_key = provider_key or _default_llm_api_key(defaults.llm_provider)
+            return RuntimeSystemConfig(
+                semantic_scholar_api_key=defaults.semantic_scholar_api_key,
+                llm_api_key=llm_api_key,
+                llm_provider=defaults.llm_provider,
+                llm_model=defaults.llm_model,
+                embedding_model=defaults.embedding_model,
+                metadata_match_threshold=defaults.metadata_match_threshold,
+                pipeline_retry_limit=defaults.pipeline_retry_limit,
+                pipeline_timeout_seconds=defaults.pipeline_timeout_seconds,
+            )
 
         llm_provider = _normalize_provider(config.llm_provider or defaults.llm_provider)
         llm_model = (config.llm_model or "").strip() or _default_llm_model(llm_provider)
         embedding_model = (config.embedding_model or "").strip() or defaults.embedding_model
+        provider_key = _get_provider_api_key(db, llm_provider)
+        llm_api_key = provider_key or _default_llm_api_key(llm_provider)
 
         if config.metadata_match_threshold is None:
             metadata_match_threshold = defaults.metadata_match_threshold
@@ -89,6 +122,7 @@ class RuntimeConfigService:
 
         return RuntimeSystemConfig(
             semantic_scholar_api_key=semantic_scholar_api_key,
+            llm_api_key=llm_api_key,
             llm_provider=llm_provider,
             llm_model=llm_model,
             embedding_model=embedding_model,

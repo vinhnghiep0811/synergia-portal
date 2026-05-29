@@ -307,6 +307,80 @@
   cursor: default;
 }
 
+.admin-provider-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.admin-provider-add {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.admin-provider-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.admin-provider-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  color: #334155;
+}
+
+.admin-provider-tag {
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1e40af;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.68rem;
+}
+
+.admin-provider-remove {
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+}
+
+.admin-provider-remove:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.admin-prompt-grid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.admin-textarea {
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.82rem;
+  font-family: "SF Mono", "Monaco", "Inconsolata", "Roboto Mono", monospace;
+  background: #ffffff;
+  min-height: 180px;
+  resize: vertical;
+}
+
+.admin-textarea:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
 .admin-btn-compact {
   padding: 0.5rem 1rem;
   min-height: 38px;

@@ -11,7 +11,12 @@ class AdminConfigUpdateRequest(BaseModel):
         min_length=8,
         description="Optional. Leave empty to keep existing key.",
     )
-    llm_provider: str | None = Field(default=None, pattern="^(gemini|ollama)$")
+    llm_api_key: str | None = Field(
+        default=None,
+        min_length=8,
+        description="Optional. Leave empty to keep existing key.",
+    )
+    llm_provider: str | None = Field(default=None, min_length=1, max_length=50)
     llm_model: str | None = Field(default=None, min_length=1, max_length=255)
     embedding_model: str | None = Field(default=None, min_length=1, max_length=255)
     metadata_match_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -54,8 +59,10 @@ class AdminConfigResponse(BaseModel):
     pipeline_timeout_seconds: int
     telegram_enabled: bool
     telegram_chat_id: str | None
+    llm_api_key_masked: str | None
     semantic_scholar_api_key_masked: str | None
     telegram_bot_token_masked: str | None
+    has_llm_api_key: bool
     has_semantic_scholar_api_key: bool
     has_telegram_bot_token: bool
     source: str
@@ -71,8 +78,9 @@ class ConfigValidateRequest(BaseModel):
         pattern="^(llm|semantic_scholar|telegram|embedding|all)$",
         description="Which service to validate: llm, semantic_scholar, telegram, embedding, or all.",
     )
-    llm_provider: str | None = Field(default=None, pattern="^(gemini|ollama)$")
+    llm_provider: str | None = Field(default=None, min_length=1, max_length=50)
     llm_model: str | None = Field(default=None, min_length=1, max_length=255)
+    llm_api_key: str | None = Field(default=None, min_length=1)
     embedding_model: str | None = Field(default=None, min_length=1, max_length=255)
     semantic_scholar_api_key: str | None = Field(default=None, min_length=1)
     telegram_bot_token: str | None = Field(default=None, min_length=1)
@@ -90,6 +98,42 @@ class ServiceValidationResult(BaseModel):
 class ConfigValidateResponse(BaseModel):
     results: list[ServiceValidationResult]
     all_ok: bool
+
+
+class LLMProviderItem(BaseModel):
+    name: str
+    is_fallback: bool = False
+    is_locked: bool = False
+
+
+class LLMProviderListResponse(BaseModel):
+    providers: list[LLMProviderItem]
+
+
+class LLMProviderCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=50)
+
+
+class LLMPromptTemplateItem(BaseModel):
+    key: str
+    label: str
+    content: str
+    is_default: bool
+    updated_at: datetime | None
+    updated_by: str | None
+
+
+class LLMPromptTemplateUpdateItem(BaseModel):
+    key: str
+    content: str
+
+
+class LLMPromptTemplatesUpdateRequest(BaseModel):
+    templates: list[LLMPromptTemplateUpdateItem]
+
+
+class LLMPromptTemplatesResponse(BaseModel):
+    templates: list[LLMPromptTemplateItem]
 
 
 class ProcessingLogSummaryItem(BaseModel):

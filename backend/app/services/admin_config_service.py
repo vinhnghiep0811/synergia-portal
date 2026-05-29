@@ -23,6 +23,7 @@ from app.core.config import (
     TELEGRAM_CHAT_ID,
 )
 from app.models.admin_system_config import AdminSystemConfig
+from app.models.llm_provider_api_key import LLMProviderApiKey
 from app.models.user import User
 from app.schemas.admin import (
     AdminConfigResponse,
@@ -33,6 +34,7 @@ from app.schemas.admin import (
 )
 from app.services.activity_log_service import ActivityLogService
 from app.services.embedding_service import EMBEDDING_DIM, EmbeddingService
+from app.services.llm_provider_registry_service import LLMProviderRegistryService
 from app.services.runtime_config_service import RuntimeConfigService
 
 
@@ -40,6 +42,55 @@ class AdminConfigService:
     def __init__(self, db: Session):
         self.db = db
         self.activity_service = ActivityLogService(db)
+        self.provider_registry = LLMProviderRegistryService(db)
+
+    @staticmethod
+    def _normalize_provider_name(value: str | None) -> str:
+        normalized = (value or "").strip().lower()
+        return normalized or "gemini"
+
+    def _get_provider_api_key(self, provider: str) -> str | None:
+        normalized = self._normalize_provider_name(provider)
+        row = (
+            self.db.query(LLMProviderApiKey)
+            .filter(LLMProviderApiKey.provider_name == normalized)
+            .first()
+        )
+        if not row:
+            return None
+        value = (row.api_key or "").strip()
+        return value or None
+
+    def _resolve_llm_api_key(self, provider: str, override_key: str | None = None) -> str | None:
+        if override_key:
+            return override_key
+        stored_key = self._get_provider_api_key(provider)
+        if stored_key:
+            return stored_key
+        normalized = self._normalize_provider_name(provider)
+        if normalized == "gemini":
+            return GEMINI_API_KEY or None
+        return None
+
+    def _upsert_llm_api_key(self, provider: str, api_key: str, actor_user: User) -> None:
+        normalized = self._normalize_provider_name(provider)
+        row = (
+            self.db.query(LLMProviderApiKey)
+            .filter(LLMProviderApiKey.provider_name == normalized)
+            .first()
+        )
+        if row:
+            row.api_key = api_key
+            row.updated_by_user_id = actor_user.id
+            return
+
+        self.db.add(
+            LLMProviderApiKey(
+                provider_name=normalized,
+                api_key=api_key,
+                updated_by_user_id=actor_user.id,
+            )
+        )
 
     def get_configuration(self) -> AdminConfigResponse:
         config = self._get_config()
@@ -54,8 +105,10 @@ class AdminConfigService:
                 pipeline_timeout_seconds=defaults["pipeline_timeout_seconds"],
                 telegram_enabled=defaults["telegram_enabled"],
                 telegram_chat_id=defaults["telegram_chat_id"],
+                llm_api_key_masked=defaults["llm_api_key_masked"],
                 semantic_scholar_api_key_masked=defaults["semantic_scholar_api_key_masked"],
                 telegram_bot_token_masked=defaults["telegram_bot_token_masked"],
+                has_llm_api_key=defaults["has_llm_api_key"],
                 has_semantic_scholar_api_key=defaults["has_semantic_scholar_api_key"],
                 has_telegram_bot_token=defaults["has_telegram_bot_token"],
                 source="env_default",
@@ -69,19 +122,70 @@ class AdminConfigService:
         """Validate individual service connections without saving to database."""
         # Build a temporary config object for validation
         existing_config = self._get_config()
+        defaults = RuntimeConfigService.get(self.db)
+
+        def normalize_text(value: object) -> str | None:
+            if isinstance(value, str):
+                stripped = value.strip()
+                return stripped or None
+            return None if value is None else str(value)
+
+        provider_value = (
+            normalize_text(payload.llm_provider)
+            or (existing_config.llm_provider if existing_config else defaults.llm_provider)
+        )
+        provider_value = self._normalize_provider_name(provider_value)
+        self.provider_registry.ensure_provider_allowed(provider_value)
+
+        llm_model_value = normalize_text(payload.llm_model)
+        if not llm_model_value:
+            existing_provider = (
+                self._normalize_provider_name(existing_config.llm_provider)
+                if existing_config
+                else None
+            )
+            if existing_config and provider_value == existing_provider:
+                llm_model_value = normalize_text(existing_config.llm_model)
+        if not llm_model_value:
+            llm_model_value = GEMINI_MODEL if provider_value != "ollama" else OLLAMA_MODEL
+
+        llm_api_key_value = normalize_text(payload.llm_api_key)
+        resolved_llm_api_key = self._resolve_llm_api_key(provider_value, llm_api_key_value)
+
+        embedding_model_value = normalize_text(payload.embedding_model)
+        if not embedding_model_value:
+            embedding_model_value = (
+                normalize_text(existing_config.embedding_model)
+                if existing_config
+                else None
+            ) or defaults.embedding_model
+
+        semantic_key_value = normalize_text(payload.semantic_scholar_api_key)
+        if not semantic_key_value:
+            semantic_key_value = (
+                normalize_text(existing_config.semantic_scholar_api_key)
+                if existing_config
+                else None
+            ) or defaults.semantic_scholar_api_key
+
+        telegram_bot_token_value = normalize_text(payload.telegram_bot_token) or (
+            normalize_text(existing_config.telegram_bot_token)
+            if existing_config
+            else None
+        )
+        telegram_chat_id_value = normalize_text(payload.telegram_chat_id) or (
+            normalize_text(existing_config.telegram_chat_id)
+            if existing_config
+            else None
+        )
+
         temp = AdminSystemConfig(
-            llm_provider=payload.llm_provider
-            or (existing_config.llm_provider if existing_config else "gemini"),
-            llm_model=payload.llm_model
-            or (existing_config.llm_model if existing_config else ""),
-            embedding_model=payload.embedding_model
-            or (existing_config.embedding_model if existing_config else ""),
-            semantic_scholar_api_key=payload.semantic_scholar_api_key
-            or (existing_config.semantic_scholar_api_key if existing_config else None),
-            telegram_bot_token=payload.telegram_bot_token
-            or (existing_config.telegram_bot_token if existing_config else None),
-            telegram_chat_id=payload.telegram_chat_id
-            or (existing_config.telegram_chat_id if existing_config else None),
+            llm_provider=provider_value,
+            llm_model=llm_model_value,
+            embedding_model=embedding_model_value,
+            semantic_scholar_api_key=semantic_key_value,
+            telegram_bot_token=telegram_bot_token_value,
+            telegram_chat_id=telegram_chat_id_value,
             telegram_enabled=True,  # force enabled for validation
             pipeline_timeout_seconds=payload.pipeline_timeout_seconds
             or (existing_config.pipeline_timeout_seconds if existing_config else 300),
@@ -95,19 +199,22 @@ class AdminConfigService:
 
         results: list[ServiceValidationResult] = []
         for svc in services_to_validate:
-            result = self._validate_single_service(svc, temp)
+            result = self._validate_single_service(svc, temp, resolved_llm_api_key)
             results.append(result)
 
         all_ok = all(r.ok for r in results)
         return ConfigValidateResponse(results=results, all_ok=all_ok)
 
     def _validate_single_service(
-        self, service: str, config: AdminSystemConfig
+        self,
+        service: str,
+        config: AdminSystemConfig,
+        llm_api_key: str | None = None,
     ) -> ServiceValidationResult:
         """Validate a single service and return a structured result instead of raising."""
         try:
             if service == "llm":
-                self._validate_llm_configuration(config)
+                self._validate_llm_configuration(config, llm_api_key)
                 return ServiceValidationResult(
                     service="llm",
                     ok=True,
@@ -173,30 +280,84 @@ class AdminConfigService:
             return self._activate_default_settings(actor_user)
 
         data = payload.model_dump(exclude_unset=True)
-        if not data:
-            return self.get_configuration()
-
         data.pop("use_default_settings", None)
-        if not data:
-            return self.get_configuration()
+
+        defaults = RuntimeConfigService.get()
+        default_telegram_enabled = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+
+        def normalize_text(value: object) -> str | None:
+            if isinstance(value, str):
+                stripped = value.strip()
+                return stripped or None
+            return None if value is None else str(value)
+
+        provider_value = normalize_text(data.get("llm_provider")) or defaults.llm_provider
+        provider_value = self._normalize_provider_name(provider_value)
+        self.provider_registry.ensure_provider_allowed(provider_value)
+
+        llm_model_value = normalize_text(data.get("llm_model"))
+        if not llm_model_value:
+            llm_model_value = (
+                defaults.llm_model
+                if provider_value == defaults.llm_provider
+                else (GEMINI_MODEL if provider_value != "ollama" else OLLAMA_MODEL)
+            )
+
+        llm_api_key_value = normalize_text(data.get("llm_api_key"))
+        resolved_llm_api_key = self._resolve_llm_api_key(provider_value, llm_api_key_value)
+        semantic_key_value = normalize_text(data.get("semantic_scholar_api_key")) or defaults.semantic_scholar_api_key
+        embedding_model_value = normalize_text(data.get("embedding_model")) or defaults.embedding_model
+
+        metadata_match_threshold = (
+            data.get("metadata_match_threshold")
+            if data.get("metadata_match_threshold") is not None
+            else defaults.metadata_match_threshold
+        )
+        pipeline_retry_limit = (
+            data.get("pipeline_retry_limit")
+            if data.get("pipeline_retry_limit") is not None
+            else defaults.pipeline_retry_limit
+        )
+        pipeline_timeout_seconds = (
+            data.get("pipeline_timeout_seconds")
+            if data.get("pipeline_timeout_seconds") is not None
+            else defaults.pipeline_timeout_seconds
+        )
+
+        telegram_enabled = (
+            data.get("telegram_enabled")
+            if data.get("telegram_enabled") is not None
+            else default_telegram_enabled
+        )
+        telegram_bot_token = normalize_text(data.get("telegram_bot_token")) or (TELEGRAM_BOT_TOKEN or None)
+        telegram_chat_id = normalize_text(data.get("telegram_chat_id")) or (TELEGRAM_CHAT_ID or None)
 
         config = self._get_or_create_config()
+        effective_values = {
+            "llm_provider": provider_value,
+            "llm_model": llm_model_value,
+            "embedding_model": embedding_model_value,
+            "metadata_match_threshold": metadata_match_threshold,
+            "pipeline_retry_limit": pipeline_retry_limit,
+            "pipeline_timeout_seconds": pipeline_timeout_seconds,
+            "semantic_scholar_api_key": semantic_key_value,
+            "telegram_enabled": bool(telegram_enabled),
+            "telegram_bot_token": telegram_bot_token,
+            "telegram_chat_id": telegram_chat_id,
+        }
+
         updated_fields: list[str] = []
         secret_fields_changed: list[str] = []
-
-        for field_name, raw_value in data.items():
-            value = raw_value
-            if isinstance(value, str):
-                value = value.strip()
-
-            if field_name in {"semantic_scholar_api_key", "telegram_bot_token"} and value:
-                secret_fields_changed.append(field_name)
-
-            if field_name == "llm_provider" and isinstance(value, str):
-                value = value.lower()
-
+        for field_name, value in effective_values.items():
             setattr(config, field_name, value)
             updated_fields.append(field_name)
+
+        if normalize_text(data.get("semantic_scholar_api_key")):
+            secret_fields_changed.append("semantic_scholar_api_key")
+        if normalize_text(data.get("telegram_bot_token")):
+            secret_fields_changed.append("telegram_bot_token")
+        if normalize_text(data.get("llm_api_key")):
+            secret_fields_changed.append("llm_api_key")
 
         if config.telegram_enabled and (not config.telegram_bot_token or not config.telegram_chat_id):
             raise HTTPException(
@@ -204,7 +365,10 @@ class AdminConfigService:
                 detail="telegram_bot_token and telegram_chat_id are required when Telegram is enabled.",
             )
 
-        self._validate_custom_configuration(config)
+        self._validate_custom_configuration(config, resolved_llm_api_key)
+
+        if llm_api_key_value:
+            self._upsert_llm_api_key(provider_value, llm_api_key_value, actor_user)
 
         config.updated_by_user_id = actor_user.id
         self.db.add(config)
@@ -301,6 +465,8 @@ class AdminConfigService:
             if user:
                 updated_by = user.email
 
+        llm_api_key = self._resolve_llm_api_key(config.llm_provider)
+
         return AdminConfigResponse(
             llm_provider=config.llm_provider,
             llm_model=config.llm_model,
@@ -310,8 +476,10 @@ class AdminConfigService:
             pipeline_timeout_seconds=config.pipeline_timeout_seconds,
             telegram_enabled=config.telegram_enabled,
             telegram_chat_id=config.telegram_chat_id,
+            llm_api_key_masked=self._mask_secret(llm_api_key),
             semantic_scholar_api_key_masked=self._mask_secret(config.semantic_scholar_api_key),
             telegram_bot_token_masked=self._mask_secret(config.telegram_bot_token),
+            has_llm_api_key=bool(llm_api_key),
             has_semantic_scholar_api_key=bool(config.semantic_scholar_api_key),
             has_telegram_bot_token=bool(config.telegram_bot_token),
             source=source,
@@ -327,9 +495,8 @@ class AdminConfigService:
             return "*" * len(secret)
         return f"{secret[:4]}{'*' * (len(secret) - 8)}{secret[-4:]}"
 
-    @staticmethod
-    def _defaults() -> dict[str, object]:
-        runtime_defaults = RuntimeConfigService.get()
+    def _defaults(self) -> dict[str, object]:
+        runtime_defaults = RuntimeConfigService.get(self.db)
         telegram_enabled = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
 
         return {
@@ -341,10 +508,12 @@ class AdminConfigService:
             "pipeline_timeout_seconds": runtime_defaults.pipeline_timeout_seconds,
             "telegram_enabled": telegram_enabled,
             "telegram_chat_id": TELEGRAM_CHAT_ID or None,
+            "llm_api_key_masked": self._mask_secret(runtime_defaults.llm_api_key),
             "semantic_scholar_api_key_masked": AdminConfigService._mask_secret(
                 runtime_defaults.semantic_scholar_api_key
             ),
             "telegram_bot_token_masked": AdminConfigService._mask_secret(TELEGRAM_BOT_TOKEN),
+            "has_llm_api_key": bool(runtime_defaults.llm_api_key),
             "has_semantic_scholar_api_key": bool(runtime_defaults.semantic_scholar_api_key),
             "has_telegram_bot_token": bool(TELEGRAM_BOT_TOKEN),
         }
@@ -353,21 +522,22 @@ class AdminConfigService:
         timeout_value = int(config.pipeline_timeout_seconds or 300)
         return float(max(5, min(timeout_value, 30)))
 
-    def _validate_custom_configuration(self, config: AdminSystemConfig) -> None:
-        self._validate_llm_configuration(config)
+    def _validate_custom_configuration(
+        self, config: AdminSystemConfig, llm_api_key: str | None = None
+    ) -> None:
+        self._validate_llm_configuration(config, llm_api_key)
         self._validate_semantic_scholar_configuration(config)
         self._validate_embedding_configuration(config)
         self._validate_telegram_configuration(config)
 
-    def _validate_llm_configuration(self, config: AdminSystemConfig) -> None:
-        provider = (config.llm_provider or "").strip().lower()
+    def _validate_llm_configuration(
+        self, config: AdminSystemConfig, llm_api_key: str | None = None
+    ) -> None:
+        provider = (config.llm_provider or "").strip().lower() or "gemini"
         model_name = (config.llm_model or "").strip()
+        api_key = (llm_api_key or "").strip()
 
-        if provider not in {"gemini", "ollama"}:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="llm_provider must be either 'gemini' or 'ollama'.",
-            )
+        self.provider_registry.ensure_provider_allowed(provider)
         if not model_name:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -375,11 +545,14 @@ class AdminConfigService:
             )
 
         timeout_seconds = self._request_timeout_seconds(config)
-        if provider == "gemini":
-            if not GEMINI_API_KEY:
+        if provider != "ollama":
+            if not api_key:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="GEMINI_API_KEY is missing in environment. Choose default settings or configure environment first.",
+                    detail=(
+                        "LLM API key is missing in environment/admin config. "
+                        "Choose default settings or configure environment first."
+                    ),
                 )
             endpoint = (
                 "https://generativelanguage.googleapis.com/v1beta/"
@@ -398,7 +571,7 @@ class AdminConfigService:
                     endpoint,
                     headers={
                         "Content-Type": "application/json",
-                        "x-goog-api-key": GEMINI_API_KEY,
+                        "x-goog-api-key": api_key,
                     },
                     json=payload,
                     timeout=timeout_seconds,

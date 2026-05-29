@@ -40,8 +40,11 @@ class GeminiLLMProvider(BaseLLMProvider):
         retry_attempts: int | None = None,
         request_timeout_seconds: int | None = None,
         fallback_timeout_seconds: int | None = None,
+        provider_alias: str | None = None,
+        api_key: str | None = None,
     ) -> None:
-        self.api_key = GEMINI_API_KEY
+        self.api_key = (api_key or "").strip() or GEMINI_API_KEY
+        self.provider_alias = (provider_alias or "gemini").strip() or "gemini"
         normalized_model = (model_name or "").strip()
         self.model = normalized_model or GEMINI_MODEL
         self.temperature = GEMINI_TEMPERATURE
@@ -86,7 +89,7 @@ class GeminiLLMProvider(BaseLLMProvider):
         raw_text = provider_result["raw_text"]
         usage = provider_result.get("usage") or {}
         finish_reason = provider_result.get("finish_reason")
-        provider_name = provider_result.get("provider") or "gemini"
+        provider_name = provider_result.get("provider") or self.provider_alias
         model_name = provider_result.get("model") or self.model
 
         with open("/tmp/llm_raw_output.txt", "w", encoding="utf-8") as f:
@@ -177,7 +180,7 @@ class GeminiLLMProvider(BaseLLMProvider):
                 "completion_tokens": usage.get("candidatesTokenCount"),
                 "total_tokens": usage.get("totalTokenCount"),
             },
-            "provider": "gemini",
+            "provider": self.provider_alias,
             "model": self.model,
             "finish_reason": finish_reason,
         }

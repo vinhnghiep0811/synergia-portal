@@ -2,14 +2,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "../components/AppHeader.jsx";
 import "../styles/AdminPage.css";
 import {
+  addAdminLLMProvider,
   getAdminActivities,
   getAdminCanonicalDocuments,
   getAdminConfiguration,
+  getAdminLLMProviders,
+  getAdminLLMPrompts,
   getAdminEvaluationReport,
   getAdminOverview,
   getAdminPapers,
   getAdminProcessingLogs,
+  removeAdminLLMProvider,
   updateAdminConfiguration,
+  updateAdminLLMPrompts,
   validateAdminConfiguration,
 } from "../services/adminApi.js";
 
@@ -144,6 +149,7 @@ export function AdminPage() {
   const [configForm, setConfigForm] = useState({
     llm_provider: "gemini",
     llm_model: "",
+    llm_api_key: "",
     embedding_model: "",
     metadata_match_threshold: 0.7,
     pipeline_retry_limit: 3,
@@ -157,6 +163,14 @@ export function AdminPage() {
   const [validationResults, setValidationResults] = useState({});
   const [validatingService, setValidatingService] = useState(null);
   const [configSuccess, setConfigSuccess] = useState("");
+
+  const [llmProviders, setLlmProviders] = useState([]);
+  const [newProviderName, setNewProviderName] = useState("");
+
+  const [promptTemplates, setPromptTemplates] = useState([]);
+  const [promptForm, setPromptForm] = useState({});
+  const [isSavingPrompts, setIsSavingPrompts] = useState(false);
+  const [promptSuccess, setPromptSuccess] = useState("");
 
   const [evaluation, setEvaluation] = useState(null);
   const [windowDays, setWindowDays] = useState(7);
@@ -218,11 +232,17 @@ export function AdminPage() {
 
   const loadConfig = useCallback(() => {
     return runWithState(async () => {
-      const data = await getAdminConfiguration();
+      const [data, providerData, promptData] = await Promise.all([
+        getAdminConfiguration(),
+        getAdminLLMProviders(),
+        getAdminLLMPrompts(),
+      ]);
+
       setConfig(data);
       setConfigForm({
         llm_provider: data.llm_provider || "gemini",
         llm_model: data.llm_model || "",
+        llm_api_key: "",
         embedding_model: data.embedding_model || "",
         metadata_match_threshold: data.metadata_match_threshold ?? 0.7,
         pipeline_retry_limit: data.pipeline_retry_limit ?? 3,
@@ -232,8 +252,21 @@ export function AdminPage() {
         semantic_scholar_api_key: "",
         telegram_bot_token: "",
       });
+
+      const providers = providerData?.providers || [];
+      setLlmProviders(providers);
+
+      const templates = promptData?.templates || [];
+      setPromptTemplates(templates);
+      const initialPromptForm = {};
+      templates.forEach((template) => {
+        initialPromptForm[template.key] = template.content || "";
+      });
+      setPromptForm(initialPromptForm);
+
       setValidationResults({});
       setConfigSuccess("");
+      setPromptSuccess("");
     });
   }, [runWithState]);
 
@@ -313,6 +346,14 @@ export function AdminPage() {
     ];
   }, [evaluation]);
 
+  const providerOptions = useMemo(() => {
+    if (llmProviders.length) return llmProviders;
+    return [
+      { name: "gemini", is_fallback: false, is_locked: false },
+      { name: "ollama", is_fallback: true, is_locked: true },
+    ];
+  }, [llmProviders]);
+
   const updateConfigField = useCallback((field, value) => {
     setConfigForm((prev) => ({ ...prev, [field]: value }));
     setValidationResults((prev) => {
@@ -325,6 +366,67 @@ export function AdminPage() {
     });
   }, []);
 
+  const updatePromptField = useCallback((key, value) => {
+    setPromptForm((prev) => ({ ...prev, [key]: value }));
+    setPromptSuccess("");
+  }, []);
+
+  const handleAddProvider = useCallback(async () => {
+    const trimmed = newProviderName.trim();
+    if (!trimmed) return;
+
+    setError("");
+    try {
+      const data = await addAdminLLMProvider(trimmed);
+      setLlmProviders(data.providers || []);
+      setNewProviderName("");
+    } catch (err) {
+      setError(err.message || "Không thể thêm provider mới");
+    }
+  }, [newProviderName]);
+
+  const handleRemoveProvider = useCallback(async (name) => {
+    setError("");
+    try {
+      const data = await removeAdminLLMProvider(name);
+      const providers = data.providers || [];
+      setLlmProviders(providers);
+      if (configForm.llm_provider === name && providers.length > 0) {
+        const nextProvider = providers.find((item) => !item.is_locked) || providers[0];
+        updateConfigField("llm_provider", nextProvider.name);
+      }
+    } catch (err) {
+      setError(err.message || "Không thể xoá provider");
+    }
+  }, [configForm.llm_provider, updateConfigField]);
+
+  const savePrompts = useCallback(async () => {
+    setIsSavingPrompts(true);
+    setError("");
+    setPromptSuccess("");
+    try {
+      const payload = {
+        templates: promptTemplates.map((template) => ({
+          key: template.key,
+          content: promptForm[template.key] ?? "",
+        })),
+      };
+      const updated = await updateAdminLLMPrompts(payload);
+      const templates = updated.templates || [];
+      setPromptTemplates(templates);
+      const nextPromptForm = {};
+      templates.forEach((template) => {
+        nextPromptForm[template.key] = template.content || "";
+      });
+      setPromptForm(nextPromptForm);
+      setPromptSuccess("Prompt đã được lưu.");
+    } catch (err) {
+      setError(err.message || "Lưu prompt thất bại");
+    } finally {
+      setIsSavingPrompts(false);
+    }
+  }, [promptForm, promptTemplates]);
+
   const testService = useCallback(async (service) => {
     setValidatingService(service);
     setError("");
@@ -333,6 +435,7 @@ export function AdminPage() {
         service,
         llm_provider: configForm.llm_provider,
         llm_model: configForm.llm_model || undefined,
+        llm_api_key: configForm.llm_api_key || undefined,
         embedding_model: configForm.embedding_model || undefined,
         semantic_scholar_api_key: configForm.semantic_scholar_api_key || undefined,
         telegram_bot_token: configForm.telegram_bot_token || undefined,
@@ -362,6 +465,7 @@ export function AdminPage() {
       setConfigForm({
         llm_provider: updated.llm_provider || "gemini",
         llm_model: updated.llm_model || "",
+        llm_api_key: "",
         embedding_model: updated.embedding_model || "",
         metadata_match_threshold: updated.metadata_match_threshold ?? 0.7,
         pipeline_retry_limit: updated.pipeline_retry_limit ?? 3,
@@ -395,6 +499,9 @@ export function AdminPage() {
         telegram_enabled: Boolean(configForm.telegram_enabled),
         telegram_chat_id: configForm.telegram_chat_id || null,
       };
+      if (configForm.llm_api_key.trim()) {
+        payload.llm_api_key = configForm.llm_api_key.trim();
+      }
       if (configForm.semantic_scholar_api_key.trim()) {
         payload.semantic_scholar_api_key = configForm.semantic_scholar_api_key.trim();
       }
@@ -406,6 +513,7 @@ export function AdminPage() {
       setConfig(updated);
       setConfigForm((prev) => ({
         ...prev,
+        llm_api_key: "",
         semantic_scholar_api_key: "",
         telegram_bot_token: "",
       }));
@@ -730,14 +838,117 @@ export function AdminPage() {
                   <label className="admin-label">
                     Provider
                     <select className="admin-input" value={configForm.llm_provider} onChange={(e) => updateConfigField("llm_provider", e.target.value)}>
-                      <option value="gemini">Gemini</option>
-                      <option value="ollama">Ollama</option>
+                      {providerOptions.map((provider) => (
+                        <option key={provider.name} value={provider.name}>
+                          {provider.name}{provider.is_fallback ? " (fallback)" : ""}
+                        </option>
+                      ))}
                     </select>
                   </label>
                   <label className="admin-label">
                     Model name
                     <input className="admin-input" type="text" value={configForm.llm_model} onChange={(e) => updateConfigField("llm_model", e.target.value)} placeholder="e.g. gemini-2.5-pro" />
                   </label>
+                </div>
+                <label className="admin-label">
+                  API key (nhập mới để cập nhật)
+                  <input
+                    className="admin-input"
+                    type="password"
+                    value={configForm.llm_api_key}
+                    onChange={(e) => updateConfigField("llm_api_key", e.target.value)}
+                    placeholder="Nhập API key..."
+                  />
+                </label>
+                <div className="admin-meta-text">
+                  Key hiện tại: {config?.llm_api_key_masked || "(chưa cấu hình)"}
+                </div>
+                <div className="admin-provider-manager">
+                  <label className="admin-label">
+                    Thêm provider mới
+                    <div className="admin-provider-add">
+                      <input
+                        className="admin-input"
+                        type="text"
+                        value={newProviderName}
+                        onChange={(e) => setNewProviderName(e.target.value)}
+                        placeholder="e.g. openai"
+                      />
+                      <button
+                        type="button"
+                        className="admin-test-btn"
+                        onClick={handleAddProvider}
+                        disabled={!newProviderName.trim()}
+                      >
+                        Thêm
+                      </button>
+                    </div>
+                  </label>
+                  <div className="admin-provider-list">
+                    {providerOptions.map((provider) => (
+                      <div key={provider.name} className="admin-provider-chip">
+                        <span>{provider.name}</span>
+                        {provider.is_fallback && <span className="admin-provider-tag">fallback</span>}
+                        <button
+                          type="button"
+                          className="admin-provider-remove"
+                          onClick={() => handleRemoveProvider(provider.name)}
+                          disabled={provider.is_locked}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="admin-meta-text">
+                    Ollama luôn được giữ làm fallback khi provider chính thất bại.
+                  </div>
+                </div>
+              </div>
+
+              {/* Prompt Templates Section */}
+              <div className="card admin-panel-card admin-config-card">
+                <div className="admin-config-card__head">
+                  <h4 className="admin-card-subtitle">📝 Prompt LLM</h4>
+                  <div className="admin-filter-row">
+                    <button
+                      type="button"
+                      onClick={savePrompts}
+                      disabled={isSavingPrompts}
+                      className="admin-test-btn"
+                    >
+                      {isSavingPrompts ? "Đang lưu..." : "Lưu prompt"}
+                    </button>
+                  </div>
+                </div>
+                {promptSuccess && (
+                  <div className="admin-callout admin-callout--success">
+                    ✅ {promptSuccess}
+                  </div>
+                )}
+                <div className="admin-meta-text">
+                  Placeholder hỗ trợ: {"{{input_text}}, {{schema}}, {{output_shape}}, {{shape}}, {{broken_json}}, {{prompt_version}}."}
+                </div>
+                <div className="admin-prompt-grid">
+                  {promptTemplates.length === 0 && (
+                    <div className="admin-empty-state">Chưa có prompt để chỉnh sửa.</div>
+                  )}
+                  {promptTemplates.map((template) => (
+                    <label key={template.key} className="admin-label admin-label--prompt">
+                      {template.label}
+                      <textarea
+                        className="admin-textarea"
+                        rows={10}
+                        value={promptForm[template.key] || ""}
+                        onChange={(e) => updatePromptField(template.key, e.target.value)}
+                      />
+                      <div className="admin-meta-text">
+                        Key: {template.key} · {template.is_default ? "Default" : "Custom"}
+                        {template.updated_at ? ` · Cập nhật ${formatDate(template.updated_at)}` : ""}
+                        {template.updated_by ? ` · bởi ${template.updated_by}` : ""}
+                      </div>
+                    </label>
+                  ))}
                 </div>
               </div>
 
