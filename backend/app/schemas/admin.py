@@ -18,6 +18,8 @@ class AdminConfigUpdateRequest(BaseModel):
     )
     llm_provider: str | None = Field(default=None, min_length=1, max_length=50)
     llm_model: str | None = Field(default=None, min_length=1, max_length=255)
+    llm_base_url: str | None = Field(default=None, min_length=1, max_length=2048)
+    llm_extra_params: dict[str, Any] | None = Field(default=None)
     embedding_model: str | None = Field(default=None, min_length=1, max_length=255)
     metadata_match_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     pipeline_retry_limit: int | None = Field(default=None, ge=0, le=10)
@@ -53,6 +55,8 @@ class AdminConfigUpdateRequest(BaseModel):
 class AdminConfigResponse(BaseModel):
     llm_provider: str
     llm_model: str | None
+    llm_base_url: str | None
+    llm_extra_params: dict[str, Any] | None
     embedding_model: str | None
     metadata_match_threshold: float
     pipeline_retry_limit: int
@@ -81,6 +85,8 @@ class ConfigValidateRequest(BaseModel):
     llm_provider: str | None = Field(default=None, min_length=1, max_length=50)
     llm_model: str | None = Field(default=None, min_length=1, max_length=255)
     llm_api_key: str | None = Field(default=None, min_length=1)
+    llm_base_url: str | None = Field(default=None, min_length=1, max_length=2048)
+    llm_extra_params: dict[str, Any] | None = Field(default=None)
     embedding_model: str | None = Field(default=None, min_length=1, max_length=255)
     semantic_scholar_api_key: str | None = Field(default=None, min_length=1)
     telegram_bot_token: str | None = Field(default=None, min_length=1)

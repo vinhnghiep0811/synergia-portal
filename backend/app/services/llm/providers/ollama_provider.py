@@ -24,10 +24,12 @@ class OllamaLLMProvider(BaseLLMProvider):
         self,
         model_name: str | None = None,
         timeout_seconds: int | None = None,
+        base_url: str | None = None,
+        extra_params: dict | None = None,
     ) -> None:
         normalized_model = (model_name or "").strip()
         self.model = normalized_model or OLLAMA_MODEL
-        self.base_url = OLLAMA_BASE_URL
+        self.base_url = (base_url or "").strip().rstrip("/") or OLLAMA_BASE_URL
         self.timeout_seconds = (
             max(1, int(timeout_seconds))
             if timeout_seconds is not None
@@ -38,6 +40,7 @@ class OllamaLLMProvider(BaseLLMProvider):
         self.num_ctx = OLLAMA_NUM_CTX
         self.top_p = OLLAMA_TOP_P
         self.repeat_penalty = OLLAMA_REPEAT_PENALTY
+        self.extra_params = extra_params if isinstance(extra_params, dict) else None
 
     def extract_metadata(self, prompt: str, fallback_prompt: str | None = None) -> Dict[str, Any]:
         del fallback_prompt
@@ -124,6 +127,14 @@ class OllamaLLMProvider(BaseLLMProvider):
                 "repeat_penalty": self.repeat_penalty,
             },
         }
+        if self.extra_params:
+            extra_options = self.extra_params.get("options")
+            if isinstance(extra_options, dict):
+                payload["options"].update(extra_options)
+            for key, value in self.extra_params.items():
+                if key in {"options", "model", "prompt"}:
+                    continue
+                payload[key] = value
 
         request = urllib.request.Request(
             url=endpoint,

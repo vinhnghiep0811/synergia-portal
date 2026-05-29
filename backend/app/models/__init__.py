@@ -11,6 +11,7 @@ from app.models.citation_edge import CitationEdge
 from app.models.user import User
 from app.models.admin_system_config import AdminSystemConfig
 from app.models.llm_provider_api_key import LLMProviderApiKey
+from app.models.llm_provider_config import LLMProviderConfig
 from app.models.llm_prompt_template import LLMPromptTemplate
 from app.models.llm_provider_option import LLMProviderOption
 
@@ -28,6 +29,7 @@ __all__ = [
     "User",
     "AdminSystemConfig",
     "LLMProviderApiKey",
+    "LLMProviderConfig",
     "LLMPromptTemplate",
     "LLMProviderOption",
 ]

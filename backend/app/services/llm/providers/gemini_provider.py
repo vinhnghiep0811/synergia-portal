@@ -25,6 +25,7 @@ from app.core.config import (
 from app.services.llm.providers.base import BaseLLMProvider
 
 logger = logging.getLogger(__name__)
+GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
 
 class GeminiCallFailedError(RuntimeError):
@@ -42,11 +43,15 @@ class GeminiLLMProvider(BaseLLMProvider):
         fallback_timeout_seconds: int | None = None,
         provider_alias: str | None = None,
         api_key: str | None = None,
+        base_url: str | None = None,
+        extra_params: dict | None = None,
     ) -> None:
         self.api_key = (api_key or "").strip() or GEMINI_API_KEY
         self.provider_alias = (provider_alias or "gemini").strip() or "gemini"
         normalized_model = (model_name or "").strip()
         self.model = normalized_model or GEMINI_MODEL
+        self.base_url = (base_url or "").strip().rstrip("/") or GEMINI_DEFAULT_BASE_URL
+        self.extra_params = extra_params if isinstance(extra_params, dict) else None
         self.temperature = GEMINI_TEMPERATURE
         self.max_output_tokens = GEMINI_MAX_OUTPUT_TOKENS
 
@@ -261,10 +266,7 @@ class GeminiLLMProvider(BaseLLMProvider):
         if not self.api_key:
             raise GeminiCallFailedError("GEMINI_API_KEY is missing")
 
-        endpoint = (
-            f"https://generativelanguage.googleapis.com/v1beta/"
-            f"models/{self.model}:generateContent"
-        )
+        endpoint = f"{self.base_url}/models/{self.model}:generateContent"
 
         payload = {
             "contents": [
@@ -285,6 +287,7 @@ class GeminiLLMProvider(BaseLLMProvider):
                 },
             },
         }
+        payload = self._apply_extra_params(payload)
 
         last_error: Exception | None = None
         attempt_used = 0
@@ -410,6 +413,21 @@ class GeminiLLMProvider(BaseLLMProvider):
             raise ValueError("Gemini response does not contain text output.")
 
         return raw_text
+
+    def _apply_extra_params(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.extra_params:
+            return payload
+
+        generation_override = self.extra_params.get("generationConfig")
+        if isinstance(generation_override, dict):
+            payload["generationConfig"].update(generation_override)
+
+        for key, value in self.extra_params.items():
+            if key in {"generationConfig", "contents"}:
+                continue
+            payload[key] = value
+
+        return payload
 
     def _safe_parse_json(self, raw_text: str) -> Optional[Dict[str, Any]]:
         try:

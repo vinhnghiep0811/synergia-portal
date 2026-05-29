@@ -1,5 +1,6 @@
 from app.core.config import LLM_PROVIDER
 from app.services.llm.providers.base import BaseLLMProvider
+from app.services.llm.providers.deepseek_provider import DeepSeekLLMProvider
 from app.services.llm.providers.gemini_provider import GeminiLLMProvider
 from app.services.llm.providers.ollama_provider import OllamaLLMProvider
 
@@ -12,6 +13,8 @@ class LLMProviderFactory:
         retry_limit: int | None = None,
         timeout_seconds: int | None = None,
         api_key: str | None = None,
+        base_url: str | None = None,
+        extra_params: dict | None = None,
     ) -> BaseLLMProvider:
         selected = (provider_name or LLM_PROVIDER or "gemini").lower().strip()
 
@@ -19,13 +22,33 @@ class LLMProviderFactory:
             return OllamaLLMProvider(
                 model_name=model_name,
                 timeout_seconds=timeout_seconds,
+                base_url=base_url,
+                extra_params=extra_params,
             )
 
-        return GeminiLLMProvider(
-            model_name=model_name,
-            retry_attempts=retry_limit,
-            request_timeout_seconds=timeout_seconds,
-            fallback_timeout_seconds=timeout_seconds,
-            provider_alias=selected,
-            api_key=api_key,
+        if selected == "deepseek":
+            return DeepSeekLLMProvider(
+                model_name=model_name,
+                retry_attempts=retry_limit,
+                request_timeout_seconds=timeout_seconds,
+                provider_alias=selected,
+                api_key=api_key,
+                base_url=base_url,
+                extra_params=extra_params,
+            )
+
+        if selected == "gemini":
+            return GeminiLLMProvider(
+                model_name=model_name,
+                retry_attempts=retry_limit,
+                request_timeout_seconds=timeout_seconds,
+                fallback_timeout_seconds=timeout_seconds,
+                provider_alias=selected,
+                api_key=api_key,
+                base_url=base_url,
+                extra_params=extra_params,
+            )
+
+        raise ValueError(
+            f"Unsupported LLM provider '{selected}'. Please add a provider class for it."
         )

@@ -36,6 +36,8 @@ class LLMExtractionService:
             retry_limit=runtime_config.pipeline_retry_limit,
             timeout_seconds=runtime_config.pipeline_timeout_seconds,
             api_key=runtime_config.llm_api_key,
+            base_url=runtime_config.llm_base_url,
+            extra_params=runtime_config.llm_extra_params,
         )
         self.input_builder = LLMInputBuilder()
         prompt_templates = LLMPromptTemplateService(db).get_template_map()

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.llm_provider_option import LLMProviderOption
 from app.models.user import User
 
-DEFAULT_LLM_PROVIDERS = ["gemini", "ollama"]
+DEFAULT_LLM_PROVIDERS = ["gemini", "deepseek", "ollama"]
 
 
 class LLMProviderRegistryService:

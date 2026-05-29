@@ -149,6 +149,8 @@ export function AdminPage() {
   const [configForm, setConfigForm] = useState({
     llm_provider: "gemini",
     llm_model: "",
+    llm_base_url: "",
+    llm_extra_params: "",
     llm_api_key: "",
     embedding_model: "",
     metadata_match_threshold: 0.7,
@@ -242,6 +244,10 @@ export function AdminPage() {
       setConfigForm({
         llm_provider: data.llm_provider || "gemini",
         llm_model: data.llm_model || "",
+        llm_base_url: data.llm_base_url || "",
+        llm_extra_params: data.llm_extra_params
+          ? JSON.stringify(data.llm_extra_params, null, 2)
+          : "",
         llm_api_key: "",
         embedding_model: data.embedding_model || "",
         metadata_match_threshold: data.metadata_match_threshold ?? 0.7,
@@ -355,7 +361,19 @@ export function AdminPage() {
   }, [llmProviders]);
 
   const updateConfigField = useCallback((field, value) => {
-    setConfigForm((prev) => ({ ...prev, [field]: value }));
+    setConfigForm((prev) => {
+      if (field === "llm_provider") {
+        return {
+          ...prev,
+          llm_provider: value,
+          llm_model: "",
+          llm_base_url: "",
+          llm_extra_params: "",
+          llm_api_key: "",
+        };
+      }
+      return { ...prev, [field]: value };
+    });
     setValidationResults((prev) => {
       const next = { ...prev };
       if (field.startsWith("llm_")) delete next.llm;
@@ -369,6 +387,15 @@ export function AdminPage() {
   const updatePromptField = useCallback((key, value) => {
     setPromptForm((prev) => ({ ...prev, [key]: value }));
     setPromptSuccess("");
+  }, []);
+
+  const parseExtraParams = useCallback((raw) => {
+    if (!raw || !raw.trim()) return undefined;
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      throw new Error("LLM extra params phải là JSON hợp lệ.");
+    }
   }, []);
 
   const handleAddProvider = useCallback(async () => {
@@ -431,10 +458,13 @@ export function AdminPage() {
     setValidatingService(service);
     setError("");
     try {
+      const extraParams = parseExtraParams(configForm.llm_extra_params);
       const payload = {
         service,
         llm_provider: configForm.llm_provider,
         llm_model: configForm.llm_model || undefined,
+        llm_base_url: configForm.llm_base_url || undefined,
+        llm_extra_params: extraParams || undefined,
         llm_api_key: configForm.llm_api_key || undefined,
         embedding_model: configForm.embedding_model || undefined,
         semantic_scholar_api_key: configForm.semantic_scholar_api_key || undefined,
@@ -465,6 +495,10 @@ export function AdminPage() {
       setConfigForm({
         llm_provider: updated.llm_provider || "gemini",
         llm_model: updated.llm_model || "",
+        llm_base_url: updated.llm_base_url || "",
+        llm_extra_params: updated.llm_extra_params
+          ? JSON.stringify(updated.llm_extra_params, null, 2)
+          : "",
         llm_api_key: "",
         embedding_model: updated.embedding_model || "",
         metadata_match_threshold: updated.metadata_match_threshold ?? 0.7,
@@ -489,9 +523,11 @@ export function AdminPage() {
     setError("");
     setConfigSuccess("");
     try {
+      const extraParams = parseExtraParams(configForm.llm_extra_params);
       const payload = {
         llm_provider: configForm.llm_provider,
         llm_model: configForm.llm_model,
+        llm_base_url: configForm.llm_base_url.trim() ? configForm.llm_base_url.trim() : null,
         embedding_model: configForm.embedding_model,
         metadata_match_threshold: Number(configForm.metadata_match_threshold),
         pipeline_retry_limit: Number(configForm.pipeline_retry_limit),
@@ -499,6 +535,11 @@ export function AdminPage() {
         telegram_enabled: Boolean(configForm.telegram_enabled),
         telegram_chat_id: configForm.telegram_chat_id || null,
       };
+      if (configForm.llm_extra_params.trim()) {
+        payload.llm_extra_params = extraParams;
+      } else {
+        payload.llm_extra_params = null;
+      }
       if (configForm.llm_api_key.trim()) {
         payload.llm_api_key = configForm.llm_api_key.trim();
       }
@@ -850,6 +891,26 @@ export function AdminPage() {
                     <input className="admin-input" type="text" value={configForm.llm_model} onChange={(e) => updateConfigField("llm_model", e.target.value)} placeholder="e.g. gemini-2.5-pro" />
                   </label>
                 </div>
+                <label className="admin-label">
+                  Base URL
+                  <input
+                    className="admin-input"
+                    type="text"
+                    value={configForm.llm_base_url}
+                    onChange={(e) => updateConfigField("llm_base_url", e.target.value)}
+                    placeholder="e.g. https://api.deepseek.com"
+                  />
+                </label>
+                <label className="admin-label">
+                  Extra params (JSON)
+                  <textarea
+                    className="admin-textarea"
+                    rows={4}
+                    value={configForm.llm_extra_params}
+                    onChange={(e) => updateConfigField("llm_extra_params", e.target.value)}
+                    placeholder='{"reasoning_effort": "high", "extra_body": {"thinking": {"type": "enabled"}}}'
+                  />
+                </label>
                 <label className="admin-label">
                   API key (nhập mới để cập nhật)
                   <input

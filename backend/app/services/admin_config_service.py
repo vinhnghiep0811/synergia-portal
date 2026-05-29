@@ -24,6 +24,7 @@ from app.core.config import (
 )
 from app.models.admin_system_config import AdminSystemConfig
 from app.models.llm_provider_api_key import LLMProviderApiKey
+from app.models.llm_provider_config import LLMProviderConfig
 from app.models.user import User
 from app.schemas.admin import (
     AdminConfigResponse,
@@ -36,6 +37,9 @@ from app.services.activity_log_service import ActivityLogService
 from app.services.embedding_service import EMBEDDING_DIM, EmbeddingService
 from app.services.llm_provider_registry_service import LLMProviderRegistryService
 from app.services.runtime_config_service import RuntimeConfigService
+
+GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com"
 
 
 class AdminConfigService:
@@ -92,6 +96,72 @@ class AdminConfigService:
             )
         )
 
+    def _get_provider_config(self, provider: str) -> LLMProviderConfig | None:
+        normalized = self._normalize_provider_name(provider)
+        return (
+            self.db.query(LLMProviderConfig)
+            .filter(LLMProviderConfig.provider_name == normalized)
+            .first()
+        )
+
+    def _upsert_provider_config(
+        self,
+        provider: str,
+        base_url: str | None,
+        model_name: str | None,
+        extra_params: dict | None,
+        actor_user: User | None,
+    ) -> None:
+        normalized = self._normalize_provider_name(provider)
+        row = (
+            self.db.query(LLMProviderConfig)
+            .filter(LLMProviderConfig.provider_name == normalized)
+            .first()
+        )
+
+        if row:
+            row.base_url = base_url
+            row.model_name = model_name
+            row.extra_params = extra_params
+            if actor_user:
+                row.updated_by_user_id = actor_user.id
+            return
+
+        self.db.add(
+            LLMProviderConfig(
+                provider_name=normalized,
+                base_url=base_url,
+                model_name=model_name,
+                extra_params=extra_params,
+                updated_by_user_id=actor_user.id if actor_user else None,
+            )
+        )
+
+    @staticmethod
+    def _normalize_base_url(value: str | None) -> str | None:
+        if not value:
+            return None
+        cleaned = value.strip().rstrip("/")
+        return cleaned or None
+
+    @staticmethod
+    def _default_llm_base_url(provider: str) -> str | None:
+        if provider == "ollama":
+            return OLLAMA_BASE_URL
+        if provider == "deepseek":
+            return DEEPSEEK_DEFAULT_BASE_URL
+        if provider == "gemini":
+            return GEMINI_DEFAULT_BASE_URL
+        return None
+
+    @staticmethod
+    def _default_llm_model(provider: str) -> str:
+        if provider == "ollama":
+            return OLLAMA_MODEL
+        if provider == "deepseek":
+            return "deepseek-v4-pro"
+        return GEMINI_MODEL
+
     def get_configuration(self) -> AdminConfigResponse:
         config = self._get_config()
         if config is None:
@@ -99,6 +169,8 @@ class AdminConfigService:
             return AdminConfigResponse(
                 llm_provider=defaults["llm_provider"],
                 llm_model=defaults["llm_model"],
+                llm_base_url=defaults["llm_base_url"],
+                llm_extra_params=defaults["llm_extra_params"],
                 embedding_model=defaults["embedding_model"],
                 metadata_match_threshold=defaults["metadata_match_threshold"],
                 pipeline_retry_limit=defaults["pipeline_retry_limit"],
@@ -136,6 +208,7 @@ class AdminConfigService:
         )
         provider_value = self._normalize_provider_name(provider_value)
         self.provider_registry.ensure_provider_allowed(provider_value)
+        provider_config = self._get_provider_config(provider_value)
 
         llm_model_value = normalize_text(payload.llm_model)
         if not llm_model_value:
@@ -146,8 +219,20 @@ class AdminConfigService:
             )
             if existing_config and provider_value == existing_provider:
                 llm_model_value = normalize_text(existing_config.llm_model)
+        if not llm_model_value and provider_config and provider_config.model_name:
+            llm_model_value = normalize_text(provider_config.model_name)
         if not llm_model_value:
-            llm_model_value = GEMINI_MODEL if provider_value != "ollama" else OLLAMA_MODEL
+            llm_model_value = self._default_llm_model(provider_value)
+
+        llm_base_url_value = self._normalize_base_url(normalize_text(payload.llm_base_url))
+        if not llm_base_url_value and provider_config and provider_config.base_url:
+            llm_base_url_value = self._normalize_base_url(provider_config.base_url)
+        if not llm_base_url_value:
+            llm_base_url_value = self._default_llm_base_url(provider_value)
+
+        llm_extra_params_value = payload.llm_extra_params
+        if llm_extra_params_value is None and provider_config and provider_config.extra_params:
+            llm_extra_params_value = provider_config.extra_params
 
         llm_api_key_value = normalize_text(payload.llm_api_key)
         resolved_llm_api_key = self._resolve_llm_api_key(provider_value, llm_api_key_value)
@@ -199,7 +284,13 @@ class AdminConfigService:
 
         results: list[ServiceValidationResult] = []
         for svc in services_to_validate:
-            result = self._validate_single_service(svc, temp, resolved_llm_api_key)
+            result = self._validate_single_service(
+                svc,
+                temp,
+                resolved_llm_api_key,
+                llm_base_url=llm_base_url_value,
+                llm_extra_params=llm_extra_params_value,
+            )
             results.append(result)
 
         all_ok = all(r.ok for r in results)
@@ -210,11 +301,18 @@ class AdminConfigService:
         service: str,
         config: AdminSystemConfig,
         llm_api_key: str | None = None,
+        llm_base_url: str | None = None,
+        llm_extra_params: dict | None = None,
     ) -> ServiceValidationResult:
         """Validate a single service and return a structured result instead of raising."""
         try:
             if service == "llm":
-                self._validate_llm_configuration(config, llm_api_key)
+                self._validate_llm_configuration(
+                    config,
+                    llm_api_key,
+                    llm_base_url=llm_base_url,
+                    llm_extra_params=llm_extra_params,
+                )
                 return ServiceValidationResult(
                     service="llm",
                     ok=True,
@@ -294,17 +392,36 @@ class AdminConfigService:
         provider_value = normalize_text(data.get("llm_provider")) or defaults.llm_provider
         provider_value = self._normalize_provider_name(provider_value)
         self.provider_registry.ensure_provider_allowed(provider_value)
+        provider_config = self._get_provider_config(provider_value)
 
         llm_model_value = normalize_text(data.get("llm_model"))
+        if not llm_model_value:
+            if provider_config and provider_config.model_name:
+                llm_model_value = (provider_config.model_name or "").strip() or None
         if not llm_model_value:
             llm_model_value = (
                 defaults.llm_model
                 if provider_value == defaults.llm_provider
-                else (GEMINI_MODEL if provider_value != "ollama" else OLLAMA_MODEL)
+                else self._default_llm_model(provider_value)
             )
 
         llm_api_key_value = normalize_text(data.get("llm_api_key"))
         resolved_llm_api_key = self._resolve_llm_api_key(provider_value, llm_api_key_value)
+        llm_base_url_in_payload = "llm_base_url" in data
+        llm_base_url_value = (
+            self._normalize_base_url(normalize_text(data.get("llm_base_url")))
+            if llm_base_url_in_payload
+            else None
+        )
+        if not llm_base_url_in_payload and provider_config and provider_config.base_url:
+            llm_base_url_value = self._normalize_base_url(provider_config.base_url)
+        if not llm_base_url_value:
+            llm_base_url_value = self._default_llm_base_url(provider_value)
+
+        llm_extra_params_in_payload = "llm_extra_params" in data
+        llm_extra_params_value = data.get("llm_extra_params") if llm_extra_params_in_payload else None
+        if not llm_extra_params_in_payload and provider_config and provider_config.extra_params:
+            llm_extra_params_value = provider_config.extra_params
         semantic_key_value = normalize_text(data.get("semantic_scholar_api_key")) or defaults.semantic_scholar_api_key
         embedding_model_value = normalize_text(data.get("embedding_model")) or defaults.embedding_model
 
@@ -365,10 +482,22 @@ class AdminConfigService:
                 detail="telegram_bot_token and telegram_chat_id are required when Telegram is enabled.",
             )
 
-        self._validate_custom_configuration(config, resolved_llm_api_key)
+        self._validate_custom_configuration(
+            config,
+            resolved_llm_api_key,
+            llm_base_url=llm_base_url_value,
+            llm_extra_params=llm_extra_params_value,
+        )
 
         if llm_api_key_value:
             self._upsert_llm_api_key(provider_value, llm_api_key_value, actor_user)
+        self._upsert_provider_config(
+            provider_value,
+            llm_base_url_value,
+            llm_model_value,
+            llm_extra_params_value,
+            actor_user,
+        )
 
         config.updated_by_user_id = actor_user.id
         self.db.add(config)
@@ -466,10 +595,23 @@ class AdminConfigService:
                 updated_by = user.email
 
         llm_api_key = self._resolve_llm_api_key(config.llm_provider)
+        provider_config = self._get_provider_config(config.llm_provider)
+        llm_base_url = (
+            self._normalize_base_url(provider_config.base_url)
+            if provider_config and provider_config.base_url
+            else self._default_llm_base_url(config.llm_provider)
+        )
+        llm_extra_params = (
+            provider_config.extra_params
+            if provider_config and isinstance(provider_config.extra_params, dict)
+            else None
+        )
 
         return AdminConfigResponse(
             llm_provider=config.llm_provider,
             llm_model=config.llm_model,
+            llm_base_url=llm_base_url,
+            llm_extra_params=llm_extra_params,
             embedding_model=config.embedding_model,
             metadata_match_threshold=float(config.metadata_match_threshold),
             pipeline_retry_limit=config.pipeline_retry_limit,
@@ -502,6 +644,8 @@ class AdminConfigService:
         return {
             "llm_provider": runtime_defaults.llm_provider,
             "llm_model": runtime_defaults.llm_model,
+            "llm_base_url": runtime_defaults.llm_base_url,
+            "llm_extra_params": runtime_defaults.llm_extra_params,
             "embedding_model": runtime_defaults.embedding_model,
             "metadata_match_threshold": runtime_defaults.metadata_match_threshold,
             "pipeline_retry_limit": runtime_defaults.pipeline_retry_limit,
@@ -523,19 +667,29 @@ class AdminConfigService:
         return float(max(5, min(timeout_value, 30)))
 
     def _validate_custom_configuration(
-        self, config: AdminSystemConfig, llm_api_key: str | None = None
+        self,
+        config: AdminSystemConfig,
+        llm_api_key: str | None = None,
+        llm_base_url: str | None = None,
+        llm_extra_params: dict | None = None,
     ) -> None:
-        self._validate_llm_configuration(config, llm_api_key)
+        self._validate_llm_configuration(config, llm_api_key, llm_base_url, llm_extra_params)
         self._validate_semantic_scholar_configuration(config)
         self._validate_embedding_configuration(config)
         self._validate_telegram_configuration(config)
 
     def _validate_llm_configuration(
-        self, config: AdminSystemConfig, llm_api_key: str | None = None
+        self,
+        config: AdminSystemConfig,
+        llm_api_key: str | None = None,
+        llm_base_url: str | None = None,
+        llm_extra_params: dict | None = None,
     ) -> None:
         provider = (config.llm_provider or "").strip().lower() or "gemini"
         model_name = (config.llm_model or "").strip()
         api_key = (llm_api_key or "").strip()
+        base_url = self._normalize_base_url(llm_base_url) or self._default_llm_base_url(provider)
+        extra_params = llm_extra_params if isinstance(llm_extra_params, dict) else None
 
         self.provider_registry.ensure_provider_allowed(provider)
         if not model_name:
@@ -545,19 +699,83 @@ class AdminConfigService:
             )
 
         timeout_seconds = self._request_timeout_seconds(config)
-        if provider != "ollama":
-            if not api_key:
+        if provider == "ollama":
+            if not base_url:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="llm_base_url is required for Ollama provider.",
+                )
+            payload = {
+                "model": model_name,
+                "prompt": "Return JSON: {\"ok\": true}",
+                "stream": False,
+                "format": "json",
+                "options": {"num_predict": 32, "temperature": 0},
+            }
+            if extra_params:
+                extra_options = extra_params.get("options") if isinstance(extra_params, dict) else None
+                if isinstance(extra_options, dict):
+                    payload["options"].update(extra_options)
+                for key, value in extra_params.items():
+                    if key in {"options", "model", "prompt"}:
+                        continue
+                    payload[key] = value
+
+            try:
+                response = httpx.post(
+                    f"{base_url}/api/generate",
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                    timeout=timeout_seconds,
+                )
+            except httpx.RequestError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unable to reach Ollama endpoint {base_url}: {exc}",
+                ) from exc
+
+            if response.status_code != 200:
+                error_preview = response.text[:300]
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=(
-                        "LLM API key is missing in environment/admin config. "
-                        "Choose default settings or configure environment first."
+                        f"Ollama validation failed for model '{model_name}' "
+                        f"(status={response.status_code}): {error_preview}"
                     ),
                 )
-            endpoint = (
-                "https://generativelanguage.googleapis.com/v1beta/"
-                f"models/{model_name}:generateContent"
+
+            try:
+                response_json = response.json()
+            except json.JSONDecodeError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Ollama returned invalid JSON during validation.",
+                ) from exc
+
+            generated_text = (response_json.get("response") or "").strip()
+            if not generated_text:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Ollama returned empty response during validation.",
+                )
+            return
+
+        if not api_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "LLM API key is missing in environment/admin config. "
+                    "Choose default settings or configure environment first."
+                ),
             )
+
+        if provider == "gemini":
+            if not base_url:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="llm_base_url is required for Gemini provider.",
+                )
+            endpoint = f"{base_url}/models/{model_name}:generateContent"
             payload = {
                 "contents": [{"parts": [{"text": "Return JSON: {\"ok\": true}"}]}],
                 "generationConfig": {
@@ -566,6 +784,15 @@ class AdminConfigService:
                     "temperature": 0,
                 },
             }
+            if extra_params:
+                generation_override = extra_params.get("generationConfig")
+                if isinstance(generation_override, dict):
+                    payload["generationConfig"].update(generation_override)
+                for key, value in extra_params.items():
+                    if key in {"generationConfig", "contents"}:
+                        continue
+                    payload[key] = value
+
             try:
                 response = httpx.post(
                     endpoint,
@@ -593,24 +820,38 @@ class AdminConfigService:
                 )
             return
 
+        if not base_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="llm_base_url is required for the selected provider.",
+            )
+
+        endpoint = f"{base_url}/chat/completions"
         payload = {
             "model": model_name,
-            "prompt": "Return JSON: {\"ok\": true}",
+            "messages": [{"role": "user", "content": "Return JSON: {\"ok\": true}"}],
             "stream": False,
-            "format": "json",
-            "options": {"num_predict": 32, "temperature": 0},
         }
+        if extra_params:
+            for key, value in extra_params.items():
+                if key in {"model", "messages", "stream"}:
+                    continue
+                payload[key] = value
+
         try:
             response = httpx.post(
-                f"{OLLAMA_BASE_URL}/api/generate",
-                headers={"Content-Type": "application/json"},
+                endpoint,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                },
                 json=payload,
                 timeout=timeout_seconds,
             )
         except httpx.RequestError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unable to reach Ollama endpoint {OLLAMA_BASE_URL}: {exc}",
+                detail=f"Unable to reach {provider} API: {exc}",
             ) from exc
 
         if response.status_code != 200:
@@ -618,7 +859,7 @@ class AdminConfigService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    f"Ollama validation failed for model '{model_name}' "
+                    f"{provider} validation failed for model '{model_name}' "
                     f"(status={response.status_code}): {error_preview}"
                 ),
             )
@@ -628,14 +869,16 @@ class AdminConfigService:
         except json.JSONDecodeError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Ollama returned invalid JSON during validation.",
+                detail=f"{provider} returned invalid JSON during validation.",
             ) from exc
 
-        generated_text = (response_json.get("response") or "").strip()
-        if not generated_text:
+        choices = response_json.get("choices") or []
+        message = choices[0].get("message") if choices else None
+        content = (message or {}).get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str) or not content.strip():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Ollama returned empty response during validation.",
+                detail=f"{provider} returned empty response during validation.",
             )
 
     def _validate_semantic_scholar_configuration(self, config: AdminSystemConfig) -> None:
