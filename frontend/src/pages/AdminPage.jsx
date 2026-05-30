@@ -5,14 +5,18 @@ import {
   getAdminActivities,
   getAdminCanonicalDocuments,
   getAdminConfiguration,
+  getAdminLLMModels,
   getAdminLLMPrompts,
   getAdminEvaluationReport,
   getAdminOverview,
   getAdminPapers,
   getAdminProcessingLogs,
+  addAdminLLMModel,
   updateAdminConfiguration,
+  updateAdminLLMModel,
   updateAdminLLMPrompts,
   validateAdminConfiguration,
+  removeAdminLLMModel,
 } from "../services/adminApi.js";
 
 const TAB_CONFIG = [
@@ -26,8 +30,8 @@ const TAB_CONFIG = [
 ];
 
 const PRIMARY_LLM_PROVIDERS = [
-  { name: "gemini", label: "Gemini" },
-  { name: "deepseek", label: "DeepSeek" },
+  { name: "openrouter", label: "Primary (OpenRouter)" },
+  { name: "ollama", label: "Secondary (Ollama - Gemma)" },
 ];
 
 function formatDate(value) {
@@ -149,7 +153,7 @@ export function AdminPage() {
 
   const [config, setConfig] = useState(null);
   const [configForm, setConfigForm] = useState({
-    llm_provider: "gemini",
+    llm_provider: "openrouter",
     llm_model: "",
     llm_extra_params: "",
     llm_api_key: "",
@@ -166,6 +170,11 @@ export function AdminPage() {
   const [validationResults, setValidationResults] = useState({});
   const [validatingService, setValidatingService] = useState(null);
   const [configSuccess, setConfigSuccess] = useState("");
+  const [modelOptions, setModelOptions] = useState([]);
+  const [modelDraftName, setModelDraftName] = useState("");
+  const [modelEditingId, setModelEditingId] = useState(null);
+  const [modelEditingValue, setModelEditingValue] = useState("");
+  const [isSavingModel, setIsSavingModel] = useState(false);
 
   const [promptTemplates, setPromptTemplates] = useState([]);
   const [promptForm, setPromptForm] = useState({});
@@ -232,14 +241,15 @@ export function AdminPage() {
 
   const loadConfig = useCallback(() => {
     return runWithState(async () => {
-      const [data, promptData] = await Promise.all([
+      const [data, promptData, modelData] = await Promise.all([
         getAdminConfiguration(),
         getAdminLLMPrompts(),
+        getAdminLLMModels(),
       ]);
 
       setConfig(data);
       setConfigForm({
-        llm_provider: data.llm_provider || "gemini",
+        llm_provider: data.llm_provider || "openrouter",
         llm_model: data.llm_model || "",
         llm_extra_params: data.llm_extra_params
           ? JSON.stringify(data.llm_extra_params, null, 2)
@@ -262,6 +272,8 @@ export function AdminPage() {
         initialPromptForm[template.key] = template.content || "";
       });
       setPromptForm(initialPromptForm);
+
+      setModelOptions(modelData?.models || []);
 
       setValidationResults({});
       setConfigSuccess("");
@@ -346,6 +358,7 @@ export function AdminPage() {
   }, [evaluation]);
 
   const providerOptions = PRIMARY_LLM_PROVIDERS;
+  const isPrimaryProvider = configForm.llm_provider === "openrouter";
 
   const updateConfigField = useCallback((field, value) => {
     setConfigForm((prev) => {
@@ -383,6 +396,77 @@ export function AdminPage() {
       throw new Error("LLM extra params phải là JSON hợp lệ.");
     }
   }, []);
+
+  const addModelOption = useCallback(async () => {
+    if (!modelDraftName.trim()) {
+      setError("Tên model không được để trống.");
+      return;
+    }
+    setIsSavingModel(true);
+    setError("");
+    try {
+      const created = await addAdminLLMModel({ name: modelDraftName.trim() });
+      setModelOptions((prev) =>
+        [...prev, created].sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setModelDraftName("");
+    } catch (err) {
+      setError(err.message || "Không thể thêm model.");
+    } finally {
+      setIsSavingModel(false);
+    }
+  }, [modelDraftName]);
+
+  const startEditModel = useCallback((model) => {
+    setModelEditingId(model.id);
+    setModelEditingValue(model.name);
+  }, []);
+
+  const cancelEditModel = useCallback(() => {
+    setModelEditingId(null);
+    setModelEditingValue("");
+  }, []);
+
+  const saveEditModel = useCallback(async () => {
+    if (!modelEditingId) return;
+    if (!modelEditingValue.trim()) {
+      setError("Tên model không được để trống.");
+      return;
+    }
+    setIsSavingModel(true);
+    setError("");
+    try {
+      const updated = await updateAdminLLMModel(modelEditingId, {
+        name: modelEditingValue.trim(),
+      });
+      setModelOptions((prev) =>
+        prev
+          .map((item) => (item.id === updated.id ? updated : item))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+      cancelEditModel();
+    } catch (err) {
+      setError(err.message || "Không thể cập nhật model.");
+    } finally {
+      setIsSavingModel(false);
+    }
+  }, [modelEditingId, modelEditingValue, cancelEditModel]);
+
+  const deleteModelOption = useCallback(async (model) => {
+    setIsSavingModel(true);
+    setError("");
+    try {
+      await removeAdminLLMModel(model.id);
+      setModelOptions((prev) => prev.filter((item) => item.id !== model.id));
+      if (configForm.llm_model === model.name) {
+        setConfigForm((prev) => ({ ...prev, llm_model: "" }));
+      }
+    } catch (err) {
+      setError(err.message || "Không thể xóa model.");
+    } finally {
+      setIsSavingModel(false);
+    }
+  }, [configForm.llm_model]);
 
   const savePrompts = useCallback(async () => {
     setIsSavingPrompts(true);
@@ -449,7 +533,7 @@ export function AdminPage() {
       const updated = await updateAdminConfiguration({ use_default_settings: true });
       setConfig(updated);
       setConfigForm({
-        llm_provider: updated.llm_provider || "gemini",
+        llm_provider: updated.llm_provider || "openrouter",
         llm_model: updated.llm_model || "",
         llm_extra_params: updated.llm_extra_params
           ? JSON.stringify(updated.llm_extra_params, null, 2)
@@ -842,21 +926,35 @@ export function AdminPage() {
                   </label>
                   <label className="admin-label">
                     Model name
-                    <input className="admin-input" type="text" value={configForm.llm_model} onChange={(e) => updateConfigField("llm_model", e.target.value)} placeholder="e.g. gemini-2.5-pro" />
+                    <input
+                      className="admin-input"
+                      type="text"
+                      value={configForm.llm_model}
+                      onChange={(e) => updateConfigField("llm_model", e.target.value)}
+                      placeholder={isPrimaryProvider ? "e.g. google/gemini-2.5-flash" : "Gemma (default)"}
+                      list="openrouter-models"
+                      disabled={!isPrimaryProvider}
+                    />
+                    <datalist id="openrouter-models">
+                      {modelOptions.map((model) => (
+                        <option key={model.id} value={model.name} />
+                      ))}
+                    </datalist>
                   </label>
                 </div>
                 <label className="admin-label">
-                  Extra params (JSON)
+                  Extra params (JSON) - OpenRouter only
                   <textarea
                     className="admin-textarea"
                     rows={4}
                     value={configForm.llm_extra_params}
                     onChange={(e) => updateConfigField("llm_extra_params", e.target.value)}
                     placeholder='{"reasoning_effort": "high", "extra_body": {"thinking": {"type": "enabled"}}}'
+                    disabled={!isPrimaryProvider}
                   />
                 </label>
                 <label className="admin-label">
-                  API key (nhập mới để cập nhật)
+                  OpenRouter API key (nhập mới để cập nhật)
                   <input
                     className="admin-input"
                     type="password"
@@ -868,6 +966,102 @@ export function AdminPage() {
                 <div className="admin-meta-text">
                   Key hiện tại: {config?.llm_api_key_masked || "(chưa cấu hình)"}
                 </div>
+                <div className="admin-meta-text">
+                  {isPrimaryProvider
+                    ? "Fallback: Primary (OpenRouter) → Secondary (Ollama - Gemma) → Regex"
+                    : "Fallback: Secondary (Ollama - Gemma) → Regex"}
+                </div>
+              </div>
+
+              <div className="card admin-panel-card admin-config-card">
+                <div className="admin-config-card__head">
+                  <h4 className="admin-card-subtitle">📦 OpenRouter model catalog</h4>
+                </div>
+                <div className="admin-form-grid admin-form-grid--two">
+                  <label className="admin-label">
+                    Model name
+                    <input
+                      className="admin-input"
+                      type="text"
+                      value={modelDraftName}
+                      onChange={(e) => setModelDraftName(e.target.value)}
+                      placeholder="e.g. google/gemini-2.5-flash"
+                    />
+                  </label>
+                  <div className="admin-filter-row" style={{ alignItems: "flex-end" }}>
+                    <button
+                      type="button"
+                      className="admin-test-btn"
+                      onClick={addModelOption}
+                      disabled={isSavingModel}
+                    >
+                      {isSavingModel ? "Đang lưu..." : "Thêm model"}
+                    </button>
+                  </div>
+                </div>
+                {modelOptions.length === 0 && (
+                  <div className="admin-empty-state">Chưa có model nào trong danh sách.</div>
+                )}
+                {modelOptions.length > 0 && (
+                  <div className="admin-log-list">
+                    {modelOptions.map((model) => (
+                      <div key={model.id} className="admin-log-item">
+                        <div className="admin-log-item__head">
+                          <strong>{model.name}</strong>
+                          <div className="admin-filter-row">
+                            {modelEditingId === model.id ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="admin-test-btn"
+                                  onClick={saveEditModel}
+                                  disabled={isSavingModel}
+                                >
+                                  Lưu
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn--secondary admin-btn-compact"
+                                  onClick={cancelEditModel}
+                                  disabled={isSavingModel}
+                                >
+                                  Hủy
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btn--secondary admin-btn-compact"
+                                  onClick={() => startEditModel(model)}
+                                  disabled={isSavingModel}
+                                >
+                                  Sửa
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn--secondary admin-btn-compact"
+                                  onClick={() => deleteModelOption(model)}
+                                  disabled={isSavingModel}
+                                >
+                                  Xóa
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        {modelEditingId === model.id && (
+                          <input
+                            className="admin-input"
+                            type="text"
+                            value={modelEditingValue}
+                            onChange={(e) => setModelEditingValue(e.target.value)}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Prompt Templates Section */}

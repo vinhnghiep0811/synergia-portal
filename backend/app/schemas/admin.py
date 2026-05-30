@@ -106,6 +106,25 @@ class ConfigValidateResponse(BaseModel):
     all_ok: bool
 
 
+class LLMModelOptionItem(BaseModel):
+    id: int
+    name: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class LLMModelOptionListResponse(BaseModel):
+    models: list[LLMModelOptionItem]
+
+
+class LLMModelOptionCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class LLMModelOptionUpdateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
 class LLMPromptTemplateItem(BaseModel):
     key: str
     label: str

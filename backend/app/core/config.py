@@ -121,10 +121,14 @@ REFRESH_TOKEN_SECRET_KEY  = get_env("REFRESH_TOKEN_SECRET_KEY", "change-refresh-
 REFRESH_TOKEN_EXPIRE_DAYS = get_env_int("REFRESH_TOKEN_EXPIRE_DAYS", 30)
 
 # =========================
-# LLM - Gemini (Week 5)
+# LLM - OpenRouter (Primary)
 # =========================
-LLM_PROVIDER = get_env("LLM_PROVIDER", "gemini")
- 
+LLM_PROVIDER = get_env("LLM_PROVIDER", "openrouter")
+
+OPENROUTER_API_KEY = get_env("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = get_env("OPENROUTER_MODEL", "google/gemini-2.5-flash")
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
 GEMINI_API_KEY = get_env("GEMINI_API_KEY", "")
 GEMINI_MODEL = get_env("GEMINI_MODEL", "gemini-2.5-pro")
 

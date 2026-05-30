@@ -1,8 +1,7 @@
 from app.core.config import LLM_PROVIDER
 from app.services.llm.providers.base import BaseLLMProvider
-from app.services.llm.providers.deepseek_provider import DeepSeekLLMProvider
-from app.services.llm.providers.gemini_provider import GeminiLLMProvider
 from app.services.llm.providers.ollama_provider import OllamaLLMProvider
+from app.services.llm.providers.openrouter_provider import OpenRouterLLMProvider
 
 
 class LLMProviderFactory:
@@ -16,7 +15,9 @@ class LLMProviderFactory:
         base_url: str | None = None,
         extra_params: dict | None = None,
     ) -> BaseLLMProvider:
-        selected = (provider_name or LLM_PROVIDER or "gemini").lower().strip()
+        selected = (provider_name or LLM_PROVIDER or "openrouter").lower().strip()
+        if selected in {"gemini", "deepseek"}:
+            selected = "openrouter"
 
         if selected == "ollama":
             return OllamaLLMProvider(
@@ -26,19 +27,8 @@ class LLMProviderFactory:
                 extra_params=extra_params,
             )
 
-        if selected == "deepseek":
-            return DeepSeekLLMProvider(
-                model_name=model_name,
-                retry_attempts=retry_limit,
-                request_timeout_seconds=timeout_seconds,
-                provider_alias=selected,
-                api_key=api_key,
-                base_url=base_url,
-                extra_params=extra_params,
-            )
-
-        if selected == "gemini":
-            return GeminiLLMProvider(
+        if selected == "openrouter":
+            return OpenRouterLLMProvider(
                 model_name=model_name,
                 retry_attempts=retry_limit,
                 request_timeout_seconds=timeout_seconds,

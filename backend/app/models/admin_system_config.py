@@ -10,7 +10,7 @@ class AdminSystemConfig(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
 
     semantic_scholar_api_key = Column(Text, nullable=True)
-    llm_provider = Column(String(50), nullable=False, default="gemini", server_default="gemini")
+    llm_provider = Column(String(50), nullable=False, default="openrouter", server_default="openrouter")
     llm_model = Column(String(255), nullable=True)
     embedding_model = Column(String(255), nullable=True)
 
