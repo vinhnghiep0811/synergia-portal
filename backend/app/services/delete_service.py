@@ -293,6 +293,7 @@ class DeleteService:
             for path in (
                 paper.storage_path,
                 paper.docling_markdown_storage_path,
+                paper.docling_page_text_json_storage_path,
                 paper.page_text_json_storage_path,
             )
             if path

@@ -35,6 +35,7 @@ class PaperRecord(Base):
     file_hash_sha256 = Column(String(64), nullable=False)
 
     docling_markdown_storage_path = Column(Text, nullable=True)
+    docling_page_text_json_storage_path = Column(Text, nullable=True)
     page_text_json_storage_path = Column(Text, nullable=True)
     upload_source = Column(String(30), nullable=False, default="portal", server_default="portal")
     # status = Column(String(30), nullable=False, default="uploaded", server_default="uploaded")

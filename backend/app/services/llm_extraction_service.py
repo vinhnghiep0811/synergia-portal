@@ -3,6 +3,7 @@ import re
 import logging
 import json
 import tempfile
+import html
 from typing import Any, Optional
 from uuid import UUID
 
@@ -516,6 +517,7 @@ class LLMExtractionService:
             ("meteor", "METEOR"),
             ("ter", "TER"),
             ("perplexity", "perplexity"),
+            ("ppl", "PPL"),
         ]
 
         normalized = text.lower()
@@ -537,25 +539,152 @@ class LLMExtractionService:
 
         return deduped
 
+    @staticmethod
+    def _split_markdown_table_row(line: str) -> list[str]:
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            return []
+
+        stripped = stripped.strip("|")
+        return [
+            re.sub(r"\s+", " ", html.unescape(cell).strip())
+            for cell in stripped.split("|")
+        ]
+
+    @staticmethod
+    def _is_markdown_separator_row(cells: list[str]) -> bool:
+        non_empty_cells = [cell.strip() for cell in cells if cell.strip()]
+        if not non_empty_cells:
+            return False
+        return all(re.fullmatch(r":?-{3,}:?", cell) for cell in non_empty_cells)
+
+    @staticmethod
+    def _is_benchmark_table_header(value: str) -> bool:
+        normalized = re.sub(r"\s+", " ", (value or "").strip().lower())
+        return bool(
+            re.search(
+                r"\b(model|models|parser|parsers|system|systems|method|methods|architecture|architectures|baseline|baselines)\b",
+                normalized,
+            )
+        )
+
+    @staticmethod
+    def _normalize_benchmark_name(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+
+        normalized = html.unescape(value)
+        normalized = normalized.replace("`", "")
+        normalized = re.sub(r"[*_]+", "", normalized)
+        normalized = re.sub(r"\s*\[[^\]]+\]", "", normalized)
+        normalized = re.sub(r"\s*&\s*", " & ", normalized)
+        normalized = re.sub(r"\bet\s+al\b\.?", "et al.", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r"\s+", " ", normalized).strip(" :-–—\t\r\n")
+
+        if not normalized or len(normalized) > 100:
+            return None
+
+        lowered = normalized.lower()
+        generic_exact = {
+            "baseline",
+            "baselines",
+            "baseline system",
+            "baseline model",
+            "baseline method",
+            "state-of-the-art",
+            "state of the art",
+            "state-of-the-art baseline",
+            "state of the art baseline",
+            "smt system",
+            "encoder-decoder baseline",
+            "encoder decoder baseline",
+            "existing method",
+            "existing model",
+            "existing system",
+            "existing approach",
+            "previous method",
+            "previous model",
+            "previous system",
+            "prior work",
+            "competitive model",
+            "competitive models",
+            "best model",
+            "best results",
+            "single model",
+            "ensemble",
+            "ensembles",
+        }
+        if lowered in generic_exact:
+            return None
+
+        generic_patterns = [
+            r"^(?:previously reported|previous|existing|prior|competing|competitive)\s+(?:models?|methods?|systems?|approaches?)$",
+            r"^(?:best|strong|standard)\s+(?:models?|methods?|systems?|baselines?|results?)$",
+            r"^(?:the\s+)?(?:literature|prior work|related work)$",
+        ]
+        if any(re.search(pattern, lowered) for pattern in generic_patterns):
+            return None
+
+        if not re.search(r"[A-Za-z]", normalized):
+            return None
+
+        digit_count = sum(ch.isdigit() for ch in normalized)
+        if digit_count > len(normalized) * 0.45:
+            return None
+
+        return normalized
+
+    def _extract_benchmarks_from_markdown_tables(self, text: str) -> list[str]:
+        candidates: list[str] = []
+        lines = text.splitlines()
+        index = 0
+
+        while index < len(lines):
+            if not lines[index].lstrip().startswith("|"):
+                index += 1
+                continue
+
+            table_rows: list[list[str]] = []
+            while index < len(lines) and lines[index].lstrip().startswith("|"):
+                cells = self._split_markdown_table_row(lines[index])
+                if cells:
+                    table_rows.append(cells)
+                index += 1
+
+            if len(table_rows) < 2:
+                continue
+
+            separator_index = next(
+                (
+                    row_index
+                    for row_index, cells in enumerate(table_rows)
+                    if self._is_markdown_separator_row(cells)
+                ),
+                None,
+            )
+            if separator_index is None or separator_index == 0:
+                continue
+
+            header = table_rows[separator_index - 1]
+            first_header = next((cell for cell in header if cell.strip()), "")
+            if not self._is_benchmark_table_header(first_header):
+                continue
+
+            for row in table_rows[separator_index + 1:]:
+                if not row:
+                    continue
+                first_cell = row[0].strip()
+                benchmark = self._normalize_benchmark_name(first_cell)
+                if benchmark:
+                    candidates.append(benchmark)
+
+        return self._dedupe_strings(candidates, max_items=3)
+
     def _extract_benchmarks_from_text(self, text: str) -> list[str]:
         if not isinstance(text, str) or not text.strip():
             return []
 
-        lowered = self._repair_joined_extraction_text(text).lower()
-        candidates: list[str] = []
-
-        benchmark_patterns = [
-            (r"\boriginal transformer\b|\btransformer baseline\b|\bbaseline network\b", "Transformer baseline"),
-            (r"\bstate-of-the-art\b", "state-of-the-art baseline"),
-            (r"\bconventional smt\b|\bsmt system\b", "SMT system"),
-            (r"\benc-dec\b|\bencoder-decoder\b", "encoder-decoder baseline"),
-        ]
-
-        for pattern, label in benchmark_patterns:
-            if re.search(pattern, lowered):
-                candidates.append(label)
-
-        return self._dedupe_strings(candidates, max_items=3)
+        return self._extract_benchmarks_from_markdown_tables(text)
 
     @staticmethod
     def _dedupe_strings(values: list[str], max_items: int) -> list[str]:
@@ -781,6 +910,7 @@ class LLMExtractionService:
             "meteor": "METEOR",
             "ter": "TER",
             "perplexity": "perplexity",
+            "ppl": "PPL",
         }
         for key, label in metric_map.items():
             if re.search(rf"(?<![a-z]){re.escape(key)}(?![a-z])", lowered):
@@ -1455,6 +1585,7 @@ class LLMExtractionService:
                 canonical,
                 parsed_text=None,
                 full_text=full_text,
+                pages=pages,
             )
             prompt_gemini = self.prompt_builder.build_extraction_prompt_gemini(input_text)
             prompt_gemma = self.prompt_builder.build_extraction_prompt_gemma(input_text)
@@ -1557,7 +1688,17 @@ class LLMExtractionService:
 
                 if text_len > 0:
                     # ⚠️ docling chưa có page mapping → để empty hoặc simple mapping
-                    pages_path = getattr(paper, "page_text_json_storage_path", None)
+                    docling_pages_path = getattr(
+                        paper,
+                        "docling_page_text_json_storage_path",
+                        None,
+                    )
+                    pages_path = docling_pages_path or getattr(
+                        paper,
+                        "page_text_json_storage_path",
+                        None,
+                    )
+                    pages_source = "docling_pages" if docling_pages_path else "pages.json"
 
                     pages = []
 
@@ -1567,14 +1708,16 @@ class LLMExtractionService:
                             pages = json.loads(pages_bytes.decode("utf-8"))
 
                             logger.info(
-                                "[LLM SERVICE] Loaded pages.json for canonical=%s paper_id=%s pages=%s",
+                                "[LLM SERVICE] Loaded %s for canonical=%s paper_id=%s pages=%s",
+                                pages_source,
                                 canonical.id,
                                 getattr(paper, "id", None),
                                 len(pages),
                             )
                         except Exception as e:
                             logger.warning(
-                                "[LLM SERVICE] Failed to load pages.json canonical=%s paper_id=%s error=%s",
+                                "[LLM SERVICE] Failed to load %s canonical=%s paper_id=%s error=%s",
+                                pages_source,
                                 canonical.id,
                                 getattr(paper, "id", None),
                                 str(e),
@@ -1947,13 +2090,11 @@ class LLMExtractionService:
             max_items=4,
         )
 
-        raw_benchmarks = [
-            normalized
-            for x in value.get("benchmarks", [])
-            if isinstance(x, str)
-            and (normalized := self._normalize_free_text(x, max_chars=80))
-            and not self._is_placeholder_text(normalized)
-        ]
+        raw_benchmarks: list[str] = []
+        for x in value.get("benchmarks", []):
+            normalized = self._normalize_benchmark_name(x)
+            if normalized and not self._is_placeholder_text(normalized):
+                raw_benchmarks.append(normalized)
         benchmarks = self._dedupe_strings(
             raw_benchmarks + self._extract_benchmarks_from_text(source_text),
             max_items=3,
@@ -2059,48 +2200,96 @@ class LLMExtractionService:
         snippet: str,
         pages: list[dict],
     ) -> int | None:
+        page, _section = self._match_snippet_to_page_and_section(snippet, pages)
+        return page
+
+    def _match_snippet_to_page_and_section(
+        self,
+        snippet: str,
+        pages: list[dict],
+        page_filter: int | None = None,
+    ) -> tuple[int | None, str | None]:
         snippet = (snippet or "").strip()
         if not snippet:
-            return None
+            return None, None
 
         normalized_snippet = self._normalize_text_for_page_match(snippet)
         if not normalized_snippet:
-            return None
+            return None, None
 
         snippet_words = normalized_snippet.split()
         snippet_tokens = self._significant_match_tokens(normalized_snippet)
-        best_fuzzy_match: tuple[float, int] | None = None
+        best_fuzzy_match: tuple[float, int, str | None] | None = None
+
+        def score_text(candidate_text: str) -> float:
+            if not candidate_text:
+                return 0.0
+
+            if snippet in candidate_text:
+                return 1.0
+
+            normalized_candidate = self._normalize_text_for_page_match(candidate_text)
+            if not normalized_candidate:
+                return 0.0
+
+            if normalized_snippet in normalized_candidate:
+                return 1.0
+
+            if self._contains_token_window(normalized_candidate, snippet_words):
+                return 0.92
+
+            if len(snippet_tokens) < 4:
+                return 0.0
+
+            candidate_tokens = set(normalized_candidate.split())
+            overlap = sum(1 for token in snippet_tokens if token in candidate_tokens)
+            return overlap / len(snippet_tokens)
 
         for page in pages:
             page_num = self._coerce_page_number(page.get("page"))
             if page_num is None:
                 continue
 
-            page_text = (page.get("text") or "").strip()
-
-            if page_text and snippet in page_text:
-                return page_num
-
-            normalized_page_text = self._normalize_text_for_page_match(page_text)
-            if not normalized_page_text:
+            if page_filter is not None and page_num != page_filter:
                 continue
 
-            if normalized_snippet in normalized_page_text:
-                return page_num
+            page_sections = page.get("sections")
+            fallback_section = (
+                page_sections[0]
+                if isinstance(page_sections, list)
+                and len(page_sections) == 1
+                and isinstance(page_sections[0], str)
+                else None
+            )
 
-            if self._contains_token_window(normalized_page_text, snippet_words):
-                return page_num
+            blocks = page.get("blocks")
+            if isinstance(blocks, list):
+                for block in blocks:
+                    if not isinstance(block, dict):
+                        continue
+                    block_text = (block.get("text") or "").strip()
+                    block_score = score_text(block_text)
+                    if block_score < 0.75:
+                        continue
 
-            if len(snippet_tokens) >= 4:
-                page_tokens = set(normalized_page_text.split())
-                overlap = sum(1 for token in snippet_tokens if token in page_tokens)
-                coverage = overlap / len(snippet_tokens)
-                if coverage >= 0.75 and (
-                    best_fuzzy_match is None or coverage > best_fuzzy_match[0]
-                ):
-                    best_fuzzy_match = (coverage, page_num)
+                    block_section = block.get("section")
+                    section = block_section if isinstance(block_section, str) and block_section.strip() else fallback_section
+                    if block_score >= 1.0:
+                        return page_num, section
+                    if best_fuzzy_match is None or block_score > best_fuzzy_match[0]:
+                        best_fuzzy_match = (block_score, page_num, section)
 
-        return best_fuzzy_match[1] if best_fuzzy_match else None
+            page_score = score_text((page.get("text") or "").strip())
+            if page_score >= 1.0:
+                return page_num, fallback_section
+            if page_score >= 0.75 and (
+                best_fuzzy_match is None or page_score > best_fuzzy_match[0]
+            ):
+                best_fuzzy_match = (page_score, page_num, fallback_section)
+
+        if best_fuzzy_match:
+            return best_fuzzy_match[1], best_fuzzy_match[2]
+        return None, None
     
     def _fill_missing_pages(
         self,
@@ -2119,13 +2308,22 @@ class LLMExtractionService:
 
                 evidences = item.get("evidence") or []
                 for ev in evidences:
-                    if ev.get("page") is None:
-                        matched_page = self._match_snippet_to_page(
+                    if ev.get("page") is None or not ev.get("section"):
+                        current_page = self._coerce_page_number(ev.get("page"))
+                        matched_page, matched_section = self._match_snippet_to_page_and_section(
                             ev.get("snippet", ""),
                             pages,
+                            page_filter=current_page,
                         )
+                        if matched_page is None and current_page is not None:
+                            matched_page, matched_section = self._match_snippet_to_page_and_section(
+                                ev.get("snippet", ""),
+                                pages,
+                            )
                         if matched_page is not None:
                             ev["page"] = matched_page
+                        if not ev.get("section") and matched_section:
+                            ev["section"] = matched_section
 
                 normalized_items.append(item)
 
@@ -2135,13 +2333,22 @@ class LLMExtractionService:
             evidences = field_obj.get("evidence") or []
 
             for ev in evidences:
-                if ev.get("page") is None:
-                    matched_page = self._match_snippet_to_page(
+                if ev.get("page") is None or not ev.get("section"):
+                    current_page = self._coerce_page_number(ev.get("page"))
+                    matched_page, matched_section = self._match_snippet_to_page_and_section(
                         ev.get("snippet", ""),
                         pages,
+                        page_filter=current_page,
                     )
+                    if matched_page is None and current_page is not None:
+                        matched_page, matched_section = self._match_snippet_to_page_and_section(
+                            ev.get("snippet", ""),
+                            pages,
+                        )
                     if matched_page is not None:
                         ev["page"] = matched_page
+                    if not ev.get("section") and matched_section:
+                        ev["section"] = matched_section
 
             return field_obj
 

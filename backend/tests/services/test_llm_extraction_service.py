@@ -77,6 +77,49 @@ class LLMExtractionServicePageMatchingTests(unittest.TestCase):
 
         self.assertEqual(page, 3)
 
+    def test_fill_missing_pages_uses_docling_blocks_for_page_and_section(self):
+        pages = [
+            {
+                "page": 1,
+                "text": "Introductory material.",
+                "sections": ["Introduction"],
+                "blocks": [
+                    {
+                        "page": 1,
+                        "section": "Introduction",
+                        "text": "Introductory material.",
+                    }
+                ],
+            },
+            {
+                "page": 7,
+                "text": "We plan to investigate local restricted attention mechanisms further.",
+                "sections": ["Conclusion"],
+                "blocks": [
+                    {
+                        "page": 7,
+                        "section": "Conclusion",
+                        "text": "We plan to investigate local restricted attention mechanisms further.",
+                    }
+                ],
+            },
+        ]
+        field = {
+            "value": "The authors plan to investigate restricted attention further.",
+            "evidence": [
+                {
+                    "snippet": "We plan to investigate local restricted attention mechanisms further.",
+                    "page": None,
+                    "section": None,
+                }
+            ],
+        }
+
+        filled = self.service._fill_missing_pages(field, pages)
+
+        self.assertEqual(filled["evidence"][0]["page"], 7)
+        self.assertEqual(filled["evidence"][0]["section"], "Conclusion")
+
 
 class LLMExtractionServiceLimitationsTests(unittest.TestCase):
     def setUp(self):
@@ -173,6 +216,48 @@ class LLMExtractionServiceResearchFieldTests(unittest.TestCase):
             ["WMT 2014 English-to-German", "WMT 2014 English-to-French"],
         )
         self.assertEqual(self.service._extract_metrics_from_text(text), ["BLEU"])
+
+    def test_benchmark_extraction_uses_named_table_rows(self):
+        text = (
+            "Table 2: The Transformer achieves better BLEU scores than previous models.\n\n"
+            "| Model | BLEU | Training Cost |\n"
+            "|-------|------|---------------|\n"
+            "| ByteNet [18] | 23.75 | |\n"
+            "| Deep-Att + PosUnk [39] | 39.2 | 1.0e20 |\n"
+            "| GNMT + RL [38] | 24.6 | 2.3e19 |\n"
+            "| Transformer (big) | 28.4 | 2.3e19 |\n"
+        )
+
+        self.assertEqual(
+            self.service._extract_benchmarks_from_text(text),
+            ["ByteNet", "Deep-Att + PosUnk", "GNMT + RL"],
+        )
+
+    def test_evaluation_normalization_rejects_generic_benchmarks(self):
+        raw = {
+            "value": {
+                "datasets": ["WMT'14 English-to-German"],
+                "metrics": ["BLEU"],
+                "benchmarks": [
+                    "state-of-the-art baseline",
+                    "SMT system",
+                    "encoder-decoder baseline",
+                    "ByteNet [18]",
+                ],
+            },
+            "evidence": [
+                {
+                    "snippet": "Table 2 summarizes our results and compares our translation quality.",
+                    "page": 8,
+                    "section": "Results",
+                }
+            ],
+        }
+
+        normalized = self.service._normalize_evaluation_setup(raw, pages=[], source_text="")
+
+        self.assertEqual(normalized["value"]["benchmarks"], ["ByteNet"])
+        self.assertNotIn("state-of-the-art baseline", normalized["value"]["benchmarks"])
 
 
 if __name__ == "__main__":

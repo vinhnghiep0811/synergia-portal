@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from app.models.canonical_document import CanonicalDocument
 from app.services.llm.constants import MAX_INPUT_CHARS
@@ -11,6 +11,57 @@ logger = logging.getLogger(__name__)
 class LLMInputBuilder:
     def _clean_text(self, text: str) -> str:
         return "\n".join(line.rstrip() for line in text.strip().splitlines()).strip()
+
+    def _format_page_marker(self, page_number: Any, section: Any = None) -> str:
+        page_text = str(page_number).strip() if page_number is not None else "unknown"
+        section_text = re.sub(r"\s+", " ", section).strip() if isinstance(section, str) else ""
+        if section_text:
+            return f"[PAGE {page_text} | SECTION {section_text}]"
+        return f"[PAGE {page_text}]"
+
+    def _build_page_aware_text(self, pages: list[dict[str, Any]] | None) -> str:
+        if not pages:
+            return ""
+
+        parts: list[str] = []
+        last_marker: str | None = None
+
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+
+            page_number = page.get("page")
+            blocks = page.get("blocks")
+            if isinstance(blocks, list) and blocks:
+                for block in blocks:
+                    if not isinstance(block, dict):
+                        continue
+                    text = self._clean_text(str(block.get("text") or ""))
+                    if not text:
+                        continue
+                    marker = self._format_page_marker(
+                        block.get("page") or page_number,
+                        block.get("section"),
+                    )
+                    if marker != last_marker:
+                        parts.append(marker)
+                        last_marker = marker
+                    parts.append(text)
+                continue
+
+            text = self._clean_text(str(page.get("text") or ""))
+            if not text:
+                continue
+
+            sections = page.get("sections")
+            section = sections[0] if isinstance(sections, list) and len(sections) == 1 else None
+            marker = self._format_page_marker(page_number, section)
+            if marker != last_marker:
+                parts.append(marker)
+                last_marker = marker
+            parts.append(text)
+
+        return "\n\n".join(parts).strip()
 
     def _extract_priority_tail(self, text: str, fallback_chars: int) -> str:
         """
@@ -73,6 +124,7 @@ class LLMInputBuilder:
         canonical: CanonicalDocument,
         parsed_text: Optional[str] = None,
         full_text: Optional[str] = None,
+        pages: list[dict[str, Any]] | None = None,
     ) -> str:
         parts: list[str] = []
 
@@ -85,7 +137,8 @@ class LLMInputBuilder:
             "5. METHOD/CONTRIBUTIONS: Use this paper's own method/results, not cited prior work.\n"
             "6. EVALUATION: Datasets/tasks and metrics must come from experiment context; citation venues are not datasets.\n"
             "7. EVIDENCE: Keep snippet short (<= 180 chars). Use '...' to shorten long quotes.\n"
-            "8. Use only provided content. If not found, use null or []."
+            "8. Use only provided content. If not found, use null or [].\n"
+            "9. When [PAGE ... | SECTION ...] markers are present, use them for evidence page and section."
         )
 
         parts.append(
@@ -113,7 +166,8 @@ class LLMInputBuilder:
         if canonical.title_candidate and canonical.title_candidate != canonical.title:
             parts.append(f"[DETECTED_TITLE_CANDIDATE]\n{canonical.title_candidate}")
 
-        effective_text = (full_text or "").strip() or (parsed_text or "").strip()
+        page_aware_text = self._build_page_aware_text(pages)
+        effective_text = page_aware_text or (full_text or "").strip() or (parsed_text or "").strip()
         cleaned_text = self._clean_text(effective_text)
 
         if cleaned_text:
