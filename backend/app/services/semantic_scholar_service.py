@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models.canonical_document import CanonicalDocument
 from app.models.paper_record import PaperRecord
+from app.services.crossref_service import CrossrefService
 from app.services.runtime_config_service import RuntimeConfigService
 
 
@@ -51,6 +52,10 @@ class SemanticScholarService:
         self.title_match_threshold = max(
             0.0,
             min(1.0, float(runtime_config.metadata_match_threshold)),
+        )
+        self.crossref_service = CrossrefService(
+            timeout_seconds=self.request_timeout_seconds,
+            title_match_threshold=self.title_match_threshold,
         )
 
     def _fallback_to_env_key_if_needed(self, status_code: int, context: str) -> bool:
@@ -106,6 +111,10 @@ class SemanticScholarService:
 
         if paper_data and match_type:
             self._apply_ss_data(canonical, paper_data, match_type)
+            self._apply_crossref_verification(
+                canonical,
+                self._verify_with_crossref(canonical, paper_data),
+            )
             self._sync_title_to_papers(canonical, paper_data.get("title"))
             self.db.add(canonical)
             self.db.commit()
@@ -577,3 +586,73 @@ class SemanticScholarService:
         canonical.metadata_source = "semantic_scholar"
         canonical.enrichment_status = "enriched"
         canonical.match_status = match_type
+
+    def _verify_with_crossref(
+        self,
+        canonical: CanonicalDocument,
+        paper_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        primary_metadata = self._semantic_scholar_primary_metadata(canonical, paper_data)
+        try:
+            verification = self.crossref_service.verify_metadata(
+                primary_metadata,
+                lookup_doi=primary_metadata.get("doi"),
+                lookup_title=primary_metadata.get("title") or canonical.title_candidate,
+            )
+            logger.info(
+                "[Crossref verify] canonical_id=%s status=%s confidence=%s",
+                canonical.id,
+                verification.get("status"),
+                verification.get("confidence"),
+            )
+            return verification
+        except Exception as exc:
+            logger.warning(
+                "[Crossref verify] Failed canonical_id=%s error=%s",
+                canonical.id,
+                exc,
+            )
+            return {
+                "provider": "crossref",
+                "status": "error",
+                "queried_by": "unknown",
+                "confidence": 0.0,
+                "conflicts": [],
+                "fields": {},
+                "primary_metadata": primary_metadata,
+                "crossref_metadata": None,
+                "error": str(exc),
+            }
+
+    def _semantic_scholar_primary_metadata(
+        self,
+        canonical: CanonicalDocument,
+        paper_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        external_ids = paper_data.get("externalIds") or {}
+        authors = [
+            a.get("name", "")
+            for a in paper_data.get("authors", [])
+            if a.get("name")
+        ]
+        return {
+            "source": "semantic_scholar",
+            "doi": canonical.doi or external_ids.get("DOI"),
+            "title": paper_data.get("title") or canonical.title or canonical.title_candidate,
+            "authors": authors,
+            "year": paper_data.get("year") or canonical.publication_year,
+            "venue": paper_data.get("venue") or canonical.venue,
+            "abstract": paper_data.get("abstract") or canonical.abstract,
+            "external_ids": external_ids,
+        }
+
+    def _apply_crossref_verification(
+        self,
+        canonical: CanonicalDocument,
+        verification: dict[str, Any],
+    ) -> None:
+        canonical.crossref_match_status = verification.get("status")
+        confidence = verification.get("confidence")
+        canonical.crossref_match_confidence = confidence if confidence is not None else None
+        canonical.crossref_metadata_json = verification.get("crossref_metadata")
+        canonical.crossref_verification_json = verification

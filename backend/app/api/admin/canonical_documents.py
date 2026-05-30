@@ -98,6 +98,8 @@ def get_admin_canonical_documents(
                 "enrichment_status": canonical.enrichment_status,
                 "match_status": canonical.match_status,
                 "metadata_source": canonical.metadata_source,
+                "crossref_match_status": canonical.crossref_match_status,
+                "crossref_match_confidence": canonical.crossref_match_confidence,
                 "created_at": canonical.created_at,
                 "paper_count": paper_count,
             }
