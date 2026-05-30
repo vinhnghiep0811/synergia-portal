@@ -13,6 +13,7 @@ from app.core.config import (
     OPENROUTER_API_KEY,
     OPENROUTER_BASE_URL,
     OPENROUTER_MODEL,
+    LLM_AUTO_RETRY_MAX_ATTEMPTS,
 )
 from app.models.admin_system_config import AdminSystemConfig
 from app.models.llm_provider_api_key import LLMProviderApiKey
@@ -20,7 +21,7 @@ from app.models.llm_provider_config import LLMProviderConfig
 
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_METADATA_MATCH_THRESHOLD = 0.7
-DEFAULT_PIPELINE_RETRY_LIMIT = 3
+DEFAULT_PIPELINE_RETRY_LIMIT = LLM_AUTO_RETRY_MAX_ATTEMPTS
 DEFAULT_PIPELINE_TIMEOUT_SECONDS = 300
 DEFAULT_SEMANTIC_SCHOLAR_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
 ALLOWED_LLM_PROVIDERS = {"openrouter", "ollama"}
@@ -117,27 +118,7 @@ class RuntimeConfigService:
             .first()
         )
         if config is None:
-            provider_key = _get_primary_api_key(db)
-            llm_api_key = provider_key or _default_llm_api_key()
-            provider_config = _get_provider_config(db, defaults.llm_provider)
-            llm_base_url = _default_llm_base_url(defaults.llm_provider)
-            llm_extra_params = (
-                provider_config.extra_params
-                if provider_config and isinstance(provider_config.extra_params, dict)
-                else None
-            )
-            return RuntimeSystemConfig(
-                semantic_scholar_api_key=defaults.semantic_scholar_api_key,
-                llm_api_key=llm_api_key,
-                llm_provider=defaults.llm_provider,
-                llm_model=defaults.llm_model,
-                llm_base_url=llm_base_url,
-                llm_extra_params=llm_extra_params,
-                embedding_model=defaults.embedding_model,
-                metadata_match_threshold=defaults.metadata_match_threshold,
-                pipeline_retry_limit=defaults.pipeline_retry_limit,
-                pipeline_timeout_seconds=defaults.pipeline_timeout_seconds,
-            )
+            return defaults
 
         llm_provider = _normalize_provider(config.llm_provider or defaults.llm_provider)
         provider_config = _get_provider_config(db, llm_provider)

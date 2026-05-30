@@ -550,6 +550,8 @@ class AdminConfigService:
         config = self._get_config()
         if config is not None:
             self.db.delete(config)
+            self.db.query(LLMProviderApiKey).delete()
+            self.db.query(LLMProviderConfig).delete()
             self.db.flush()
 
         self.activity_service.log(

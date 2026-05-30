@@ -5,7 +5,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, Optional
 
-from app.core.config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_MODEL
+from app.core.config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_MODEL, LLM_AUTO_RETRY_DELAY_SECONDS
 from app.services.llm.providers.base import BaseLLMProvider
 from app.services.llm.providers.ollama_provider import OllamaLLMProvider
 
@@ -38,7 +38,7 @@ class OpenRouterLLMProvider(BaseLLMProvider):
         self.extra_params = extra_params if isinstance(extra_params, dict) else None
 
         self.retry_attempts = max(1, int(retry_attempts)) if retry_attempts is not None else 3
-        self.retry_delay_seconds = 1.0
+        self.retry_delay_seconds = LLM_AUTO_RETRY_DELAY_SECONDS
         self.request_timeout_seconds = (
             max(1, int(request_timeout_seconds))
             if request_timeout_seconds is not None
