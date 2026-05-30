@@ -392,7 +392,7 @@ class AdminConfigService:
         data = payload.model_dump(exclude_unset=True)
         data.pop("use_default_settings", None)
 
-        defaults = RuntimeConfigService.get()
+        defaults = RuntimeConfigService.get(self.db)
         default_telegram_enabled = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
 
         def normalize_text(value: object) -> str | None:

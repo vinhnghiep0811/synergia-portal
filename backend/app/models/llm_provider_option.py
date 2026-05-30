@@ -8,7 +8,7 @@ class LLMProviderOption(Base):
     __tablename__ = "llm_provider_options"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(50), nullable=False, unique=True)
+    name = Column(String(255), nullable=False, unique=True)
 
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
