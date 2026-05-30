@@ -1,3 +1,6 @@
+# DEPRECATED: Provider này không còn được sử dụng. Hệ thống đã chuyển sang OpenRouter
+# cho đa model. Giữ lại chỉ để tham khảo. Mọi import sẽ bị factory chặn.
+
 import json
 import logging
 import time
