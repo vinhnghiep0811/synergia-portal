@@ -28,6 +28,15 @@ async function post(url, payload) {
   }
 }
 
+async function del(url) {
+  try {
+    const response = await apiClient.delete(url);
+    return response.data;
+  } catch (error) {
+    throw new Error(await parseApiError(error));
+  }
+}
+
 export async function getAdminOverview() {
   return get("/api/admin/overview");
 }
@@ -85,5 +94,29 @@ export async function getAdminEvaluationReport(windowDays = 7, searchSampleLimit
     window_days: windowDays,
     search_sample_limit: searchSampleLimit,
   });
+}
+
+export async function getAdminLLMPrompts() {
+  return get("/api/admin/llm-prompts");
+}
+
+export async function updateAdminLLMPrompts(payload) {
+  return patch("/api/admin/llm-prompts", payload);
+}
+
+export async function getAdminLLMModels() {
+  return get("/api/admin/llm-models");
+}
+
+export async function addAdminLLMModel(payload) {
+  return post("/api/admin/llm-models", payload);
+}
+
+export async function updateAdminLLMModel(modelId, payload) {
+  return patch(`/api/admin/llm-models/${modelId}`, payload);
+}
+
+export async function removeAdminLLMModel(modelId) {
+  return del(`/api/admin/llm-models/${modelId}`);
 }
 

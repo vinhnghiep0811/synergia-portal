@@ -121,18 +121,14 @@ REFRESH_TOKEN_SECRET_KEY  = get_env("REFRESH_TOKEN_SECRET_KEY", "change-refresh-
 REFRESH_TOKEN_EXPIRE_DAYS = get_env_int("REFRESH_TOKEN_EXPIRE_DAYS", 30)
 
 # =========================
-# LLM - Gemini (Week 5)
+# LLM - OpenRouter (Primary)
 # =========================
-LLM_PROVIDER = get_env("LLM_PROVIDER", "gemini")
- 
-GEMINI_API_KEY = get_env("GEMINI_API_KEY", "")
-GEMINI_MODEL = get_env("GEMINI_MODEL", "gemini-2.5-pro")
+LLM_PROVIDER = get_env("LLM_PROVIDER", "openrouter")
 
-GEMINI_TEMPERATURE = float(get_env("GEMINI_TEMPERATURE", "0"))
-GEMINI_MAX_OUTPUT_TOKENS = get_env_int("GEMINI_MAX_OUTPUT_TOKENS", 4096)
-GEMINI_AUTO_RETRY_MAX_ATTEMPTS = max(1, get_env_int("GEMINI_AUTO_RETRY_MAX_ATTEMPTS", 5))
-GEMINI_AUTO_RETRY_DELAY_SECONDS = max(0.0, float(get_env("GEMINI_AUTO_RETRY_DELAY_SECONDS", "1")))
-GEMINI_FALLBACK_TO_OLLAMA = get_env_bool("GEMINI_FALLBACK_TO_OLLAMA", True)
+OPENROUTER_API_KEY = get_env("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = get_env("OPENROUTER_MODEL", "google/gemini-2.5-flash")
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
 
 OLLAMA_BASE_URL = get_env("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = get_env("OLLAMA_MODEL", "gemma:2b")
@@ -144,6 +140,8 @@ OLLAMA_TOP_P = float(get_env("OLLAMA_TOP_P", "0.9"))
 OLLAMA_REPEAT_PENALTY = float(get_env("OLLAMA_REPEAT_PENALTY", "1.1"))
 
 LLM_TIMEOUT_SECONDS = get_env_int("LLM_TIMEOUT_SECONDS", 60)
+LLM_AUTO_RETRY_MAX_ATTEMPTS = max(1, get_env_int("LLM_AUTO_RETRY_MAX_ATTEMPTS", 3))
+LLM_AUTO_RETRY_DELAY_SECONDS = max(0.0, float(get_env("LLM_AUTO_RETRY_DELAY_SECONDS", "1.0")))
 
 # =========================
 # Telegram 

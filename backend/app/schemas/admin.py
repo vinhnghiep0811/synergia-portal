@@ -11,8 +11,15 @@ class AdminConfigUpdateRequest(BaseModel):
         min_length=8,
         description="Optional. Leave empty to keep existing key.",
     )
-    llm_provider: str | None = Field(default=None, pattern="^(gemini|ollama)$")
-    llm_model: str | None = Field(default=None, min_length=1, max_length=255)
+    llm_api_key: str | None = Field(
+        default=None,
+        min_length=8,
+        description="Optional. Leave empty to keep existing key.",
+    )
+    llm_provider: str | None = Field(default=None, min_length=1, max_length=50)
+    llm_model: str | None = Field(default=None, max_length=255)
+    llm_base_url: str | None = Field(default=None, min_length=1, max_length=2048)
+    llm_extra_params: dict[str, Any] | None = Field(default=None)
     embedding_model: str | None = Field(default=None, min_length=1, max_length=255)
     metadata_match_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     pipeline_retry_limit: int | None = Field(default=None, ge=0, le=10)
@@ -48,14 +55,18 @@ class AdminConfigUpdateRequest(BaseModel):
 class AdminConfigResponse(BaseModel):
     llm_provider: str
     llm_model: str | None
+    llm_base_url: str | None
+    llm_extra_params: dict[str, Any] | None
     embedding_model: str | None
     metadata_match_threshold: float
     pipeline_retry_limit: int
     pipeline_timeout_seconds: int
     telegram_enabled: bool
     telegram_chat_id: str | None
+    llm_api_key_masked: str | None
     semantic_scholar_api_key_masked: str | None
     telegram_bot_token_masked: str | None
+    has_llm_api_key: bool
     has_semantic_scholar_api_key: bool
     has_telegram_bot_token: bool
     source: str
@@ -71,8 +82,11 @@ class ConfigValidateRequest(BaseModel):
         pattern="^(llm|semantic_scholar|telegram|embedding|all)$",
         description="Which service to validate: llm, semantic_scholar, telegram, embedding, or all.",
     )
-    llm_provider: str | None = Field(default=None, pattern="^(gemini|ollama)$")
-    llm_model: str | None = Field(default=None, min_length=1, max_length=255)
+    llm_provider: str | None = Field(default=None, min_length=1, max_length=50)
+    llm_model: str | None = Field(default=None, max_length=255)
+    llm_api_key: str | None = Field(default=None, min_length=1)
+    llm_base_url: str | None = Field(default=None, min_length=1, max_length=2048)
+    llm_extra_params: dict[str, Any] | None = Field(default=None)
     embedding_model: str | None = Field(default=None, min_length=1, max_length=255)
     semantic_scholar_api_key: str | None = Field(default=None, min_length=1)
     telegram_bot_token: str | None = Field(default=None, min_length=1)
@@ -90,6 +104,47 @@ class ServiceValidationResult(BaseModel):
 class ConfigValidateResponse(BaseModel):
     results: list[ServiceValidationResult]
     all_ok: bool
+
+
+class LLMModelOptionItem(BaseModel):
+    id: int
+    name: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class LLMModelOptionListResponse(BaseModel):
+    models: list[LLMModelOptionItem]
+
+
+class LLMModelOptionCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class LLMModelOptionUpdateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class LLMPromptTemplateItem(BaseModel):
+    key: str
+    label: str
+    content: str
+    is_default: bool
+    updated_at: datetime | None
+    updated_by: str | None
+
+
+class LLMPromptTemplateUpdateItem(BaseModel):
+    key: str
+    content: str
+
+
+class LLMPromptTemplatesUpdateRequest(BaseModel):
+    templates: list[LLMPromptTemplateUpdateItem]
+
+
+class LLMPromptTemplatesResponse(BaseModel):
+    templates: list[LLMPromptTemplateItem]
 
 
 class ProcessingLogSummaryItem(BaseModel):
