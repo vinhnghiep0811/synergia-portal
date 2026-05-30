@@ -10,11 +10,12 @@ import {
 import "../styles/CitationGraphPage.css";
 
 const GRAPH_WIDTH = 1240;
-const GRAPH_HEIGHT = 640;
+const GRAPH_HEIGHT = 720;
 const GRAPH_CENTER = { x: GRAPH_WIDTH / 2, y: GRAPH_HEIGHT / 2 };
 const ZOOM_MIN = 0.55;
 const ZOOM_MAX = 2.6;
 const ZOOM_STEP = 0.14;
+const DENSE_EDGE_THRESHOLD = 15;
 
 const EDGE_COLORS = {
   low: "#64748b",
@@ -58,6 +59,55 @@ function trimTitle(text, maxLength = 36) {
     return normalized;
   }
   return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+/** Chia tiêu đề thành tối đa `maxLines` dòng, mỗi dòng tối đa `maxChars` ký tự (ước lượng). */
+function splitTitleLines(text, maxChars, maxLines) {
+  const base = (text || "").trim() || "Untitled";
+  const words = base.split(/\s+/);
+  const lines = [];
+  let current = "";
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= maxChars) {
+      current = candidate;
+    } else {
+      if (current) {
+        lines.push(current);
+      }
+      current =
+        word.length > maxChars ? `${word.slice(0, Math.max(1, maxChars - 1))}…` : word;
+      if (lines.length >= maxLines) {
+        break;
+      }
+    }
+    if (lines.length >= maxLines) {
+      break;
+    }
+  }
+
+  if (lines.length < maxLines && current) {
+    lines.push(current);
+  }
+
+  if (!lines.length) {
+    return [trimTitle(base, maxChars)];
+  }
+
+  if (lines.length > maxLines) {
+    return lines.slice(0, maxLines);
+  }
+
+  const joined = lines.join(" ");
+  if (joined.length < base.length && lines.length === maxLines) {
+    const last = lines[maxLines - 1];
+    if (last && !last.endsWith("…") && last.length >= maxChars - 2) {
+      lines[maxLines - 1] = `${trimTitle(last, maxChars)}`;
+    }
+  }
+
+  return lines;
 }
 
 function toNumber(value) {
@@ -149,37 +199,125 @@ function buildLayout(nodes) {
     return {};
   }
 
-  const cx = GRAPH_WIDTH / 2;
-  const cy = GRAPH_HEIGHT / 2;
-  const outerRadius = Math.min(GRAPH_WIDTH, GRAPH_HEIGHT) * 0.36;
-  const innerRadius = Math.min(GRAPH_WIDTH, GRAPH_HEIGHT) * 0.23;
+  const n = nodes.length;
 
+  // Một vài case nhỏ để đồ thị nhìn cân hơn
+  if (n === 1) {
+    return {
+      [nodes[0].canonical_document_id]: {
+        x: GRAPH_WIDTH / 2,
+        y: GRAPH_HEIGHT / 2,
+      },
+    };
+  }
+
+  if (n === 2) {
+    const centerY = GRAPH_HEIGHT / 2;
+    const offsetX = Math.min(GRAPH_WIDTH, GRAPH_HEIGHT) * 0.22;
+    return {
+      [nodes[0].canonical_document_id]: {
+        x: GRAPH_WIDTH / 2 - offsetX,
+        y: centerY,
+      },
+      [nodes[1].canonical_document_id]: {
+        x: GRAPH_WIDTH / 2 + offsetX,
+        y: centerY,
+      },
+    };
+  }
+
+  // Từ 3 node trở lên: bố cục dạng lưới phẳng, dễ quét theo hàng/cột
   const sorted = [...nodes].sort(
     (left, right) =>
       right.out_degree + right.in_degree - (left.out_degree + left.in_degree)
   );
 
-  const innerCount =
-    sorted.length <= 10 ? sorted.length : Math.min(14, Math.ceil(sorted.length * 0.38));
+  const cols = clampValue(Math.round(Math.sqrt(n)), 3, 7);
+  const rows = Math.ceil(n / cols);
 
-  const inner = sorted.slice(0, innerCount);
-  const outer = sorted.slice(innerCount);
+  const paddingX = 80;
+  const paddingY = 60;
+
+  const usableWidth = GRAPH_WIDTH - paddingX * 2;
+  const usableHeight = GRAPH_HEIGHT - paddingY * 2;
+
+  const colStep = cols > 1 ? usableWidth / (cols - 1) : 0;
+  const rowStep = rows > 1 ? usableHeight / (rows - 1) : 0;
 
   const positions = {};
 
-  inner.forEach((node, index) => {
-    const angle = (2 * Math.PI * index) / Math.max(1, inner.length) - Math.PI / 2;
-    positions[node.canonical_document_id] = {
-      x: cx + innerRadius * Math.cos(angle),
-      y: cy + innerRadius * Math.sin(angle),
-    };
+  sorted.forEach((node, index) => {
+    const row = Math.floor(index / cols);
+    const col = index % cols;
+    const x = paddingX + col * colStep;
+    const y = paddingY + row * rowStep;
+
+    positions[node.canonical_document_id] = { x, y };
   });
 
-  outer.forEach((node, index) => {
-    const angle = (2 * Math.PI * index) / Math.max(1, outer.length) - Math.PI / 2;
-    positions[node.canonical_document_id] = {
-      x: cx + outerRadius * Math.cos(angle),
-      y: cy + outerRadius * Math.sin(angle),
+  return positions;
+}
+
+function buildFocusedLayout(selectedNodeId, nodes, edges, basePositions) {
+  if (!selectedNodeId || !nodes?.length) {
+    return basePositions || {};
+  }
+
+  const linkedNodeIds = [];
+  const linkedSet = new Set();
+
+  (edges || []).forEach((edge) => {
+    if (edge.source_canonical_id === selectedNodeId && edge.target_canonical_id !== selectedNodeId) {
+      if (!linkedSet.has(edge.target_canonical_id)) {
+        linkedSet.add(edge.target_canonical_id);
+        linkedNodeIds.push(edge.target_canonical_id);
+      }
+    }
+    if (edge.target_canonical_id === selectedNodeId && edge.source_canonical_id !== selectedNodeId) {
+      if (!linkedSet.has(edge.source_canonical_id)) {
+        linkedSet.add(edge.source_canonical_id);
+        linkedNodeIds.push(edge.source_canonical_id);
+      }
+    }
+  });
+
+  const nodeById = new Map(nodes.map((node) => [node.canonical_document_id, node]));
+  const positions = { ...(basePositions || {}) };
+  const selectedNode = nodeById.get(selectedNodeId);
+
+  if (!selectedNode) {
+    return positions;
+  }
+
+  positions[selectedNodeId] = { x: GRAPH_CENTER.x, y: GRAPH_CENTER.y };
+
+  if (!linkedNodeIds.length) {
+    return positions;
+  }
+
+  linkedNodeIds.sort((leftId, rightId) => {
+    const leftNode = nodeById.get(leftId);
+    const rightNode = nodeById.get(rightId);
+    const leftDegree = (leftNode?.in_degree || 0) + (leftNode?.out_degree || 0);
+    const rightDegree = (rightNode?.in_degree || 0) + (rightNode?.out_degree || 0);
+    return rightDegree - leftDegree;
+  });
+
+  const count = linkedNodeIds.length;
+  const ringRadius = clampValue(
+    130 + Math.sqrt(count) * 44,
+    130,
+    Math.min(GRAPH_WIDTH, GRAPH_HEIGHT) * 0.36
+  );
+  const margin = 66;
+
+  linkedNodeIds.forEach((nodeId, index) => {
+    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / count;
+    const x = GRAPH_CENTER.x + Math.cos(angle) * ringRadius;
+    const y = GRAPH_CENTER.y + Math.sin(angle) * ringRadius;
+    positions[nodeId] = {
+      x: clampValue(x, margin, GRAPH_WIDTH - margin),
+      y: clampValue(y, margin, GRAPH_HEIGHT - margin),
     };
   });
 
@@ -238,6 +376,8 @@ export function CitationGraphPage() {
   const [edgeLimit, setEdgeLimit] = useState(300);
 
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [nodeFocusMode, setNodeFocusMode] = useState(false);
   const [mentions, setMentions] = useState([]);
   const [loadingMentions, setLoadingMentions] = useState(false);
   const [mentionError, setMentionError] = useState("");
@@ -394,15 +534,10 @@ export function CitationGraphPage() {
     };
   }, [rescoreTracking, rescoreTrackingJobId]);
 
-  const selectedEdge = useMemo(
-    () => network?.edges?.find((edge) => edge.edge_id === selectedEdgeId) || null,
-    [network, selectedEdgeId]
-  );
-
   const zoomPercent = Math.round(view.zoom * 100);
   const viewTransform = `translate(${view.panX} ${view.panY}) scale(${view.zoom})`;
 
-  const nodePosition = useMemo(() => buildLayout(network?.nodes || []), [network]);
+  const baseNodePosition = useMemo(() => buildLayout(network?.nodes || []), [network]);
 
   const nodeById = useMemo(() => {
     const map = new Map();
@@ -419,6 +554,106 @@ export function CitationGraphPage() {
     });
     return set;
   }, [network]);
+
+  const totalNodes = network?.nodes?.length || 0;
+  const shownEdges = network?.edges?.length || 0;
+  const hasNodeButNoEdge = totalNodes > 0 && shownEdges === 0;
+  const isDenseGraph = shownEdges > DENSE_EDGE_THRESHOLD;
+
+  useEffect(() => {
+    if (isDenseGraph) {
+      setNodeFocusMode(true);
+      return;
+    }
+    setNodeFocusMode(false);
+  }, [isDenseGraph]);
+
+  const filteredEdges = useMemo(() => {
+    const allEdges = network?.edges || [];
+    if (!allEdges.length) {
+      return [];
+    }
+
+    if (!nodeFocusMode && !selectedNodeId) {
+      return allEdges;
+    }
+
+    if (!selectedNodeId) {
+      return allEdges;
+    }
+
+    return allEdges.filter(
+      (edge) =>
+        edge.source_canonical_id === selectedNodeId || edge.target_canonical_id === selectedNodeId
+    );
+  }, [network, nodeFocusMode, selectedNodeId]);
+
+  const visibleNodeIds = useMemo(() => {
+    const ids = new Set();
+    const allNodes = network?.nodes || [];
+
+    if (!selectedNodeId) {
+      allNodes.forEach((node) => ids.add(node.canonical_document_id));
+      return ids;
+    }
+
+    filteredEdges.forEach((edge) => {
+      ids.add(edge.source_canonical_id);
+      ids.add(edge.target_canonical_id);
+    });
+    ids.add(selectedNodeId);
+    return ids;
+  }, [network, selectedNodeId, filteredEdges]);
+
+  const nodePosition = useMemo(
+    () =>
+      buildFocusedLayout(
+        selectedNodeId,
+        network?.nodes || [],
+        network?.edges || [],
+        baseNodePosition
+      ),
+    [selectedNodeId, network, baseNodePosition]
+  );
+
+  const resetGraphView = useCallback(() => {
+    setView({ zoom: 1, panX: 0, panY: 0 });
+  }, []);
+
+  const toggleNodeSelection = useCallback(
+    (nodeId) => {
+      setSelectedNodeId((previousId) => (previousId === nodeId ? null : nodeId));
+      resetGraphView();
+    },
+    [resetGraphView]
+  );
+
+  useEffect(() => {
+    if (!selectedEdgeId) {
+      return;
+    }
+    const isStillVisible = filteredEdges.some((edge) => edge.edge_id === selectedEdgeId);
+    if (!isStillVisible) {
+      setSelectedEdgeId(filteredEdges[0]?.edge_id ?? null);
+    }
+  }, [filteredEdges, selectedEdgeId]);
+
+  useEffect(() => {
+    if (!selectedNodeId) {
+      return;
+    }
+    const exists = (network?.nodes || []).some(
+      (node) => node.canonical_document_id === selectedNodeId
+    );
+    if (!exists) {
+      setSelectedNodeId(null);
+    }
+  }, [network, selectedNodeId]);
+
+  const selectedEdge = useMemo(
+    () => filteredEdges.find((edge) => edge.edge_id === selectedEdgeId) || null,
+    [filteredEdges, selectedEdgeId]
+  );
 
   const handleRescore = async () => {
     try {
@@ -514,7 +749,7 @@ export function CitationGraphPage() {
   };
 
   const handleZoomReset = () => {
-    setView({ zoom: 1, panX: 0, panY: 0 });
+    resetGraphView();
   };
 
   const handleZoomSlider = (event) => {
@@ -642,9 +877,34 @@ export function CitationGraphPage() {
 
               <div className="citation-graph-toolbar">
                 <div className="citation-graph-toolbar__hint">
-                  Kéo nền để di chuyển, lăn chuột để phóng to / thu nhỏ.
+                  Kéo nền để di chuyển, lăn chuột để phóng to / thu nhỏ, click node để lọc liên kết.
                 </div>
                 <div className="citation-graph-toolbar__controls">
+                  <span className="citation-chip">Node: {totalNodes}</span>
+                  <span className="citation-chip">Cạnh: {filteredEdges.length}/{shownEdges}</span>
+                  <button
+                    type="button"
+                    className={`btn btn--secondary citation-toggle ${nodeFocusMode ? "citation-toggle--active" : ""}`}
+                    onClick={() => {
+                      setNodeFocusMode((prev) => !prev);
+                      setSelectedNodeId(null);
+                      resetGraphView();
+                    }}
+                  >
+                    {nodeFocusMode ? "Đang lọc theo node" : "Đang lọc theo node"}
+                  </button>
+                  {nodeFocusMode && selectedNodeId ? (
+                    <button
+                      type="button"
+                      className="btn btn--secondary citation-toggle"
+                      onClick={() => {
+                        setSelectedNodeId(null);
+                        resetGraphView();
+                      }}
+                    >
+                      Bỏ chọn node
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="btn btn--secondary btn--icon"
@@ -689,6 +949,17 @@ export function CitationGraphPage() {
                 <div className="citation-empty">Chưa có tài liệu nào để hiển thị trên mạng trích dẫn.</div>
               ) : (
                 <>
+                  {hasNodeButNoEdge ? (
+                    <div className="citation-notice citation-notice--pending">
+                      Hiện có {totalNodes} tài liệu nhưng chưa có cạnh trích dẫn nào theo bộ lọc hiện tại.
+                      Hãy giảm “Điểm cạnh tối thiểu” hoặc tăng “Số cạnh tối đa” để xem thêm liên kết.
+                    </div>
+                  ) : null}
+                  {nodeFocusMode && !selectedNodeId && shownEdges > 0 ? (
+                    <div className="citation-notice citation-notice--pending">
+                      Mạng có rất nhiều liên kết ({shownEdges} cạnh). Chọn một node để chỉ xem các cạnh liên quan, dễ theo dõi hướng trích dẫn hơn.
+                    </div>
+                  ) : null}
                   <div className="citation-graph-wrap">
                     <svg
                       ref={svgRef}
@@ -702,44 +973,62 @@ export function CitationGraphPage() {
                       onMouseUp={handlePanEnd}
                       onMouseLeave={handlePanEnd}
                     >
-                      <defs>
-                        <marker
-                          id="citation-arrow-low"
-                          markerWidth="10"
-                          markerHeight="10"
-                          refX="9"
-                          refY="5"
-                          orient="auto"
-                          markerUnits="strokeWidth"
-                        >
-                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
-                        </marker>
-                        <marker
-                          id="citation-arrow-medium"
-                          markerWidth="10"
-                          markerHeight="10"
-                          refX="9"
-                          refY="5"
-                          orient="auto"
-                          markerUnits="strokeWidth"
-                        >
-                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b" />
-                        </marker>
-                        <marker
-                          id="citation-arrow-high"
-                          markerWidth="10"
-                          markerHeight="10"
-                          refX="9"
-                          refY="5"
-                          orient="auto"
-                          markerUnits="strokeWidth"
-                        >
-                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#0ea5a4" />
-                        </marker>
-                      </defs>
+                     <defs>
+                    {["low", "medium", "high"].map((level) => (
+                      <marker
+                        key={level}
+                        id={`citation-arrow-${level}`}
+                        viewBox="0 0 14 14"
+                        markerWidth="10"
+                        markerHeight="10"
+                        refX="11"
+                        refY="7"
+                        orient="auto-start-reverse"
+                        markerUnits="userSpaceOnUse"
+                        overflow="visible"
+                      >
+                        <path
+                          d="
+                            M1,1
+                            L11,7
+                            L1,13
+                            Q4,7 1,1
+                          "
+                          fill={EDGE_COLORS[level]}
+                          stroke={EDGE_COLORS[level]}
+                          strokeWidth="0.6"
+                          strokeLinejoin="round"
+                        />
+                      </marker>
+                    ))}
+
+                    {/* selected arrow */}
+                    <marker
+                      id="citation-arrow-selected"
+                      viewBox="0 0 14 14"
+                      markerWidth="12"
+                      markerHeight="12"
+                      refX="11"
+                      refY="7"
+                      orient="auto-start-reverse"
+                      markerUnits="userSpaceOnUse"
+                    >
+                      <path
+                        d="
+                          M1,1
+                          L11,7
+                          L1,13
+                          Q4,7 1,1
+                        "
+                        fill="#2563eb"
+                        stroke="#ffffff"
+                        strokeWidth="1"
+                      />
+                    </marker>
+                  </defs>
 
                       <g className="citation-graph-layer" transform={viewTransform}>
-                        {(network.edges || []).map((edge) => {
+                        {filteredEdges.map((edge) => {
                           const source = nodePosition[edge.source_canonical_id];
                           const target = nodePosition[edge.target_canonical_id];
 
@@ -774,6 +1063,13 @@ export function CitationGraphPage() {
                           }
 
                           const isSelected = edge.edge_id === selectedEdgeId;
+                          const isConnectedToSelected =
+                            !selectedEdge ||
+                            isSelected ||
+                            selectedEdge.source_canonical_id === edge.source_canonical_id ||
+                            selectedEdge.source_canonical_id === edge.target_canonical_id ||
+                            selectedEdge.target_canonical_id === edge.source_canonical_id ||
+                            selectedEdge.target_canonical_id === edge.target_canonical_id;
                           const score = Number(edge.citation_score ?? 0);
 
                           return (
@@ -789,7 +1085,7 @@ export function CitationGraphPage() {
                                 d={path}
                                 className={`citation-edge citation-edge--${edge.score_band || "low"} ${
                                   isSelected ? "citation-edge--selected" : ""
-                                }`}
+                                } ${!isConnectedToSelected ? "citation-edge--dim" : ""}`}
                                 strokeWidth={isSelected ? 3.2 : 1.2 + score * 2.2}
                                 markerEnd={`url(#citation-arrow-${edge.score_band || "low"})`}
                                 onClick={() => setSelectedEdgeId(edge.edge_id)}
@@ -803,21 +1099,61 @@ export function CitationGraphPage() {
                           if (!position) {
                             return null;
                           }
+                          if (!visibleNodeIds.has(node.canonical_document_id)) {
+                            return null;
+                          }
 
                           const radius = nodeRadius(node);
                           const isActive =
-                            selectedEdge &&
-                            (selectedEdge.source_canonical_id === node.canonical_document_id ||
-                              selectedEdge.target_canonical_id === node.canonical_document_id);
+                            node.canonical_document_id === selectedNodeId ||
+                            (selectedEdge &&
+                              (selectedEdge.source_canonical_id === node.canonical_document_id ||
+                                selectedEdge.target_canonical_id === node.canonical_document_id));
 
                           return (
                             <g
                               key={node.canonical_document_id}
-                              className={`citation-node ${isActive ? "citation-node--active" : ""}`}
+                              className={`citation-node ${
+                                isActive ? "citation-node--active" : ""
+                              } ${selectedEdge && !isActive ? "citation-node--dim" : ""}`}
                               transform={`translate(${position.x}, ${position.y})`}
+                              onClick={() => toggleNodeSelection(node.canonical_document_id)}
                             >
                               <circle r={radius} />
-                              <text x={radius + 4} y={4}>{trimTitle(node.title, 24)}</text>
+                              {(() => {
+                                const lines = splitTitleLines(node.title, 20, 2);
+                                const lineHeight = 13;
+                                const labelPaddingX = 6;
+                                const labelPaddingY = 4;
+                                const textWidth = Math.max(
+                                  28,
+                                  ...lines.map((line) => Math.min(160, line.length * 6.1))
+                                );
+                                const labelX = radius + 7;
+                                const labelY = -lineHeight + 1;
+                                const boxHeight = lines.length * lineHeight + labelPaddingY * 2 - 2;
+                                const boxWidth = textWidth + labelPaddingX * 2;
+                                return (
+                                  <>
+                                    <rect
+                                      className="citation-node__label-bg"
+                                      x={labelX - labelPaddingX}
+                                      y={labelY - labelPaddingY}
+                                      width={boxWidth}
+                                      height={boxHeight}
+                                      rx="6"
+                                      ry="6"
+                                    />
+                                    <text className="citation-node__label" x={labelX} y={labelY + lineHeight - 1}>
+                                      {lines.map((line, lineIndex) => (
+                                        <tspan key={`${node.canonical_document_id}-${lineIndex}`} x={labelX} dy={lineIndex === 0 ? 0 : lineHeight}>
+                                          {line}
+                                        </tspan>
+                                      ))}
+                                    </text>
+                                  </>
+                                );
+                              })()}
                             </g>
                           );
                         })}
@@ -839,6 +1175,7 @@ export function CitationGraphPage() {
                       Điểm cao
                     </span>
                     <span>Mũi tên thể hiện hướng source -&gt; target</span>
+                    <span>Click node để lọc các cạnh liên quan</span>
                   </div>
                 </>
               )}
@@ -890,10 +1227,10 @@ export function CitationGraphPage() {
 
                   <div className="citation-edge-list-box">
                     <div className="citation-edge-list-box__head">
-                      Danh sách cạnh ({(network.edges || []).length})
+                      Danh sách cạnh ({filteredEdges.length}/{shownEdges})
                     </div>
                     <div className="citation-edge-list" role="list" aria-label="Danh sách cạnh trích dẫn">
-                      {(network.edges || []).map((edge) => (
+                      {filteredEdges.map((edge) => (
                         <div
                           key={edge.edge_id}
                           className={`citation-edge-item ${

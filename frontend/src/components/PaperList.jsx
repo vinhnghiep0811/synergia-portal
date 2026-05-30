@@ -469,13 +469,13 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
               activeTab === "pending"
                 ? "Tìm kiếm theo tên file gốc"
                 : activeTab === "processing"
-                ? "Tìm kiếm theo tiêu đề, DOI"
-                : "Tìm kiếm theo tiêu đề, DOI"
+                ? "Tìm kiếm theo tiêu đề tài liệu"
+                : "Tìm kiếm theo tiêu đề tài liệu"
             }
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
           />
-          <button
+          {/* <button
             className="btn btn--secondary"
             style={{ marginLeft: "0.5rem", fontSize: "0.8rem", padding: "0.4rem 0.8rem" }}
             onClick={() => {
@@ -484,7 +484,7 @@ export function PaperList({ papers, selectedId, lastUpdateTime }) {
             title="Làm mới danh sách"
           >
             🔄 Làm mới
-          </button>
+          </button> */}
         </div>
       </header>
 
