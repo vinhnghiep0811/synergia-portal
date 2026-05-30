@@ -29,6 +29,10 @@ class CanonicalDocumentResponse(BaseModel):
     ss_paper_id: Optional[str] = None
     ss_match_confidence: Optional[Decimal] = None
     metadata_source: Optional[str] = None
+    crossref_match_status: Optional[str] = None
+    crossref_match_confidence: Optional[Decimal] = None
+    crossref_metadata_json: Optional[Any] = None
+    crossref_verification_json: Optional[Any] = None
     enrichment_status: str
     match_status: Optional[str] = None
 
@@ -50,6 +54,8 @@ class CanonicalDocumentListItemResponse(BaseModel):
     enrichment_status: str
     match_status: Optional[str] = None
     metadata_source: Optional[str] = None
+    crossref_match_status: Optional[str] = None
+    crossref_match_confidence: Optional[Decimal] = None
     created_at: datetime
     paper_count: int
 
@@ -67,6 +73,8 @@ class CanonicalDocumentEmbeddedResponse(BaseModel):
     enrichment_status: str
     match_status: Optional[str] = None
     metadata_source: Optional[str] = None
+    crossref_match_status: Optional[str] = None
+    crossref_match_confidence: Optional[Decimal] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -79,3 +87,16 @@ class PaginationMetaResponse(BaseModel):
 class CanonicalDocumentListPaginatedResponse(BaseModel):
     items: list[CanonicalDocumentListItemResponse]
     pagination: PaginationMetaResponse
+
+
+class CanonicalDocumentDeleteResponse(BaseModel):
+    id: UUID
+    deleted: bool
+    deleted_papers_count: int
+    deleted_extraction_runs_count: int
+    deleted_document_sections_count: int
+    deleted_document_chunks_count: int
+    deleted_citation_edges_count: int
+    deleted_citation_mentions_count: int
+    storage_objects_deleted: int
+    storage_delete_errors: list[str]

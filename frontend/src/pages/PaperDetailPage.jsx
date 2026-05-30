@@ -59,6 +59,10 @@ function mapPaperDetail(detail, canonical, extractionRun) {
     semanticSource: canonical?.metadata_source || null,
     ssMatchConfidence: canonical?.ss_match_confidence || null,
     ssPaperId: canonical?.ss_paper_id || null,
+    crossrefMatchStatus: canonical?.crossref_match_status || null,
+    crossrefMatchConfidence: canonical?.crossref_match_confidence || null,
+    crossrefVerification: canonical?.crossref_verification_json || null,
+    crossrefMetadata: canonical?.crossref_metadata_json || null,
 
     canonicalTitle: canonical?.title || null,
     canonicalTitleCandidate: canonical?.title_candidate || null,

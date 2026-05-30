@@ -5,6 +5,7 @@ WORKDIR /app
 ENV PIP_DEFAULT_TIMEOUT=300
 ENV PIP_RETRIES=10
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV DOCLING_ARTIFACTS_PATH=/opt/docling-artifacts
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
@@ -17,22 +18,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
+COPY constraints.txt /app/constraints.txt
 
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir \
-        torch==2.8.0+cpu \
-        --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --upgrade pip setuptools wheel
 
-# 2) Cài requirements còn lại
 RUN pip install \
     --no-cache-dir \
     --timeout 300 \
     --retries 10 \
     --prefer-binary \
-    -i https://pypi.org/simple \
+    --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.8.0+cpu
+
+RUN pip install \
+    --no-cache-dir \
+    --timeout 300 \
+    --retries 10 \
+    --prefer-binary \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    -c /app/constraints.txt \
     -r /app/requirements.txt
 
-ENV DOCLING_ARTIFACTS_PATH=/opt/docling-artifacts
 RUN mkdir -p /opt/docling-artifacts
 
 RUN docling-tools models download -o /opt/docling-artifacts

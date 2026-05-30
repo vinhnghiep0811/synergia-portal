@@ -81,9 +81,11 @@ class LLMInputBuilder:
             "1. Return ONLY a valid JSON object. No conversational text.\n"
             "2. Keep each 'value' concise (usually <= 35 words), but keep core meaning complete.\n"
             "3. CONTRIBUTIONS: Prefer 2-3 atomic items when claims are clearly present.\n"
-            "4. LIMITATIONS: Prefer 1-2 items when constraints/future-work signals exist.\n"
-            "5. EVIDENCE: Keep snippet short (<= 180 chars). Use '...' to shorten long quotes.\n"
-            "6. Use only provided content. If not found, use null or []."
+            "4. LIMITATIONS: Return [] unless the authors explicitly state a limitation, scope constraint, caveat, or future-work item.\n"
+            "5. METHOD/CONTRIBUTIONS: Use this paper's own method/results, not cited prior work.\n"
+            "6. EVALUATION: Datasets/tasks and metrics must come from experiment context; citation venues are not datasets.\n"
+            "7. EVIDENCE: Keep snippet short (<= 180 chars). Use '...' to shorten long quotes.\n"
+            "8. Use only provided content. If not found, use null or []."
         )
 
         parts.append(
@@ -91,7 +93,8 @@ class LLMInputBuilder:
             "Use only the provided content. "
             "Do not guess missing information. "
             "If evidence is hard to localize, still keep conservative values grounded in text. "
-            "Avoid leaving contributions/limitations empty when clear signals exist in abstract/introduction/conclusion."
+            "Avoid leaving contributions empty when clear claims exist. "
+            "Do not use prior-work or baseline weaknesses from the introduction as limitations of the paper."
         )
 
 

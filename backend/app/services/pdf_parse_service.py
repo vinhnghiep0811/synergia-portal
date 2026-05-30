@@ -8,6 +8,12 @@ import pdfplumber
 logger = logging.getLogger(__name__)
 
 DOI_REGEX = re.compile(r"(?<![\d.])10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", re.IGNORECASE)
+REFERENCE_HEADING_REGEX = re.compile(
+    r"(?im)^\s*(references|bibliography|works\s+cited|literature\s+cited)\s*$"
+)
+DOI_CONTEXT_MARKERS = ("doi", "doi.org/", "dx.doi.org/")
+DOI_SCAN_CHARS = 12000
+DOI_CONTEXT_CHARS = 90
 
 class PageText(TypedDict):
     page: int
@@ -421,6 +427,76 @@ def _clean_extracted_text(text: str) -> str:
     text = re.sub(r'(?<=[,.;:])(?=[A-Za-z])', ' ', text)
     return text.strip()
 
+
+def _is_likely_two_column_page(page) -> bool:
+    try:
+        words = page.extract_words(x_tolerance=2, y_tolerance=3) or []
+    except Exception:
+        return False
+
+    if len(words) < 180:
+        return False
+
+    mid = page.width / 2
+    gutter = max(28, page.width * 0.055)
+
+    left = 0
+    right = 0
+    middle = 0
+    for word in words:
+        center = (word.get("x0", 0) + word.get("x1", 0)) / 2
+        if center < mid - gutter:
+            left += 1
+        elif center > mid + gutter:
+            right += 1
+        else:
+            middle += 1
+
+    if left < 80 or right < 80:
+        return False
+
+    return (middle / max(1, left + right)) < 0.16
+
+
+def _extract_two_column_page_text(page) -> str:
+    if not _is_likely_two_column_page(page):
+        return ""
+
+    mid = page.width / 2
+    gutter = max(6, page.width * 0.015)
+    bboxes = [
+        (0, 0, mid - gutter, page.height),
+        (mid + gutter, 0, page.width, page.height),
+    ]
+
+    parts: list[str] = []
+    for bbox in bboxes:
+        try:
+            text = page.crop(bbox).extract_text(x_tolerance=2, y_tolerance=3) or ""
+        except Exception:
+            text = ""
+
+        text = _clean_extracted_text(normalize_ligatures(strip_nul_chars(text)))
+        if len(text.split()) >= 40:
+            parts.append(text)
+
+    if len(parts) != 2:
+        return ""
+
+    column_text = "\n\n".join(parts).strip()
+    return column_text
+
+
+def _extract_page_text_for_llm(page) -> str:
+    default_text = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
+    default_text = _clean_extracted_text(normalize_ligatures(strip_nul_chars(default_text)))
+
+    column_text = _extract_two_column_page_text(page)
+    if column_text and len(column_text) >= len(default_text) * 0.65:
+        return column_text
+
+    return default_text
+
 def extract_pdf_text_for_llm(
     file_path: str,
     preview_chars: int = 2000,
@@ -435,9 +511,7 @@ def extract_pdf_text_for_llm(
 
     with pdfplumber.open(file_path) as pdf:
         for idx, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text() or ""
-            text = _clean_extracted_text(text)
-            text = text.strip()
+            text = _extract_page_text_for_llm(page).strip()
 
             pages.append({
                 "page": idx,
@@ -458,12 +532,32 @@ def normalize_doi(raw_doi: str) -> str:
     return doi
 
 
+def _text_before_references(text: str) -> str:
+    match = REFERENCE_HEADING_REGEX.search(text)
+    if not match:
+        return text
+    return text[: match.start()]
+
+
+def _has_doi_context(text: str, start: int, end: int) -> bool:
+    context_start = max(0, start - DOI_CONTEXT_CHARS)
+    context_end = min(len(text), end + DOI_CONTEXT_CHARS)
+    context = text[context_start:context_end].lower()
+    return any(marker in context for marker in DOI_CONTEXT_MARKERS)
+
+
 def detect_doi(text: str) -> Optional[str]:
     text = strip_nul_chars(text)
-    match = DOI_REGEX.search(text)
-    if not match:
+    candidate_text = _text_before_references(text)[:DOI_SCAN_CHARS]
+    matches = list(DOI_REGEX.finditer(candidate_text))
+    if not matches:
         return None
-    return normalize_doi(match.group(0))
+
+    for match in matches:
+        if _has_doi_context(candidate_text, match.start(), match.end()):
+            return normalize_doi(match.group(0))
+
+    return normalize_doi(matches[0].group(0))
 
 
 def clean_line(line: str) -> str:

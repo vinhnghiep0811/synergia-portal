@@ -37,7 +37,8 @@ def build_docling_converter() -> DocumentConverter:
     if DOCLING_ARTIFACTS_PATH:
         pipeline_options.artifacts_path = DOCLING_ARTIFACTS_PATH
     pipeline_options.do_ocr = False
-
+    pipeline_options.do_table_structure = True
+    
     _converter = DocumentConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(

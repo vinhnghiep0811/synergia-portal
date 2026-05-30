@@ -23,6 +23,10 @@ class CanonicalDocument(Base):
     ss_paper_id = Column(String(255), nullable=True)
     ss_match_confidence = Column(Numeric(5, 4), nullable=True)
     metadata_source = Column(String(50), nullable=True)
+    crossref_match_status = Column(String(30), nullable=True)
+    crossref_match_confidence = Column(Numeric(5, 4), nullable=True)
+    crossref_metadata_json = Column(JSONB, nullable=True)
+    crossref_verification_json = Column(JSONB, nullable=True)
 
     title = Column(Text, nullable=True)
     abstract = Column(Text, nullable=True)
@@ -98,4 +102,3 @@ class CanonicalDocument(Base):
         back_populates="target_canonical_document",
         lazy="selectin",
     )
-    

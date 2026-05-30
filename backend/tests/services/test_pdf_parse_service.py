@@ -21,6 +21,33 @@ class DetectDoiTests(unittest.TestCase):
 
         self.assertEqual(result, "10.1000/abc-123_xyz")
 
+    def test_detect_doi_ignores_reference_section_doi(self) -> None:
+        text = (
+            "A Paper Without A DOI\n"
+            "Abstract\n"
+            "This paper has no DOI on the title page.\n\n"
+            "References\n"
+            "[1] Related work. DOI 10.5555/reference-only."
+        )
+
+        result = detect_doi(text)
+
+        self.assertIsNone(result)
+
+    def test_detect_doi_prefers_labeled_front_matter_doi(self) -> None:
+        text = (
+            "A Paper With DOI\n"
+            "DOI: 10.1234/CORRECT.2024.001\n"
+            "Abstract\n"
+            "Main text.\n\n"
+            "References\n"
+            "[1] Related work. DOI 10.5555/reference-only."
+        )
+
+        result = detect_doi(text)
+
+        self.assertEqual(result, "10.1234/correct.2024.001")
+
     def test_detect_doi_returns_none_when_text_has_no_doi(self) -> None:
         text = "This extracted text contains title, abstract, and references but no DOI marker."
 

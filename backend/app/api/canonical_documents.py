@@ -67,6 +67,8 @@ def list_canonical_documents(
             venue=canonical.venue,
             publication_year=canonical.publication_year,
             metadata_source=canonical.metadata_source,
+            crossref_match_status=canonical.crossref_match_status,
+            crossref_match_confidence=canonical.crossref_match_confidence,
             enrichment_status=canonical.enrichment_status,
             match_status=canonical.match_status,
             created_at=canonical.created_at,

@@ -16,6 +16,10 @@ class SearchResultItem(BaseModel):
     content: str = Field(..., description="Snippet hoặc nội dung khớp")
     similarity_score: float = Field(..., description="Điểm khớp / tương đồng")
     source: str = Field("semantic", description="semantic | metadata | chunk")
+    section: str | None = Field(None, description="Section containing the evidence snippet, if available")
+    section_type: str | None = Field(None, description="Section type containing the evidence snippet, if available")
+    page_from: int | None = Field(None, description="First page of the evidence snippet, if available")
+    page_to: int | None = Field(None, description="Last page of the evidence snippet, if available")
 
 
 class SearchResponse(BaseModel):
