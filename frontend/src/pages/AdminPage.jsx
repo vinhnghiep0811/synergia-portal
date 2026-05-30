@@ -926,20 +926,32 @@ export function AdminPage() {
                   </label>
                   <label className="admin-label">
                     Model name
-                    <input
+                    <select
                       className="admin-input"
-                      type="text"
-                      value={configForm.llm_model}
+                      value={configForm.llm_model || ""}
                       onChange={(e) => updateConfigField("llm_model", e.target.value)}
-                      placeholder={isPrimaryProvider ? "e.g. google/gemini-2.5-flash" : "Gemma (default)"}
-                      list="openrouter-models"
                       disabled={!isPrimaryProvider}
-                    />
-                    <datalist id="openrouter-models">
-                      {modelOptions.map((model) => (
-                        <option key={model.id} value={model.name} />
-                      ))}
-                    </datalist>
+                    >
+                      {!isPrimaryProvider ? (
+                        <option value={configForm.llm_model || ""}>Gemma (default)</option>
+                      ) : (
+                        <>
+                          {configForm.llm_model && !modelOptions.find(m => m.name === configForm.llm_model) && (
+                            <option value={configForm.llm_model}>{configForm.llm_model} (Chưa có trong catalog)</option>
+                          )}
+                          {!configForm.llm_model && (
+                            <option value="" disabled>
+                              {modelOptions.length === 0 ? "Chưa có model, hãy thêm ở catalog" : "Chọn model..."}
+                            </option>
+                          )}
+                          {modelOptions.map((model) => (
+                            <option key={model.id} value={model.name}>
+                              {model.name}
+                            </option>
+                          ))}
+                        </>
+                      )}
+                    </select>
                   </label>
                 </div>
                 <label className="admin-label">

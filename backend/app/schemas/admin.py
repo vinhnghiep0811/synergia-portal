@@ -17,7 +17,7 @@ class AdminConfigUpdateRequest(BaseModel):
         description="Optional. Leave empty to keep existing key.",
     )
     llm_provider: str | None = Field(default=None, min_length=1, max_length=50)
-    llm_model: str | None = Field(default=None, min_length=1, max_length=255)
+    llm_model: str | None = Field(default=None, max_length=255)
     llm_base_url: str | None = Field(default=None, min_length=1, max_length=2048)
     llm_extra_params: dict[str, Any] | None = Field(default=None)
     embedding_model: str | None = Field(default=None, min_length=1, max_length=255)
@@ -83,7 +83,7 @@ class ConfigValidateRequest(BaseModel):
         description="Which service to validate: llm, semantic_scholar, telegram, embedding, or all.",
     )
     llm_provider: str | None = Field(default=None, min_length=1, max_length=50)
-    llm_model: str | None = Field(default=None, min_length=1, max_length=255)
+    llm_model: str | None = Field(default=None, max_length=255)
     llm_api_key: str | None = Field(default=None, min_length=1)
     llm_base_url: str | None = Field(default=None, min_length=1, max_length=2048)
     llm_extra_params: dict[str, Any] | None = Field(default=None)
