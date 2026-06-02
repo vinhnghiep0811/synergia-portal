@@ -413,6 +413,31 @@ class LLMExtractionServiceResearchFieldTests(unittest.TestCase):
         self.assertIn("Weighted Transformer", result["method"]["value"])
         self.assertNotIn("Vaswani", result["method"]["value"])
 
+    def test_normalize_contributions_keeps_training_and_transfer_claim(self):
+        normalized = self.service._normalize_contributions_field(
+            [
+                {
+                    "value": (
+                        "The paper analyzes several language pairs and demonstrates "
+                        "transfer of encoder knowledge to low-resource languages."
+                    ),
+                    "evidence": [
+                        {
+                            "snippet": (
+                                "we train the Transformer system from English to seven languages "
+                                "... we also test attention in a transfer learning scenario"
+                            ),
+                            "page": 1,
+                            "section": "Abstract",
+                        }
+                    ],
+                }
+            ]
+        )
+
+        self.assertEqual(len(normalized), 1)
+        self.assertIn("transfer of encoder knowledge", normalized[0]["value"])
+
     def test_evaluation_extraction_keeps_wmt_and_bleu_but_drops_venues(self):
         text = (
             "We benchmark on the WMT 2014 English-to-German and English-to-French tasks. "

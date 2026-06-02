@@ -566,7 +566,8 @@ class LLMExtractionService:
         repaired = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "", repaired)
         joined_we_verbs = (
             "propose|present|introduce|replace|achieve|show|report|benchmark|"
-            "evaluate|obtain|develop|train|use|found|plan|improve"
+            "evaluate|test|analyze|analyse|demonstrate|find|obtain|develop|"
+            "train|review|discuss|explore|describe|use|found|plan|improve"
         )
         repaired = re.sub(
             rf"\b([Ww]e)({joined_we_verbs})\b",
@@ -594,10 +595,18 @@ class LLMExtractionService:
     def _has_current_paper_signal(self, text: str) -> bool:
         lowered = self._repair_joined_extraction_text(text).lower()
         signal_patterns = [
-            r"\bwe\s+(?:propose|present|introduce|replace|achieve|show|report|benchmark|evaluate|obtain|develop|train|use|improve)\b",
+            (
+                r"\bwe\s+(?:propose|present|introduce|replace|achieve|show|report|"
+                r"benchmark|evaluate|test|analyze|analyse|demonstrate|find|obtain|"
+                r"develop|train|review|discuss|explore|describe|use|improve)\b"
+            ),
             r"\bin this (?:work|paper|study)\b",
             r"\bour (?:model|method|architecture|approach|network|proposed|experiments?|results?)\b",
-            r"\bthis (?:paper|work|study) (?:proposes|presents|introduces|reports|shows|evaluates)\b",
+            (
+                r"\b(?:this|the) (?:paper|work|study) (?:aims|proposes|presents|"
+                r"introduces|reports|shows|evaluates|tests|analyzes|analyses|"
+                r"demonstrates|finds|trains|reviews|discusses|explores|describes)\b"
+            ),
         ]
         return any(re.search(pattern, lowered) for pattern in signal_patterns)
 
@@ -668,9 +677,19 @@ class LLMExtractionService:
             return False
 
         contribution_patterns = [
-            r"\bwe\s+(?:propose|present|introduce|develop|replace|show|report|achieve|obtain|improve|outperform|benchmark)\b",
+            (
+                r"\bwe\s+(?:propose|present|introduce|develop|replace|show|report|"
+                r"achieve|obtain|improve|outperform|benchmark|evaluate|test|"
+                r"analyze|analyse|demonstrate|find|train|review|discuss|explore|"
+                r"describe)\b"
+            ),
             r"\bour (?:model|method|architecture|approach|network|results?)\b",
             r"\bthe proposed (?:model|method|architecture|approach|network)\b",
+            (
+                r"\b(?:this|the) (?:paper|work|study) (?:aims|proposes|presents|"
+                r"introduces|reports|shows|evaluates|tests|analyzes|analyses|"
+                r"demonstrates|finds|trains|reviews|discusses|explores|describes)\b"
+            ),
             r"\b(?:achieves?|improves?|outperforms?|converges?)\b.{0,80}\b(?:bleu|accuracy|f1|state-of-the-art|baseline)\b",
         ]
         return any(re.search(pattern, lowered) for pattern in contribution_patterns)
@@ -742,7 +761,12 @@ class LLMExtractionService:
             return False
 
         compact_claim_patterns = [
-            r"^(?:introduces?|proposes?|replaces?|improves?|outperforms?|achieves?|obtains?|converges?)\b",
+            (
+                r"^(?:introduces?|proposes?|replaces?|improves?|outperforms?|"
+                r"achieves?|obtains?|converges?|evaluates?|tests?|trains?|"
+                r"analy[sz]es?|demonstrates?|finds?|reviews?|discusses?|"
+                r"explores?|describes?)\b"
+            ),
             r"\b(?:bleu|accuracy|f1)\b.{0,80}\b(?:improvement|points?|score)\b",
         ]
         return any(re.search(pattern, lowered) for pattern in compact_claim_patterns)
