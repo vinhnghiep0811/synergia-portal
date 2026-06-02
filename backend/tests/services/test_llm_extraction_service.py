@@ -172,6 +172,56 @@ class LLMExtractionServiceLimitationsTests(unittest.TestCase):
         self.assertEqual(len(limitations), 1)
         self.assertIn("Future work", limitations[0]["value"])
 
+    def test_normalize_limitations_accepts_metric_shortcoming_caveat(self):
+        limitations = self.service._normalize_limitations_field(
+            [
+                {
+                    "value": (
+                        "ROUGE scores have shortcomings and should not be the only metric "
+                        "to optimize for long-sequence summarization models."
+                    ),
+                    "evidence": [
+                        {
+                            "snippet": (
+                                "ROUGE scores have their short- comings and should not be "
+                                "the only metric to optimize"
+                            ),
+                            "page": 9,
+                            "section": "Conclusion",
+                        }
+                    ],
+                }
+            ]
+        )
+
+        self.assertEqual(len(limitations), 1)
+        self.assertIn("ROUGE", limitations[0]["value"])
+
+    def test_normalize_limitations_accepts_further_research_direction(self):
+        limitations = self.service._normalize_limitations_field(
+            [
+                {
+                    "value": (
+                        "Applying the model to other long sequence-to-sequence tasks is "
+                        "an interesting direction for further research."
+                    ),
+                    "evidence": [
+                        {
+                            "snippet": (
+                                "could be applied to other sequence-to-sequence tasks with long inputs "
+                                "and outputs, which is an interesting direction for further research"
+                            ),
+                            "page": 9,
+                            "section": "Conclusion",
+                        }
+                    ],
+                }
+            ]
+        )
+
+        self.assertEqual(len(limitations), 1)
+        self.assertIn("further research", limitations[0]["value"])
+
     def test_coerce_from_input_text_does_not_turn_prior_work_weakness_into_limitation(self):
         result = self.service._coerce_from_input_text(
             "[ABSTRACT]\n"
@@ -185,6 +235,164 @@ class LLMExtractionServiceLimitationsTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(result)
+        self.assertEqual(result["limitations"], [])
+
+    def test_coerce_from_input_text_drops_autoregressive_prior_work_limitation(self):
+        result = self.service._coerce_from_input_text(
+            "[PAPER_TEXT]\n"
+            "1 Introduction\n"
+            "However, because of their auto-regressive property of requiring previous hidden "
+            "states to be computed before the current time step, they cannot benefit from "
+            "parallelization."
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["limitations"], [])
+
+    def test_normalize_result_drops_limitation_from_introduction_context(self):
+        input_text = (
+            "[PAPER_TEXT]\n"
+            "1 Introduction\n"
+            "However, because of their auto-regressive property of requiring previous hidden "
+            "states to be computed before the current time step, they cannot benefit from "
+            "parallelization.\n"
+            "2 Method\n"
+            "We introduce Weighted Transformer with multiple self-attention branches.\n"
+            "6 Conclusion\n"
+            "We introduced Weighted Transformer for machine translation."
+        )
+        raw = {
+            "problem": {"value": None, "evidence": []},
+            "method": {
+                "value": "The paper introduces Weighted Transformer with multiple self-attention branches.",
+                "evidence": [
+                    {
+                        "snippet": "We introduce Weighted Transformer with multiple self-attention branches.",
+                        "page": None,
+                        "section": None,
+                    }
+                ],
+            },
+            "contributions": [],
+            "limitations": [
+                {
+                    "value": "Autoregressive models cannot benefit from parallelization.",
+                    "evidence": [
+                        {
+                            "snippet": (
+                                "because of their auto-regressive property of requiring previous hidden "
+                                "states to be computed before the current time step, they cannot benefit "
+                                "from parallelization"
+                            ),
+                            "page": None,
+                            "section": "Conclusion",
+                        }
+                    ],
+                }
+            ],
+            "evaluation_setup": {
+                "value": {"datasets": [], "metrics": [], "benchmarks": []},
+                "evidence": [],
+            },
+        }
+
+        result = self.service._normalize_result(raw, pages=[], input_text=input_text)
+
+        self.assertEqual(result["limitations"], [])
+
+    def test_normalize_result_keeps_future_work_from_conclusion_context(self):
+        input_text = (
+            "[PAPER_TEXT]\n"
+            "1 Introduction\n"
+            "We introduce a model for machine translation.\n"
+            "6 Conclusion\n"
+            "We plan to extend the Transformer to problems involving input and output "
+            "modalities other than text."
+        )
+        raw = {
+            "problem": {"value": None, "evidence": []},
+            "method": {"value": None, "evidence": []},
+            "contributions": [],
+            "limitations": [
+                {
+                    "value": "The authors plan to extend the model beyond text modalities.",
+                    "evidence": [
+                        {
+                            "snippet": (
+                                "We plan to extend the Transformer to problems involving input and "
+                                "output modalities other than text"
+                            ),
+                            "page": None,
+                            "section": None,
+                        }
+                    ],
+                }
+            ],
+            "evaluation_setup": {
+                "value": {"datasets": [], "metrics": [], "benchmarks": []},
+                "evidence": [],
+            },
+        }
+
+        result = self.service._normalize_result(raw, pages=[], input_text=input_text)
+
+        self.assertEqual(len(result["limitations"]), 1)
+        self.assertIn("extend the model", result["limitations"][0]["value"])
+
+    def test_coerce_from_input_text_extracts_conclusion_metric_caveat(self):
+        result = self.service._coerce_from_input_text(
+            "[PAPER_TEXT]\n"
+            "1 Introduction\n"
+            "We introduce a summarization model for long documents.\n"
+            "7 Conclusion\n"
+            "We saw that despite their common use for evaluation, ROUGE scores have their "
+            "short-\ncomings and should not be the only metric to opti-\nmize on summarization "
+            "model for long sequences."
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result["limitations"]), 1)
+        self.assertIn("ROUGE", result["limitations"][0]["value"])
+
+    def test_normalize_result_drops_metric_caveat_from_introduction_context(self):
+        input_text = (
+            "[PAPER_TEXT]\n"
+            "1 Introduction\n"
+            "ROUGE scores have shortcomings and should not be the only metric to optimize "
+            "summarization models.\n"
+            "2 Method\n"
+            "We introduce a new summarization model."
+        )
+        raw = {
+            "problem": {"value": None, "evidence": []},
+            "method": {"value": None, "evidence": []},
+            "contributions": [],
+            "limitations": [
+                {
+                    "value": (
+                        "ROUGE scores have shortcomings and should not be the only metric "
+                        "to optimize summarization models."
+                    ),
+                    "evidence": [
+                        {
+                            "snippet": (
+                                "ROUGE scores have shortcomings and should not be the only "
+                                "metric to optimize summarization models"
+                            ),
+                            "page": None,
+                            "section": "Conclusion",
+                        }
+                    ],
+                }
+            ],
+            "evaluation_setup": {
+                "value": {"datasets": [], "metrics": [], "benchmarks": []},
+                "evidence": [],
+            },
+        }
+
+        result = self.service._normalize_result(raw, pages=[], input_text=input_text)
+
         self.assertEqual(result["limitations"], [])
 
 

@@ -47,8 +47,16 @@ Field interpretation:
 - problem: the research problem/gap/task addressed by the paper
 - method: the main technical approach proposed by the paper
 - contributions: explicit claims/findings/main additions by the paper
-- limitations: explicit weaknesses, assumptions, constraints, or future-work caveats
+- limitations: explicit limitations, assumptions, constraints, caveats, or future-work items about this paper's proposed work
 - evaluation_setup: datasets/metrics/benchmarks explicitly mentioned in evaluation context
+
+Limitation rules:
+- Only extract limitations from sections headed Limitations, Discussion, Conclusion, Future Work, Threats to Validity, or equivalent.
+- If none of those sections are present, return "limitations": [].
+- Treat explicit author caveats as valid limitations, including metric/scope warnings such as "should not be the only metric" or "has shortcomings".
+- Treat author-stated future directions as valid when phrased as "future work", "further research", "interesting direction", or an explicit extension/application left for later.
+- Never extract prior-work, baseline, recurrent-model, convolutional-model, or competing-method weaknesses as limitations of this paper.
+- Do not infer limitations from your own critique of the paper.
 
 Prompt version: {{prompt_version}}
 
@@ -82,8 +90,8 @@ FIELD BEHAVIOR:
 RECALL RULES (IMPORTANT):
 1. Do not return contributions: [] when abstract/introduction clearly states claims (e.g., "we propose", "we present", "we show", "we achieve").
 2. Prefer 2-3 contribution items when supported.
-3. Prefer at least 1 limitation item when paper mentions assumptions, constraints, failure cases, resource costs, or future work.
-4. If no dedicated "limitations" section exists, infer conservative limitations from explicit constraint language in the text.
+3. Return limitations: [] unless the authors explicitly state a limitation, scope constraint, caveat, metric/scope warning, or future/further-research item about the proposed work.
+4. Only extract limitations from Limitations, Discussion, Conclusion, Future Work, Threats to Validity, or equivalent sections.
 
 ANTI-NOISE RULES (CRITICAL):
 1. Do not copy long abstract paragraphs into contributions or limitations.
@@ -103,8 +111,10 @@ CONTRIBUTIONS FILTER:
 - BAD: full abstract copied as one contribution.
 
 LIMITATIONS FILTER:
-- Prefer explicit caveats from limitations/discussion/future-work context.
-- If no explicit limitation sentence exists, you may use clearly implied constraints (compute cost, data dependency, domain assumptions, robustness caveats) from the provided text.
+- Only use explicit caveats from limitations/discussion/conclusion/future-work context.
+- Valid caveats include evaluation-metric shortcomings, scope constraints, and author-stated directions for future or further research.
+- If no such section or explicit limitation sentence exists, return limitations: [].
+- Do not use weaknesses of prior work, baselines, recurrent models, convolutional models, or competing methods as limitations.
 - Never invent facts outside PAPER_CONTENT.
 
 FINAL CHECKLIST:
@@ -112,7 +122,7 @@ FINAL CHECKLIST:
 2. No irrelevant bibliographic keys.
 3. Contributions are concise claims, not copied paragraphs.
 4. Limitations are concise caveats grounded in text.
-5. Avoid empty contributions/limitations when supported by PAPER_CONTENT.
+5. Avoid empty contributions when supported by PAPER_CONTENT, but keep limitations empty when explicit author-stated limitations are absent.
 
 Prompt version: {{prompt_version}}
 
@@ -171,7 +181,7 @@ STRICT RULES:
 3. Never output placeholder literals ("string", "string | null", ...).
 4. Contributions must be concise contribution claims (up to 3 items), not copied abstract blocks.
 5. Avoid returning contributions: [] if PAPER_CONTENT clearly contains contribution claims.
-6. Limitations should include explicit caveats/assumptions/future-work, and may include clearly implied constraints from text.
+6. Limitations must be explicit caveats/assumptions/metric warnings/future-or-further-research items from limitations/discussion/conclusion/future-work context; otherwise use [].
 7. Drop OCR-corrupted/no-space text and irrelevant content.
 8. Every non-null scalar/list item must include evidence snippet.
 9. If evidence is weak, keep only conservative, well-supported items.

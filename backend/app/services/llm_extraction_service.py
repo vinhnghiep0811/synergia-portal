@@ -187,28 +187,33 @@ class LLMExtractionService:
         return deduped
 
     def _has_limitation_signal(self, text: str) -> bool:
-        lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+        lowered = self._normalize_limitation_signal_text(text)
         if not lowered:
             return False
 
         signal_patterns = [
             r"\blimit(?:ation|ations|ed|s)?\b",
-            r"\bfuture (?:work|research|direction|directions)\b",
+            r"\b(?:future|further) (?:work|research|direction|directions|study|investigation)\b",
+            r"\b(?:interesting|promising) directions? for (?:future|further) (?:work|research)\b",
             r"\bwe (?:plan|intend|leave|hope|will investigate|aim) to\b",
             r"\bremain(?:s)? (?:an|a)? ?(?:open )?(?:problem|question|challenge)\b",
-            r"\b(?:constraint|constraints|assumption|assumptions|caveat|drawback|weakness|shortcoming)\b",
+            r"\b(?:constraint|constraints|assumption|assumptions|caveat|caveats|drawback|drawbacks|weakness|weaknesses|shortcoming|shortcomings)\b",
             r"\b(?:cannot|can't|unable to|fails? to|struggles? to|does not|do not|did not)\b",
             r"\b(?:expensive|costly|latency|scalability|memory constraints?|memory consumption|compute cost|computational cost|resource intensive)\b",
             r"\bprecludes? parallelization\b",
             r"\brequires?\b.{0,80}\b(?:human|manual|annotation|labels|labeled|compute|memory|resources?|pretraining|training data)\b",
             r"\b(?:only|solely) (?:evaluated|tested|trained|demonstrated|considered|studied|reported)\b",
             r"\b(?:restricted|confined|limited) to\b",
+            r"\bshould not be (?:the )?(?:only|sole) (?:metric|measure|criterion|criteria|evaluation)\b",
+            r"\bnot (?:be )?the only (?:metric|measure|criterion|criteria|evaluation)\b",
+            r"\b(?:metric|measure|criterion|criteria|evaluation)\b.{0,100}\b(?:shortcomings?|limitations?|insufficient|not enough)\b",
+            r"\b(?:can|could|may|might) be (?:extended|applied|adapted|tested|evaluated|investigated|explored)\b.{0,120}\b(?:future|further|additional|other|new)\b",
         ]
 
         return any(re.search(pattern, lowered) for pattern in signal_patterns)
 
     def _is_prior_work_context(self, text: str) -> bool:
-        lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+        lowered = self._normalize_limitation_signal_text(text)
         if not lowered:
             return False
 
@@ -221,6 +226,11 @@ class LLMExtractionService:
             r"\brecurrent neural networks?\b",
             r"\brecurrent models?\b",
             r"\bconvolutional neural networks?\b",
+            r"\bauto-?regressive property\b",
+            r"\bprevious hidden states?\b",
+            r"\bcurrent time step\b",
+            r"\bsequential nature\b",
+            r"\bprecludes? parallelization\b",
         ]
         current_scope_markers = [
             r"\bwe\b",
@@ -229,11 +239,272 @@ class LLMExtractionService:
             r"\bproposed\b",
             r"\btransformer\b",
             r"\bfuture (?:work|research|direction|directions)\b",
+            r"\bfurther (?:work|research|direction|directions)\b",
         ]
 
         has_prior_marker = any(re.search(pattern, lowered) for pattern in prior_markers)
         has_current_scope_marker = any(re.search(pattern, lowered) for pattern in current_scope_markers)
         return has_prior_marker and not has_current_scope_marker
+
+    def _normalize_limitation_signal_text(self, text: Any) -> str:
+        if not isinstance(text, str):
+            return ""
+
+        repaired = self._repair_joined_extraction_text(text)
+        return re.sub(r"\s+", " ", repaired.lower()).strip()
+
+    @staticmethod
+    def _normalize_section_label(value: Any) -> str:
+        if not isinstance(value, str):
+            return ""
+
+        normalized = value.replace("\u00a0", " ").strip().lower()
+        normalized = re.sub(r"^#+\s*", "", normalized)
+        normalized = re.sub(r"^\d+(?:\.\d+)*\.?\s+", "", normalized)
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized.strip(" .:-")
+
+    def _is_allowed_limitation_section(self, section: Any) -> bool:
+        normalized = self._normalize_section_label(section)
+        if not normalized:
+            return False
+
+        return bool(
+            re.search(
+                r"\b("
+                r"limitations?|"
+                r"discussion|"
+                r"conclusions?|"
+                r"future work|"
+                r"threats? to validity|"
+                r"caveats?|"
+                r"outlook"
+                r")\b",
+                normalized,
+            )
+        )
+
+    def _is_rejected_limitation_section(self, section: Any) -> bool:
+        normalized = self._normalize_section_label(section)
+        if not normalized:
+            return False
+
+        return bool(
+            re.search(
+                r"\b("
+                r"abstract|"
+                r"introduction|"
+                r"motivation|"
+                r"background|"
+                r"related work|"
+                r"prior work|"
+                r"method(?:s|ology)?|"
+                r"approach(?:es)?|"
+                r"model|"
+                r"architecture|"
+                r"experiment(?:s)?|"
+                r"evaluation|"
+                r"results?|"
+                r"references?|"
+                r"bibliography|"
+                r"appendix"
+                r")\b",
+                normalized,
+            )
+        )
+
+    def _section_from_marker_line(self, line: str) -> str | None:
+        marker_match = re.fullmatch(
+            r"\[PAGE\s+[^\]|]+(?:\s*\|\s*SECTION\s+([^\]]+))?\]",
+            line.strip(),
+            flags=re.IGNORECASE,
+        )
+        if marker_match:
+            section = self._normalize_section_label(marker_match.group(1))
+            return section or None
+
+        tag_match = re.fullmatch(r"\[(ABSTRACT|PAPER_TEXT)\]", line.strip(), flags=re.IGNORECASE)
+        if tag_match:
+            tag = tag_match.group(1).lower()
+            return "abstract" if tag == "abstract" else None
+
+        return None
+
+    def _section_from_heading_line(self, line: str) -> str | None:
+        stripped = re.sub(r"\s+", " ", (line or "").strip())
+        if not stripped or stripped.startswith("["):
+            return None
+
+        candidate = re.sub(r"^#+\s*", "", stripped).strip()
+        candidate = re.sub(r"^\d+(?:\.\d+)*\.?\s+", "", candidate).strip()
+        candidate = candidate.strip(" .:-")
+        normalized = self._normalize_section_label(candidate)
+        if not normalized or len(normalized) > 90:
+            return None
+
+        known_heading_patterns = [
+            r"abstract",
+            r"introduction",
+            r"motivation",
+            r"background",
+            r"related work",
+            r"prior work",
+            r"method(?:s|ology)?",
+            r"approach(?:es)?",
+            r"model(?: architecture)?",
+            r"architecture",
+            r"experiment(?:s)?",
+            r"experimental setup",
+            r"evaluation",
+            r"results?",
+            r"discussion",
+            r"conclusions?",
+            r"future work",
+            r"limitations?",
+            r"limitations? and future work",
+            r"threats? to validity",
+            r"caveats?",
+            r"outlook",
+            r"references?",
+            r"bibliography",
+            r"appendix",
+        ]
+
+        if any(re.fullmatch(pattern, normalized) for pattern in known_heading_patterns):
+            return normalized
+
+        return None
+
+    def _section_chunks_from_input_text(self, input_text: str) -> list[dict[str, Any]]:
+        if not isinstance(input_text, str) or not input_text.strip():
+            return []
+
+        chunks: list[dict[str, Any]] = []
+        current_section: str | None = None
+        current_lines: list[str] = []
+
+        def flush() -> None:
+            nonlocal current_lines
+            if not current_lines:
+                return
+            text = "\n".join(current_lines).strip()
+            if text:
+                chunks.append({"section": current_section, "text": text})
+            current_lines = []
+
+        for line in input_text.splitlines():
+            tag_match = re.fullmatch(r"\[(ABSTRACT|PAPER_TEXT)\]", line.strip(), flags=re.IGNORECASE)
+            if tag_match:
+                flush()
+                current_section = "abstract" if tag_match.group(1).lower() == "abstract" else None
+                current_lines.append(line)
+                continue
+
+            marker_section = self._section_from_marker_line(line)
+            heading_section = marker_section or self._section_from_heading_line(line)
+            if heading_section is not None:
+                flush()
+                current_section = heading_section
+            current_lines.append(line)
+
+        flush()
+        return chunks
+
+    def _infer_section_for_snippet_from_input_text(
+        self,
+        snippet: str,
+        input_text: str,
+    ) -> str | None:
+        normalized_snippet = self._normalize_text_for_page_match(snippet)
+        if not normalized_snippet:
+            return None
+
+        snippet_words = normalized_snippet.split()
+        snippet_tokens = self._significant_match_tokens(normalized_snippet)
+        best_section: str | None = None
+        best_score = 0.0
+
+        for chunk in self._section_chunks_from_input_text(input_text):
+            normalized_chunk = self._normalize_text_for_page_match(chunk.get("text") or "")
+            if not normalized_chunk:
+                continue
+
+            score = 0.0
+            if normalized_snippet in normalized_chunk:
+                score = 1.0
+            elif self._contains_token_window(normalized_chunk, snippet_words):
+                score = 0.92
+            elif len(snippet_tokens) >= 4:
+                chunk_tokens = set(normalized_chunk.split())
+                overlap = sum(1 for token in snippet_tokens if token in chunk_tokens)
+                score = overlap / len(snippet_tokens)
+
+            if score > best_score:
+                best_score = score
+                best_section = chunk.get("section")
+
+        return best_section if best_score >= 0.75 else None
+
+    def _limitation_has_allowed_source_context(
+        self,
+        item: dict[str, Any],
+        input_text: str,
+    ) -> bool:
+        evidence = item.get("evidence")
+        evidence_items = evidence if isinstance(evidence, list) else []
+
+        snippets = [
+            ev.get("snippet")
+            for ev in evidence_items
+            if isinstance(ev, dict) and isinstance(ev.get("snippet"), str)
+        ]
+        value = item.get("value")
+        if isinstance(value, str):
+            snippets.append(value)
+
+        if isinstance(input_text, str) and input_text.strip():
+            for snippet in snippets:
+                section = self._infer_section_for_snippet_from_input_text(snippet, input_text)
+                if self._is_allowed_limitation_section(section):
+                    return True
+                if self._is_rejected_limitation_section(section):
+                    return False
+
+        for ev in evidence_items:
+            if not isinstance(ev, dict):
+                continue
+            section = ev.get("section")
+            if self._is_allowed_limitation_section(section):
+                return True
+            if self._is_rejected_limitation_section(section):
+                return False
+
+        if not isinstance(input_text, str) or not input_text.strip():
+            return True
+
+        return False
+
+    def _filter_limitations_by_source_context(
+        self,
+        limitations: Any,
+        input_text: str,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(limitations, list):
+            return []
+
+        filtered: list[dict[str, Any]] = []
+        for item in limitations:
+            if not isinstance(item, dict):
+                continue
+            if not self._limitation_has_allowed_source_context(item, input_text):
+                logger.info(
+                    "[LLM NORMALIZE] Dropping limitation outside allowed source context: %s",
+                    self._normalize_free_text(item.get("value"), max_chars=120),
+                )
+                continue
+            filtered.append(item)
+
+        return filtered
 
     def _is_valid_limitation_item(self, item: dict[str, Any]) -> bool:
         value = item.get("value")
@@ -292,6 +563,7 @@ class LLMExtractionService:
         repaired = text
         repaired = repaired.replace("\u2019", "'").replace("`", "'")
         repaired = re.sub("[\u2010-\u2015]", "-", repaired)
+        repaired = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "", repaired)
         joined_we_verbs = (
             "propose|present|introduce|replace|achieve|show|report|benchmark|"
             "evaluate|obtain|develop|train|use|found|plan|improve"
@@ -1043,9 +1315,15 @@ class LLMExtractionService:
             "limitation",
             "limitations",
             "future work",
+            "future research",
+            "further research",
+            "interesting direction",
             "constraint",
             "assumption",
             "weakness",
+            "weaknesses",
+            "shortcoming",
+            "shortcomings",
             "trade-off",
             "sensitive to",
             "depends on",
@@ -1060,6 +1338,10 @@ class LLMExtractionService:
             "compute",
             "latency",
             "scalability",
+            "should not be",
+            "not be the only",
+            "only metric",
+            "only measure",
         ]
 
         contrast_markers = ["however", "but", "yet", "although", "nevertheless"]
@@ -2193,6 +2475,10 @@ class LLMExtractionService:
         normalized["contributions"] = self._fill_missing_pages(normalized["contributions"], pages)
         normalized["limitations"] = self._fill_missing_pages(normalized["limitations"], pages)
         normalized["evaluation_setup"] = self._fill_missing_pages(normalized["evaluation_setup"], pages)
+        normalized["limitations"] = self._filter_limitations_by_source_context(
+            normalized["limitations"],
+            input_text,
+        )
         return ExtractionResultSchema(**normalized).model_dump()
     
     def _match_snippet_to_page(

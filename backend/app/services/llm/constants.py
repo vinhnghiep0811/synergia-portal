@@ -1,6 +1,6 @@
 import os
 
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v6"
 
 SECTION_CANDIDATES = [
     "abstract",
