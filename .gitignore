@@ -50,7 +50,7 @@ frontend/.env.*
 
 # Report artifacts and source
 report/
-
+dataset/
 /data_set
 /result_set
 CLAUDE.md

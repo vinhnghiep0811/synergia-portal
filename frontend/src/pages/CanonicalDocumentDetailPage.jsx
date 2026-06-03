@@ -97,6 +97,7 @@ export function CanonicalDocumentDetailPage() {
   function formatMetadataSource(source) {
     if (!source) return "-";
     if (source === "semantic_scholar") return "Semantic Scholar";
+    if (source === "crossref") return "Crossref";
     return source;
   }
 
@@ -124,8 +125,16 @@ export function CanonicalDocumentDetailPage() {
   function getBadgeColor(status) {
     switch (status) {
       case "matched":
+      case "matched_by_doi":
+      case "matched_by_title":
+      case "matched_by_crossref":
+      case "matched_by_crossref_doi":
+      case "matched_by_crossref_title":
+      case "enriched":
         return "#22c55e";
       case "unmatched":
+      case "crossref_rate_limited":
+      case "rate_limited":
         return "#f59e0b";
       case "error":
         return "#ef4444";

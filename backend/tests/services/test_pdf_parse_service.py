@@ -64,6 +64,9 @@ class DetectTitleTests(unittest.TestCase):
     def test_publication_date_header_is_not_title_text(self) -> None:
         self.assertTrue(_is_non_title_text("Science Oct 22 (2004)"))
 
+    def test_article_type_label_is_not_title_text(self) -> None:
+        self.assertTrue(_is_non_title_text("Review"))
+
     def test_select_title_ignores_publication_header_above_title(self) -> None:
         lines = [
             {
@@ -97,6 +100,49 @@ class DetectTitleTests(unittest.TestCase):
         self.assertEqual(
             title,
             "Electric Field Effect in Atomically Thin Carbon Films",
+        )
+
+    def test_select_title_ignores_journal_masthead_above_article_title(self) -> None:
+        lines = [
+            {
+                "text": "smart cities",
+                "top": 50.32853146299999,
+                "x0": 74.47395716000001,
+                "x1": 162.697885407179,
+                "width": 88.22392824717899,
+                "avg_size": 19.014299999999935,
+            },
+            {
+                "text": "Review",
+                "top": 102.7356385999999,
+                "x0": 35.671,
+                "x1": 65.010857,
+                "width": 29.339857000000002,
+                "avg_size": 9.962600000000066,
+            },
+            {
+                "text": "A Review on Electric Vehicles: Technologies and Challenges",
+                "top": 115.76532480000003,
+                "x0": 35.301,
+                "x1": 528.4530000000002,
+                "width": 493.1520000000002,
+                "avg_size": 17.93279999999993,
+            },
+            {
+                "text": "Julio A. Sanguesa, Vicente Torres-Sanz, Piedad Garrido",
+                "top": 150.35144560000003,
+                "x0": 35.811,
+                "x1": 458.4435972,
+                "width": 422.6325972,
+                "avg_size": 9.807340259740215,
+            },
+        ]
+
+        title = _select_title_from_lines(lines, page_width=595.276)
+
+        self.assertEqual(
+            title,
+            "A Review on Electric Vehicles: Technologies and Challenges",
         )
 
 

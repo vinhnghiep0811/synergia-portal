@@ -32,6 +32,7 @@ SS_MIN_INTERVAL_SECONDS = max(1.0, float(os.getenv("SEMANTIC_SCHOLAR_MIN_INTERVA
 SS_FIELDS = "title,authors,year,venue,abstract,externalIds"
 TITLE_MATCH_THRESHOLD_DEFAULT = 0.82
 DOI_TITLE_MISMATCH_THRESHOLD = 0.60
+CROSSREF_FALLBACK_MATCH_STATUSES = {"verified", "partial", "weak"}
 
 _ss_rate_lock = threading.Lock()
 _last_ss_request_ts = 0.0
@@ -124,6 +125,12 @@ class SemanticScholarService:
 
         if is_rate_limited:
             self._mark_rate_limited(canonical)
+            return "rate_limited"
+
+        crossref_result = self._try_crossref_fallback(canonical)
+        if crossref_result == "enriched":
+            return "enriched"
+        if crossref_result == "rate_limited":
             return "rate_limited"
 
         self._mark_unmatched(canonical)
@@ -586,6 +593,178 @@ class SemanticScholarService:
         canonical.metadata_source = "semantic_scholar"
         canonical.enrichment_status = "enriched"
         canonical.match_status = match_type
+
+    def _try_crossref_fallback(self, canonical: CanonicalDocument) -> str:
+        verification = self._verify_canonical_candidate_with_crossref(canonical)
+
+        if (
+            verification.get("status") == "conflict"
+            and canonical.doi
+            and (canonical.title_candidate or canonical.title)
+        ):
+            title_only_verification = self._verify_canonical_candidate_with_crossref(
+                canonical,
+                title_only=True,
+            )
+            if (
+                self._is_crossref_fallback_match(title_only_verification)
+                or title_only_verification.get("status") in {"rate_limited", "error"}
+            ):
+                verification = title_only_verification
+
+        if self._is_crossref_fallback_match(verification):
+            crossref_metadata = verification.get("crossref_metadata") or {}
+            match_type = self._crossref_match_type(verification)
+            self._apply_crossref_data(
+                canonical,
+                crossref_metadata,
+                match_type,
+                verification,
+            )
+            self._sync_title_to_papers(canonical, canonical.title)
+            self.db.add(canonical)
+            self.db.commit()
+            self.db.refresh(canonical)
+            logger.info(
+                "[Crossref fallback] Enriched canonical_id=%s via %s",
+                canonical.id,
+                match_type,
+            )
+            return "enriched"
+
+        self._apply_crossref_verification(canonical, verification)
+        if verification.get("status") == "rate_limited":
+            canonical.enrichment_status = "rate_limited"
+            canonical.match_status = "crossref_rate_limited"
+            canonical.metadata_source = "crossref"
+            self.db.add(canonical)
+            self.db.commit()
+            self.db.refresh(canonical)
+            logger.info("[Crossref fallback] Rate limited canonical_id=%s", canonical.id)
+            return "rate_limited"
+
+        logger.info(
+            "[Crossref fallback] No matched metadata canonical_id=%s status=%s",
+            canonical.id,
+            verification.get("status"),
+        )
+        return "unmatched"
+
+    def _verify_canonical_candidate_with_crossref(
+        self,
+        canonical: CanonicalDocument,
+        *,
+        title_only: bool = False,
+    ) -> dict[str, Any]:
+        primary_metadata = self._canonical_primary_metadata(canonical)
+        if title_only:
+            primary_metadata = {**primary_metadata, "doi": None}
+
+        try:
+            verification = self.crossref_service.verify_metadata(
+                primary_metadata,
+                lookup_doi=None if title_only else primary_metadata.get("doi"),
+                lookup_title=primary_metadata.get("title"),
+            )
+            logger.info(
+                "[Crossref fallback] canonical_id=%s status=%s confidence=%s title_only=%s",
+                canonical.id,
+                verification.get("status"),
+                verification.get("confidence"),
+                title_only,
+            )
+            return verification
+        except Exception as exc:
+            logger.warning(
+                "[Crossref fallback] Failed canonical_id=%s error=%s",
+                canonical.id,
+                exc,
+            )
+            return {
+                "provider": "crossref",
+                "status": "error",
+                "queried_by": "title" if title_only else "unknown",
+                "confidence": 0.0,
+                "conflicts": [],
+                "fields": {},
+                "primary_metadata": primary_metadata,
+                "crossref_metadata": None,
+                "error": str(exc),
+            }
+
+    def _canonical_primary_metadata(self, canonical: CanonicalDocument) -> dict[str, Any]:
+        return {
+            "source": "parsed_pdf",
+            "doi": canonical.doi,
+            "title": canonical.title_candidate or canonical.title,
+            "authors": [],
+            "year": None,
+            "venue": None,
+            "abstract": None,
+        }
+
+    def _is_crossref_fallback_match(self, verification: dict[str, Any]) -> bool:
+        return (
+            verification.get("status") in CROSSREF_FALLBACK_MATCH_STATUSES
+            and bool(verification.get("crossref_metadata"))
+        )
+
+    def _crossref_match_type(self, verification: dict[str, Any]) -> str:
+        queried_by = verification.get("queried_by")
+        if queried_by == "doi":
+            return "matched_by_crossref_doi"
+        if queried_by == "title":
+            return "matched_by_crossref_title"
+        return "matched_by_crossref"
+
+    def _apply_crossref_data(
+        self,
+        canonical: CanonicalDocument,
+        crossref_metadata: dict[str, Any],
+        match_type: str,
+        verification: dict[str, Any],
+    ) -> None:
+        canonical.title = crossref_metadata.get("title") or canonical.title_candidate
+        canonical.publication_year = crossref_metadata.get("year")
+        canonical.venue = crossref_metadata.get("venue")
+        canonical.abstract = crossref_metadata.get("abstract")
+        canonical.authors_json = [
+            {"name": name, "author_id": None}
+            for name in crossref_metadata.get("authors", [])
+            if name
+        ]
+        self._set_crossref_doi_if_available(canonical, crossref_metadata.get("doi"))
+        canonical.ss_paper_id = None
+        canonical.ss_match_confidence = None
+        canonical.metadata_source = "crossref"
+        canonical.enrichment_status = "enriched"
+        canonical.match_status = match_type
+        self._apply_crossref_verification(canonical, verification)
+
+    def _set_crossref_doi_if_available(
+        self,
+        canonical: CanonicalDocument,
+        doi: str | None,
+    ) -> None:
+        normalized_doi = str(doi).strip().lower() if doi else None
+        if not normalized_doi or canonical.doi:
+            return
+
+        existing = (
+            self.db.query(CanonicalDocument)
+            .filter(CanonicalDocument.doi == normalized_doi)
+            .first()
+        )
+        if existing and existing.id != canonical.id:
+            logger.warning(
+                "[Crossref fallback] Skipping DOI assignment canonical_id=%s doi=%s owner_id=%s",
+                canonical.id,
+                normalized_doi,
+                existing.id,
+            )
+            return
+
+        canonical.doi = normalized_doi
 
     def _verify_with_crossref(
         self,

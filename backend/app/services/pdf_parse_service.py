@@ -29,6 +29,21 @@ PUBLICATION_DAY_MONTH_HEADER_REGEX = re.compile(
     rf"\d{{1,2}}\s+{MONTH_NAME_PATTERN},?\s*\(?\d{{4}}\)?$",
     re.IGNORECASE,
 )
+ARTICLE_TYPE_LABELS = {
+    "article",
+    "brief report",
+    "case report",
+    "communication",
+    "editorial",
+    "letter",
+    "opinion",
+    "perspective",
+    "research",
+    "research article",
+    "review",
+    "review article",
+    "short communication",
+}
 
 class PageText(TypedDict):
     page: int
@@ -307,9 +322,15 @@ def _is_non_title_text(text: str) -> bool:
         or "open access" in t
         or "published by" in t
         or "@" in t
+        or _looks_like_article_type_label(text)
         or _looks_like_publication_header(text)
         or _looks_like_author_line(text)
     )
+
+
+def _looks_like_article_type_label(text: str) -> bool:
+    normalized = normalize_space(text).strip(" .:").lower()
+    return normalized in ARTICLE_TYPE_LABELS
 
 
 def _looks_like_publication_header(text: str) -> bool:
@@ -347,11 +368,70 @@ def _looks_like_author_line(text: str) -> bool:
     return all(is_name_chunk(chunk) for chunk in chunks)
 
 
+def _alpha_words(text: str) -> list[str]:
+    return re.findall(r"[A-Za-z][A-Za-z'-]*", text)
+
+
+def _is_probable_title_line(line: dict, page_width: float) -> bool:
+    text = normalize_space(line["text"])
+    words = _alpha_words(text)
+    if len(words) < 4:
+        return False
+    if _is_non_title_text(text):
+        return False
+    if line["avg_size"] < 10.5:
+        return False
+    if line["width"] < page_width * 0.30:
+        return False
+
+    return any(char.isupper() for char in text)
+
+
+def _looks_like_contextual_masthead(
+    line: dict,
+    lines: list[dict],
+    page_width: float,
+) -> bool:
+    text = normalize_space(line["text"])
+    words = _alpha_words(text)
+    if not text or len(text) > 48 or len(words) > 4:
+        return False
+    if line["top"] > 95:
+        return False
+    if line["width"] > page_width * 0.45:
+        return False
+    if ":" in text:
+        return False
+
+    return any(
+        candidate["top"] > line["top"]
+        and candidate["top"] - line["top"] <= 150
+        and candidate["avg_size"] >= line["avg_size"] - 2.8
+        and _is_probable_title_line(candidate, page_width)
+        for candidate in lines
+    )
+
+
+def _is_contextual_non_title_line(
+    line: dict,
+    lines: list[dict],
+    page_width: float,
+) -> bool:
+    return (
+        _is_non_title_text(line["text"])
+        or _looks_like_contextual_masthead(line, lines, page_width)
+    )
+
+
 def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[str]:
     if not lines:
         return None
 
-    usable = [line for line in lines if not _is_non_title_text(line["text"])]
+    usable = [
+        line
+        for line in lines
+        if not _is_contextual_non_title_line(line, lines, page_width)
+    ]
     if not usable:
         return None
 

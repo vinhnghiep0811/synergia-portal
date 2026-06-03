@@ -13,14 +13,20 @@ export function CanonicalDocumentsPage() {
   const itemsPerPage = 5;
   const navigate = useNavigate();
 
-  const filteredDocuments = documents.filter(doc => 
-    !searchText || 
-    (doc.title && doc.title_candidate.toLowerCase().includes(searchText.toLowerCase())) ||
-    (doc.doi && doc.doi.toLowerCase().includes(searchText.toLowerCase())) ||
-    (doc.authors && doc.authors.some(author => author.toLowerCase().includes(searchText.toLowerCase()))) ||
-    (doc.venue && doc.venue.toLowerCase().includes(searchText.toLowerCase())) ||
-    (doc.canonical_key && doc.canonical_key.toLowerCase().includes(searchText.toLowerCase()))
-  );
+  const filteredDocuments = documents.filter((doc) => {
+    if (!searchText) return true;
+
+    const normalizedSearch = searchText.toLowerCase();
+    const title = doc.title || doc.title_candidate || "";
+
+    return (
+      title.toLowerCase().includes(normalizedSearch) ||
+      (doc.doi && doc.doi.toLowerCase().includes(normalizedSearch)) ||
+      (doc.authors && doc.authors.some(author => author.toLowerCase().includes(normalizedSearch))) ||
+      (doc.venue && doc.venue.toLowerCase().includes(normalizedSearch)) ||
+      (doc.canonical_key && doc.canonical_key.toLowerCase().includes(normalizedSearch))
+    );
+  });
 
   const sortedDocuments = [...filteredDocuments].sort((a, b) => {
     const dateA = new Date(a.created_at || 0);
@@ -47,7 +53,8 @@ export function CanonicalDocumentsPage() {
               const detail = await getCanonicalDocumentDetail(doc.id);
               return {
                 ...doc,
-                title: detail.title_candidate || doc.title,
+                title: detail.title || doc.title || detail.title_candidate || doc.title_candidate,
+                title_candidate: detail.title_candidate || doc.title_candidate,
                 authors: detail.authors || doc.authors,
                 venue: detail.venue || doc.venue,
                 year: detail.publication_year || doc.year,

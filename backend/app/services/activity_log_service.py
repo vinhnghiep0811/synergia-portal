@@ -237,7 +237,9 @@ class ActivityLogService:
         doi: str | None,
         ss_paper_id: str | None,
         title: str | None,
+        metadata_source: str | None = None,
     ):
+        source = metadata_source or "semantic_scholar"
         return self.log(
             actor_type=ActivityActorType.SYSTEM,
             event_type=ActivityEventType.SEMANTIC_SCHOLAR_MATCHED,
@@ -245,13 +247,14 @@ class ActivityLogService:
             object_id=canonical_document_id,
             canonical_document_id=canonical_document_id,
             status=ActivityStatus.SUCCESS,
-            message="Semantic Scholar matched and enriched canonical document",
+            message="Metadata matched and enriched canonical document",
             metadata_json={
                 "canonical_key": canonical_key,
                 "canonical_type": canonical_type,
                 "doi": doi,
                 "ss_paper_id": ss_paper_id,
                 "title": title,
+                "metadata_source": source,
             },
         )
     
