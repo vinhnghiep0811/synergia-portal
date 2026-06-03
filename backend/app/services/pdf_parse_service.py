@@ -14,6 +14,21 @@ REFERENCE_HEADING_REGEX = re.compile(
 DOI_CONTEXT_MARKERS = ("doi", "doi.org/", "dx.doi.org/")
 DOI_SCAN_CHARS = 12000
 DOI_CONTEXT_CHARS = 90
+MONTH_NAME_PATTERN = (
+    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+    r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|"
+    r"nov(?:ember)?|dec(?:ember)?)\.?"
+)
+PUBLICATION_MONTH_DAY_HEADER_REGEX = re.compile(
+    rf"^(?:[A-Z][A-Za-z.&'+-]*(?:\s+[A-Z][A-Za-z.&'+-]*){{0,5}}\s+)?"
+    rf"{MONTH_NAME_PATTERN}\s+\d{{1,2}},?\s*\(?\d{{4}}\)?$",
+    re.IGNORECASE,
+)
+PUBLICATION_DAY_MONTH_HEADER_REGEX = re.compile(
+    rf"^(?:[A-Z][A-Za-z.&'+-]*(?:\s+[A-Z][A-Za-z.&'+-]*){{0,5}}\s+)?"
+    rf"\d{{1,2}}\s+{MONTH_NAME_PATTERN},?\s*\(?\d{{4}}\)?$",
+    re.IGNORECASE,
+)
 
 class PageText(TypedDict):
     page: int
@@ -292,7 +307,19 @@ def _is_non_title_text(text: str) -> bool:
         or "open access" in t
         or "published by" in t
         or "@" in t
+        or _looks_like_publication_header(text)
         or _looks_like_author_line(text)
+    )
+
+
+def _looks_like_publication_header(text: str) -> bool:
+    normalized = normalize_space(text).strip(" .")
+    if not normalized or len(normalized) > 90:
+        return False
+
+    return (
+        PUBLICATION_MONTH_DAY_HEADER_REGEX.match(normalized) is not None
+        or PUBLICATION_DAY_MONTH_HEADER_REGEX.match(normalized) is not None
     )
 
 
