@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
@@ -281,7 +282,62 @@ class OpenRouterLLMProvider(BaseLLMProvider):
 
     @staticmethod
     def _safe_parse_json(raw_text: str) -> Optional[Dict[str, Any]]:
+        text = raw_text.strip()
         try:
-            return json.loads(raw_text)
+            return json.loads(text)
         except Exception:
+            pass
+
+        for candidate in OpenRouterLLMProvider._json_parse_candidates(text):
+            try:
+                parsed = json.loads(candidate)
+            except Exception:
+                continue
+
+            if isinstance(parsed, dict):
+                return parsed
+
+        return None
+
+    @staticmethod
+    def _json_parse_candidates(text: str) -> list[str]:
+        candidates: list[str] = []
+
+        fenced = OpenRouterLLMProvider._extract_fenced_json(text)
+        if fenced:
+            candidates.append(fenced)
+
+        extracted = OpenRouterLLMProvider._extract_first_json_value(text)
+        if extracted:
+            candidates.append(extracted)
+
+        return candidates
+
+    @staticmethod
+    def _extract_fenced_json(text: str) -> str | None:
+        match = re.search(
+            r"```(?:json)?\s*(.*?)\s*```",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not match:
             return None
+
+        return match.group(1).strip() or None
+
+    @staticmethod
+    def _extract_first_json_value(text: str) -> str | None:
+        decoder = json.JSONDecoder()
+
+        for index, char in enumerate(text):
+            if char not in "{[":
+                continue
+
+            try:
+                _parsed, end = decoder.raw_decode(text[index:])
+            except json.JSONDecodeError:
+                continue
+
+            return text[index:index + end].strip()
+
+        return None

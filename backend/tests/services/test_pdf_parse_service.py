@@ -67,6 +67,23 @@ class DetectTitleTests(unittest.TestCase):
     def test_article_type_label_is_not_title_text(self) -> None:
         self.assertTrue(_is_non_title_text("Review"))
 
+    def test_initialed_author_line_is_not_title_text(self) -> None:
+        self.assertTrue(
+            _is_non_title_text(
+                "Wladimir A. Benalcazar, B. Andrei Bernevig, and Taylor L. Hughes"
+            )
+        )
+        self.assertTrue(
+            _is_non_title_text(
+                "Wladimir A. Benalcazar,1 B. Andrei Bernevig,2 and Taylor L. Hughes1"
+            )
+        )
+        self.assertTrue(
+            _is_non_title_text(
+                "K.S. Novoselov A.K. Geim S.V. Morozov D. Jiang Y. Zhang"
+            )
+        )
+
     def test_select_title_ignores_publication_header_above_title(self) -> None:
         lines = [
             {
@@ -144,6 +161,38 @@ class DetectTitleTests(unittest.TestCase):
             title,
             "A Review on Electric Vehicles: Technologies and Challenges",
         )
+
+    def test_select_title_ignores_initialed_author_line_below_title(self) -> None:
+        lines = [
+            {
+                "text": "Quantized Electric Multipole Insulators",
+                "top": 52.92126400094401,
+                "x0": 190.99879491,
+                "x1": 425.09594328196795,
+                "width": 234.09714837196796,
+                "avg_size": 11.960818944000039,
+            },
+            {
+                "text": "Wladimir A. Benalcazar, B. Andrei Bernevig, and Taylor L. Hughes",
+                "top": 78.82492780350003,
+                "x0": 148.08563519999998,
+                "x1": 463.543132471893,
+                "width": 315.457497271893,
+                "avg_size": 9.96728242200004,
+            },
+            {
+                "text": "Department of Physics and Institute for Condensed Matter Theory,",
+                "top": 93.526984524,
+                "x0": 170.12598930000001,
+                "x1": 450.0737410118976,
+                "width": 279.9477517118976,
+                "avg_size": 8.970614208000029,
+            },
+        ]
+
+        title = _select_title_from_lines(lines, page_width=612)
+
+        self.assertEqual(title, "Quantized Electric Multipole Insulators")
 
 
 if __name__ == "__main__":

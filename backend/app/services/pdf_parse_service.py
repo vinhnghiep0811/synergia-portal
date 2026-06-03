@@ -346,26 +346,80 @@ def _looks_like_publication_header(text: str) -> bool:
 
 def _looks_like_author_line(text: str) -> bool:
     normalized = normalize_space(text)
-    if not normalized or ("," not in normalized and " and " not in normalized):
+    if not normalized:
         return False
 
-    chunks = [chunk.strip(" .;:()[]{}") for chunk in re.split(r"\s*(?:,| and )\s*", normalized) if chunk.strip()]
-    if len(chunks) < 2:
+    normalized = _strip_author_affiliation_markers(normalized)
+    has_author_separator = "," in normalized or ";" in normalized or re.search(r"\band\b", normalized)
+
+    if has_author_separator:
+        chunks = [
+            chunk.strip(" .;:()[]{}")
+            for chunk in re.split(r"\s*(?:,|;|\band\b)\s*", normalized)
+            if chunk.strip()
+        ]
+        if len(chunks) < 2:
+            return False
+
+        return all(_is_author_name_chunk(chunk) for chunk in chunks)
+
+    return _looks_like_initialed_author_sequence(normalized)
+
+
+def _strip_author_affiliation_markers(text: str) -> str:
+    text = re.sub(r"([,;])\s*[\d*†‡§]+\s*", r"\1 ", text)
+    text = re.sub(r"^\s*[\d*†‡§]+\s*", "", text)
+    text = re.sub(r"(?<=[A-Za-z])\s*[\d*†‡§]+(?=(?:\s|,|;|$))", "", text)
+    text = re.sub(r"[\u00b9\u00b2\u00b3\u2070-\u2079]+", "", text)
+    return normalize_space(text)
+
+
+def _is_author_name_chunk(chunk: str) -> bool:
+    chunk = _strip_author_affiliation_markers(chunk).strip(" .;:()[]{}")
+    if not chunk:
         return False
 
-    def is_name_chunk(chunk: str) -> bool:
-        words = [w for w in chunk.split(" ") if w]
+    if re.fullmatch(r"[A-Z][a-z]+[A-Z]\.[A-Z][A-Za-z-]+", chunk):
+        return True
 
-        if len(words) in (2, 3):
-            if all(re.fullmatch(r"[A-Z][a-z]+(?:-[A-Z][a-z]+)?", w) for w in words):
-                return True
+    words = [word for word in chunk.split(" ") if word]
+    if not 2 <= len(words) <= 5:
+        return False
 
-        if re.fullmatch(r"[A-Z][a-z]+[A-Z][a-z]+", chunk):
-            return True
+    meaningful_words = 0
+    for word in words:
+        cleaned = word.strip(" ;:()[]{}")
+        if not cleaned:
+            continue
+
+        if re.fullmatch(r"(?:[A-Z]\.){1,4}", cleaned):
+            meaningful_words += 1
+            continue
+
+        if re.fullmatch(r"[A-Z][A-Za-z]+(?:[-'][A-Z]?[A-Za-z]+)*", cleaned):
+            meaningful_words += 1
+            continue
+
+        if cleaned.lower() in {"de", "del", "da", "di", "la", "le", "van", "von"}:
+            continue
 
         return False
 
-    return all(is_name_chunk(chunk) for chunk in chunks)
+    return meaningful_words >= 2
+
+
+def _looks_like_initialed_author_sequence(text: str) -> bool:
+    matches = re.findall(
+        r"(?:[A-Z]\.){1,4}\s*[A-Z][A-Za-z]+(?:[-'][A-Z]?[A-Za-z]+)*",
+        text,
+    )
+    if len(matches) < 2:
+        return False
+
+    compact_text = re.sub(r"\s+", "", text)
+    compact_matches = sum(len(re.sub(r"\s+", "", match)) for match in matches)
+
+    return compact_matches / max(1, len(compact_text)) >= 0.75
 
 
 def _alpha_words(text: str) -> list[str]:
