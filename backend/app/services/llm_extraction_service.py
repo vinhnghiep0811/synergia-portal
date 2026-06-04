@@ -588,7 +588,7 @@ class LLMExtractionService:
             repaired,
             flags=re.IGNORECASE,
         )
-        repaired = re.sub(r"\b([A-Za-z])etal\.?", r"\1 et al.", repaired)
+        repaired = re.sub(r"\b(?!Metal\b)([A-Z])etal\.?(?=\W|$)", r"\1 et al.", repaired)
         repaired = re.sub(r"(?<=[,;:])(?=[A-Za-z])", " ", repaired)
         return repaired
 

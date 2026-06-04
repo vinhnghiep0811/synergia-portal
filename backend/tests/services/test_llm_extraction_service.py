@@ -400,6 +400,15 @@ class LLMExtractionServiceResearchFieldTests(unittest.TestCase):
     def setUp(self):
         self.service = object.__new__(LLMExtractionService)
 
+    def test_repair_joined_text_does_not_split_metal_terms(self):
+        repaired = self.service._repair_joined_extraction_text(
+            "metal metallic all-metallic Metal. Aetal. reported the result."
+        )
+
+        self.assertIn("metal metallic all-metallic Metal.", repaired)
+        self.assertIn("A et al. reported the result.", repaired)
+        self.assertNotIn("m et al.", repaired)
+
     def test_coerce_prefers_current_paper_method_over_cited_prior_work(self):
         result = self.service._coerce_from_input_text(
             "[PAPER_TEXT]\n"
