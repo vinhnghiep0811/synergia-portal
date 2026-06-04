@@ -34,7 +34,7 @@ Field-specific limits:
 - limitations.value: 0 to 2 short strings
 - limitations.evidence: each limitation must have exactly 1 evidence item
 - evaluation_setup.value.datasets: at most 3 dataset names
-- evaluation_setup.value.metrics: at most 4 metric names
+- evaluation_setup.value.metrics: at most 5 metric names
 - evaluation_setup.value.benchmarks: at most 3 benchmark/baseline names
 - evaluation_setup.evidence: at most 1 item
 

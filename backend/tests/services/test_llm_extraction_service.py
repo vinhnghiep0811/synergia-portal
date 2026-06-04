@@ -450,6 +450,91 @@ class LLMExtractionServiceResearchFieldTests(unittest.TestCase):
         )
         self.assertEqual(self.service._extract_metrics_from_text(text), ["BLEU"])
 
+    def test_detect_paper_type_does_not_treat_experimental_system_as_system_paper(self):
+        text = (
+            "Studies of Shubnikov-de Haas oscillations confirmed that electronic transport "
+            "in FLG was strictly 2D and served as an indicator of the quality and homogeneity "
+            "of the experimental system."
+        )
+
+        self.assertNotEqual(self.service._detect_paper_type(text), "system")
+
+    def test_evaluation_normalization_keeps_domain_metrics_and_material_benchmarks(self):
+        raw = {
+            "value": {
+                "datasets": [],
+                "metrics": [
+                    "carrier mobility",
+                    "carrier concentration",
+                    "Shubnikov-de Haas oscillation amplitude",
+                    "resistivity",
+                    "Hall coefficient",
+                ],
+                "benchmarks": ["multilayer graphene", "bulk graphite"],
+            },
+            "evidence": [
+                {
+                    "snippet": (
+                        "The linear dependence BF on Vg proves a constant 2D density "
+                        "of states and yields the double-valley degeneracy."
+                    ),
+                    "page": 3,
+                    "section": "Results",
+                }
+            ],
+        }
+
+        normalized = self.service._normalize_evaluation_setup(raw, pages=[], source_text="")
+
+        self.assertEqual(
+            normalized["value"]["metrics"],
+            [
+                "carrier mobility",
+                "carrier concentration",
+                "Shubnikov-de Haas oscillation amplitude",
+                "resistivity",
+                "Hall coefficient",
+            ],
+        )
+        self.assertEqual(normalized["value"]["benchmarks"], ["multilayer graphene", "bulk graphite"])
+
+    def test_semantic_correction_preserves_non_system_evaluation_setup(self):
+        raw = {
+            "evaluation_setup": {
+                "value": {
+                    "datasets": [],
+                    "metrics": ["carrier mobility", "Hall coefficient"],
+                    "benchmarks": ["multilayer graphene", "bulk graphite"],
+                },
+                "evidence": [
+                    {
+                        "snippet": (
+                            "Studies of Shubnikov-de Haas oscillations confirmed that "
+                            "electronic transport in FLG was strictly 2D."
+                        ),
+                        "page": 3,
+                        "section": "Results",
+                    }
+                ],
+            }
+        }
+        full_text = (
+            "The films exhibit pronounced Shubnikov-de Haas oscillations. "
+            "This serves as an indicator of the quality and homogeneity of the experimental system. "
+            "These properties differ from multilayer graphene and bulk graphite."
+        )
+
+        corrected = self.service._apply_semantic_correction(raw, full_text)
+
+        self.assertEqual(
+            corrected["evaluation_setup"]["value"]["metrics"],
+            ["carrier mobility", "Hall coefficient"],
+        )
+        self.assertEqual(
+            corrected["evaluation_setup"]["value"]["benchmarks"],
+            ["multilayer graphene", "bulk graphite"],
+        )
+
     def test_benchmark_extraction_uses_named_table_rows(self):
         text = (
             "Table 2: The Transformer achieves better BLEU scores than previous models.\n\n"

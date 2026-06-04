@@ -814,9 +814,15 @@ class LLMExtractionService:
             ("ter", "TER"),
             ("perplexity", "perplexity"),
             ("ppl", "PPL"),
+            ("carrier mobility", "carrier mobility"),
+            ("carrier concentration", "carrier concentration"),
+            ("shubnikov-de haas oscillation amplitude", "Shubnikov-de Haas oscillation amplitude"),
+            ("shubnikov de haas oscillation amplitude", "Shubnikov-de Haas oscillation amplitude"),
+            ("resistivity", "resistivity"),
+            ("hall coefficient", "Hall coefficient"),
         ]
 
-        normalized = text.lower()
+        normalized = re.sub(r"[\u2010-\u2015]", "-", text.lower())
         metrics: list[str] = []
         for needle, label in keywords:
             if re.search(rf"(?<![a-z]){re.escape(needle)}(?![a-z])", normalized):
@@ -830,7 +836,7 @@ class LLMExtractionService:
                 continue
             deduped.append(item)
             seen.add(key)
-            if len(deduped) >= 4:
+            if len(deduped) >= 5:
                 break
 
         return deduped
@@ -1164,8 +1170,28 @@ class LLMExtractionService:
             "icml",
             "cvpr",
             "proceedings",
+            "dataset",
+            "datasets",
+            "benchmark",
+            "benchmarks",
+            "training data",
+            "test data",
+            "test set",
+            "validation set",
+            "experiments",
+            "experimental results",
         }
         if any(lowered == item or lowered.startswith(f"{item} ") for item in rejected):
+            return False
+
+        if not re.search(r"[A-Za-z]", normalized):
+            return False
+
+        if len(normalized) > 100:
+            return False
+
+        digit_count = sum(ch.isdigit() for ch in normalized)
+        if digit_count > len(normalized) * 0.45:
             return False
 
         accepted_patterns = [
@@ -1185,14 +1211,31 @@ class LLMExtractionService:
             r"\bgigaword\b",
             r"\bun\b",
         ]
-        return any(re.search(pattern, lowered) for pattern in accepted_patterns)
+        if any(re.search(pattern, lowered) for pattern in accepted_patterns):
+            return True
+
+        has_named_dataset_signal = (
+            re.search(r"\b(?:dataset|corpus|benchmark|testbed|cohort|registry)\b", lowered)
+            or re.search(r"[A-Z]{2,}", normalized)
+            or re.search(r"\d", normalized)
+        )
+        return bool(has_named_dataset_signal)
 
     @staticmethod
     def _normalize_metric_name(value: str) -> str | None:
         if not isinstance(value, str) or not value.strip():
             return None
 
-        lowered = value.strip().lower()
+        normalized = html.unescape(value)
+        normalized = normalized.replace("`", "")
+        normalized = re.sub(r"[\u2010-\u2015]", "-", normalized)
+        normalized = re.sub(r"[*_]+", "", normalized)
+        normalized = re.sub(r"\s*\[[^\]]+\]", "", normalized)
+        normalized = re.sub(r"\s+", " ", normalized).strip(" :-\t\r\n")
+        if not normalized or len(normalized) > 90:
+            return None
+
+        lowered = normalized.lower()
         metric_map = {
             "bleu": "BLEU",
             "bleu score": "BLEU",
@@ -1212,7 +1255,45 @@ class LLMExtractionService:
             if re.search(rf"(?<![a-z]){re.escape(key)}(?![a-z])", lowered):
                 return label
 
-        return None
+        generic_exact = {
+            "metric",
+            "metrics",
+            "evaluation",
+            "performance",
+            "score",
+            "scores",
+            "result",
+            "results",
+            "measurement",
+            "measurements",
+            "value",
+            "values",
+            "benchmark",
+            "benchmarks",
+            "dataset",
+            "datasets",
+            "table",
+            "figure",
+        }
+        if lowered in generic_exact:
+            return None
+
+        generic_patterns = [
+            r"^(?:various|several|multiple|standard|common|reported)\s+(?:metrics?|measurements?|scores?)$",
+            r"^(?:experimental|evaluation|performance)\s+(?:metrics?|results?|scores?)$",
+            r"^(?:the\s+)?(?:main|primary|overall)\s+(?:metric|measure|score)$",
+        ]
+        if any(re.search(pattern, lowered) for pattern in generic_patterns):
+            return None
+
+        if not re.search(r"[A-Za-z]", normalized):
+            return None
+
+        digit_count = sum(ch.isdigit() for ch in normalized)
+        if digit_count > len(normalized) * 0.45:
+            return None
+
+        return normalized
 
     def _extract_datasets_from_text(self, text: str) -> list[str]:
         if not isinstance(text, str) or not text.strip():
@@ -1723,18 +1804,26 @@ class LLMExtractionService:
     def _detect_paper_type(self, text: str) -> str:
         t = text.lower()
 
-        # ưu tiên system trước
-        if any(k in t for k in [
-            "we introduce",
-            "this paper introduces",
-            "this paper presents",
-            "we present",
-            "metadata format",
-            "framework",
-            "format",
-            "system",
-            "architecture",
-        ]):
+        # Only high-confidence software/system papers get system-specific fixes.
+        system_patterns = [
+            (
+                r"\bwe\s+(?:introduce|present|propose|develop|describe)\s+"
+                r"(?:a|an|the|our)?\s*"
+                r"(?:[a-z0-9_-]+\s+){0,4}"
+                r"(?:metadata\s+format|data\s+format|framework|toolkit|tool|platform|"
+                r"library|software|system)\b"
+            ),
+            (
+                r"\bthis\s+(?:paper|work|study)\s+"
+                r"(?:introduces|presents|proposes|describes)\s+"
+                r"(?:a|an|the)?\s*"
+                r"(?:[a-z0-9_-]+\s+){0,4}"
+                r"(?:metadata\s+format|data\s+format|framework|toolkit|tool|platform|"
+                r"library|software|system)\b"
+            ),
+            r"\bmetadata\s+format\b",
+        ]
+        if any(re.search(pattern, t) for pattern in system_patterns):
             return "system"
 
         if any(k in t for k in [
@@ -1818,16 +1907,16 @@ class LLMExtractionService:
 
         paper_type = self._detect_paper_type(full_text)
 
-        # 🔥 Fix Croissant-like papers
+        # Croissant-like system papers may omit human-evaluation metrics.
         if paper_type == "system":
             eval_setup = raw_result.get("evaluation_setup") or {}
             value = eval_setup.get("value") or {}
 
-            # ❌ benchmark không hợp lệ → clear
-            value["benchmarks"] = []
-
-            # ✅ infer human metrics
-            metrics = []
+            metrics = [
+                metric
+                for metric in value.get("metrics", [])
+                if isinstance(metric, str) and metric.strip()
+            ]
 
             t = full_text.lower()
 
@@ -1846,7 +1935,7 @@ class LLMExtractionService:
             if "consistency" in t:
                 metrics.append("consistency")
 
-            value["metrics"] = metrics
+            value["metrics"] = self._dedupe_strings(metrics, max_items=5)
 
             eval_setup["value"] = value
             raw_result["evaluation_setup"] = eval_setup
@@ -2393,7 +2482,7 @@ class LLMExtractionService:
                 raw_metrics.append(metric)
         metrics = self._dedupe_strings(
             raw_metrics + self._extract_metrics_from_text(source_text),
-            max_items=4,
+            max_items=5,
         )
 
         raw_benchmarks: list[str] = []
