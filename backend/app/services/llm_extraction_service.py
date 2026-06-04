@@ -199,7 +199,8 @@ class LLMExtractionService:
             r"\bremain(?:s)? (?:an|a)? ?(?:open )?(?:problem|question|challenge)\b",
             r"\bremain(?:s)?\b.{0,40}\bto be\b.{0,40}\b(?:overcome|solved|addressed|resolved|investigated|studied)\b",
             r"\b(?:constraint|constraints|assumption|assumptions|caveat|caveats|drawback|drawbacks|weakness|weaknesses|shortcoming|shortcomings|obstacle|obstacles|barrier|barriers|bottleneck|bottlenecks|difficulty|difficulties)\b",
-            r"\b(?:cannot|can't|unable to|fails? to|struggles? to|does not|do not|did not|is not yet|are not yet|was not yet|were not yet|not yet viable|not yet efficient|not yet practical)\b",
+            r"\b(?:cannot|can't|unable to|fails? to|struggles? to|does not|do not|did not|is not yet|are not yet|was not yet|were not yet|not yet viable|not yet efficient|not yet practical|may not|might not|not always|not in all cases|not necessarily)\b",
+            r"\b(?:difficult|hard|challenging)\s+to\s+(?:scale|generalize|train|evaluate|implement|achieve|obtain|measure)\b",
             r"\b(?:expensive|costly|latency|scalability|memory constraints?|memory consumption|compute cost|computational cost|resource intensive)\b",
             r"\bprecludes? parallelization\b",
             r"\brequires?\b.{0,80}\b(?:human|manual|annotation|labels|labeled|compute|memory|resources?|pretraining|training data)\b",
@@ -520,7 +521,7 @@ class LLMExtractionService:
 
         return filtered
 
-    def _is_valid_limitation_item(self, item: dict[str, Any]) -> bool:
+    def _is_valid_limitation_item(self, item: dict[str, Any], is_fallback: bool = False) -> bool:
         value = item.get("value")
         if not isinstance(value, str) or not value.strip():
             return False
@@ -533,8 +534,18 @@ class LLMExtractionService:
         ) if isinstance(evidence, list) else ""
 
         combined = re.sub(r"\s+", " ", f"{value} {evidence_text}").strip()
+        if self._is_noisy_extraction_sentence(combined):
+            return False
+
         lowered = combined.lower()
 
+        # If it is direct LLM output, we don't apply strict semantic signal filters!
+        if not is_fallback:
+            if self._is_prior_work_context(combined):
+                return False
+            return True
+
+        # If it is fallback (coerced from raw text), we enforce strict signals!
         if re.match(
             r"^#+\s*\d*(?:\.\d+)?\s*(abstract|introduction|background|related work|method|approach|experiments?|results?)\b",
             lowered,
@@ -564,9 +575,9 @@ class LLMExtractionService:
 
         return True
 
-    def _normalize_limitations_field(self, raw: Any) -> list[dict[str, Any]]:
+    def _normalize_limitations_field(self, raw: Any, is_fallback: bool = False) -> list[dict[str, Any]]:
         candidates = self._normalize_list_field(raw, max_items=6)
-        filtered = [item for item in candidates if self._is_valid_limitation_item(item)]
+        filtered = [item for item in candidates if self._is_valid_limitation_item(item, is_fallback=is_fallback)]
         return self._dedupe_list_items(filtered, max_items=2)
 
     @staticmethod
@@ -576,6 +587,7 @@ class LLMExtractionService:
 
         repaired = text
         repaired = repaired.replace("\u2019", "'").replace("`", "'")
+        repaired = re.sub(r"^(?:one-sentence summary|summary|abstract|introduction):\s*", "", repaired, flags=re.IGNORECASE)
         repaired = re.sub("[\u2010-\u2015]", "-", repaired)
         repaired = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "", repaired)
         joined_we_verbs = (
@@ -648,6 +660,25 @@ class LLMExtractionService:
         if "@" in lowered or "proceedings of" in lowered or "arxiv:" in lowered:
             return True
 
+        # Filter out email addresses
+        if re.search(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b", lowered):
+            return True
+
+        # Filter out typical affiliation/author headers
+        affiliation_keywords = [
+            "department of", "dept. of", "university of", "univ. of",
+            "institute for", "institute of", "inst. of", "laboratory of",
+            "corporation", "co., ltd.", "inc.", "gmbh", "postal code",
+            "zip code", "e-mail:", "email:", "authors:", "correspondence to:",
+            "all rights reserved", "copyright", "associated with", "reprint"
+        ]
+        if any(keyword in lowered for keyword in affiliation_keywords):
+            return True
+
+        # Filter out figure/table/equation references
+        if re.match(r"^(?:fig(?:ure)?|table|eq(?:uation)?)\b\s*\d+", lowered):
+            return True
+
         if re.match(r"^\[page \d+\]", lowered) and not self._has_current_paper_signal(lowered):
             return True
 
@@ -716,17 +747,25 @@ class LLMExtractionService:
 
     def _pick_contribution_sentences(self, sentences: list[str], max_items: int = 3) -> list[str]:
         candidates: list[str] = []
-        seen: set[str] = set()
+        seen_token_sets: list[set[str]] = []
         for sentence in sentences:
             if not self._is_valid_contribution_sentence(sentence):
                 continue
 
-            key = re.sub(r"\s+", " ", sentence).strip().lower()
-            if key in seen:
+            cleaned = re.sub(r"\s+", " ", sentence).strip()
+            tokens = {
+                token
+                for token in re.findall(r"[a-z0-9]+", cleaned.lower())
+                if len(token) > 3 and token not in PAGE_MATCH_STOPWORDS
+            }
+            if tokens and any(
+                len(tokens & seen) / max(1, min(len(tokens), len(seen))) >= 0.72
+                for seen in seen_token_sets
+            ):
                 continue
 
             candidates.append(sentence)
-            seen.add(key)
+            seen_token_sets.append(tokens)
             if len(candidates) >= max_items:
                 break
 
@@ -743,7 +782,7 @@ class LLMExtractionService:
 
         return field
 
-    def _is_valid_contribution_item(self, item: dict[str, Any]) -> bool:
+    def _is_valid_contribution_item(self, item: dict[str, Any], is_fallback: bool = False) -> bool:
         value = item.get("value")
         if not isinstance(value, str) or not value.strip():
             return False
@@ -758,6 +797,14 @@ class LLMExtractionService:
         combined = re.sub(r"\s+", " ", f"{value} {evidence_text}").strip()
         if self._is_noisy_extraction_sentence(combined):
             return False
+
+        # If it is direct LLM output, we don't apply strict semantic signal filters!
+        if not is_fallback:
+            if self._is_external_work_statement(combined):
+                return False
+            return True
+
+        # If it is fallback (coerced from raw text), we enforce strict signals!
         if self._is_external_work_statement(combined):
             return False
         if self._is_valid_contribution_sentence(combined):
@@ -785,9 +832,9 @@ class LLMExtractionService:
 
         return False
 
-    def _normalize_contributions_field(self, raw: Any) -> list[dict[str, Any]]:
+    def _normalize_contributions_field(self, raw: Any, is_fallback: bool = False) -> list[dict[str, Any]]:
         candidates = self._normalize_list_field(raw, max_items=8)
-        filtered = [item for item in candidates if self._is_valid_contribution_item(item)]
+        filtered = [item for item in candidates if self._is_valid_contribution_item(item, is_fallback=is_fallback)]
 
         deduped: list[dict[str, Any]] = []
         seen_token_sets: list[set[str]] = []
@@ -1579,7 +1626,7 @@ class LLMExtractionService:
         if not isinstance(contributions, list):
             contributions = []
         if len(contributions) == 0:
-            fallback_contributions = self._normalize_contributions_field(fallback.get("contributions"))
+            fallback_contributions = self._normalize_contributions_field(fallback.get("contributions"), is_fallback=True)
             if fallback_contributions:
                 normalized["contributions"] = fallback_contributions
                 filled_keys.append("contributions")
@@ -1588,7 +1635,7 @@ class LLMExtractionService:
         if not isinstance(limitations, list):
             limitations = []
         if len(limitations) == 0:
-            fallback_limitations = self._normalize_limitations_field(fallback.get("limitations"))
+            fallback_limitations = self._normalize_limitations_field(fallback.get("limitations"), is_fallback=True)
             if fallback_limitations:
                 normalized["limitations"] = fallback_limitations
                 filled_keys.append("limitations")
@@ -2607,8 +2654,8 @@ class LLMExtractionService:
         normalized = {
             "problem": self._normalize_scalar_field(raw.get("problem")),
             "method": self._normalize_method_field(raw.get("method")),
-            "contributions": self._normalize_contributions_field(raw.get("contributions")),
-            "limitations": self._normalize_limitations_field(raw.get("limitations")),
+            "contributions": self._normalize_contributions_field(raw.get("contributions"), is_fallback=False),
+            "limitations": self._normalize_limitations_field(raw.get("limitations"), is_fallback=False),
             "evaluation_setup": self._normalize_evaluation_setup(raw.get("evaluation_setup"), pages, input_text),
         }
         normalized = self._enrich_missing_fields_from_input_text(normalized, input_text, pages)

@@ -617,6 +617,59 @@ class LLMExtractionServiceResearchFieldTests(unittest.TestCase):
         self.assertTrue(self.service._has_limitation_signal("obstacles remain to be overcome"))
         self.assertTrue(self.service._has_limitation_signal("these methods are not yet efficient"))
         self.assertTrue(self.service._has_limitation_signal("there are major barriers to scalability"))
+        self.assertTrue(self.service._has_limitation_signal("recycling may not always reduce greenhouse gas emissions"))
+        self.assertTrue(self.service._has_limitation_signal("this might not in all cases result in improvements"))
+        self.assertTrue(self.service._has_limitation_signal("it is not necessarily viable"))
+        self.assertTrue(self.service._has_limitation_signal("it is difficult to scale to production size"))
+
+    def test_noisy_extraction_sentence_filtering(self):
+        # Email address
+        self.assertTrue(self.service._is_noisy_extraction_sentence("Contact us at author@university.edu for details"))
+        # Affiliation headers
+        self.assertTrue(self.service._is_noisy_extraction_sentence("Jiang 1 Department of Physics, University of Manchester"))
+        self.assertTrue(self.service._is_noisy_extraction_sentence("Institute for Microelectronics Technology, Chernogolovka, Russia"))
+        # Figure/table references
+        self.assertTrue(self.service._is_noisy_extraction_sentence("Figure 2 shows the calculated dependences"))
+        self.assertTrue(self.service._is_noisy_extraction_sentence("table 1: comparison of models"))
+        
+        # Valid contribution sentence should NOT be noisy
+        self.assertFalse(self.service._is_noisy_extraction_sentence("We propose a novel framework for deep learning."))
+
+    def test_fallback_contribution_deduplication_and_prefix_repair(self):
+        # Check prefix repair
+        repaired = self.service._repair_joined_extraction_text("One-sentence summary: We report a naturally-occurring material.")
+        self.assertEqual(repaired, "We report a naturally-occurring material.")
+
+        # Check deduplication of near-duplicates in candidate picking
+        sentences = [
+            "We report the electric field effect in few-layer graphene (FLG).",
+            "Here we report the electric field effect in few-layer graphene (FLG).",
+            "We describe a metallic field-effect transistor."
+        ]
+        candidates = self.service._pick_contribution_sentences(sentences, max_items=3)
+        # The first and second sentences are near-duplicates, so only one should be kept
+        self.assertEqual(len(candidates), 2)
+        self.assertIn("We report the electric field effect in few-layer graphene (FLG).", candidates)
+        self.assertNotIn("Here we report the electric field effect in few-layer graphene (FLG).", candidates)
+        self.assertIn("We describe a metallic field-effect transistor.", candidates)
+
+
+    def test_direct_llm_vs_fallback_validation_rules(self):
+        # Case 1: Contribution
+        # A creative contribution statement from LLM without strict words like "we/our"
+        item_contrib = {"value": "The first demonstration of stable monocrystalline graphitic films under ambient conditions."}
+        # For direct LLM (is_fallback=False), this should be accepted
+        self.assertTrue(self.service._is_valid_contribution_item(item_contrib, is_fallback=False))
+        # For fallback (is_fallback=True), this should be rejected because it has no claim owner or matching verb pattern
+        self.assertFalse(self.service._is_valid_contribution_item(item_contrib, is_fallback=True))
+
+        # Case 2: Limitation
+        # A creative limitation statement from LLM without strict signal words
+        item_limit = {"value": "The model has high computational complexity during inference."}
+        # For direct LLM (is_fallback=False), this should be accepted
+        self.assertTrue(self.service._is_valid_limitation_item(item_limit, is_fallback=False))
+        # For fallback (is_fallback=True), this should be rejected because it lacks limitation keywords
+        self.assertFalse(self.service._is_valid_limitation_item(item_limit, is_fallback=True))
 
 
 if __name__ == "__main__":
