@@ -603,6 +603,21 @@ class LLMExtractionServiceResearchFieldTests(unittest.TestCase):
         self.assertEqual(normalized["value"]["benchmarks"], ["ByteNet"])
         self.assertNotIn("state-of-the-art baseline", normalized["value"]["benchmarks"])
 
+    def test_survey_paper_skips_evaluation_enrichment(self):
+        text = "This paper presents a review of existing recycling methods for batteries on GLUE and precision."
+        normalized = self.service._normalize_evaluation_setup(
+            {"value": {"datasets": [], "metrics": []}, "evidence": []},
+            pages=[],
+            source_text=text
+        )
+        self.assertEqual(normalized["value"]["datasets"], [])
+        self.assertEqual(normalized["value"]["metrics"], [])
+
+    def test_new_limitation_signals(self):
+        self.assertTrue(self.service._has_limitation_signal("obstacles remain to be overcome"))
+        self.assertTrue(self.service._has_limitation_signal("these methods are not yet efficient"))
+        self.assertTrue(self.service._has_limitation_signal("there are major barriers to scalability"))
+
 
 if __name__ == "__main__":
     unittest.main()

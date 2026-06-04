@@ -197,8 +197,9 @@ class LLMExtractionService:
             r"\b(?:interesting|promising) directions? for (?:future|further) (?:work|research)\b",
             r"\bwe (?:plan|intend|leave|hope|will investigate|aim) to\b",
             r"\bremain(?:s)? (?:an|a)? ?(?:open )?(?:problem|question|challenge)\b",
-            r"\b(?:constraint|constraints|assumption|assumptions|caveat|caveats|drawback|drawbacks|weakness|weaknesses|shortcoming|shortcomings)\b",
-            r"\b(?:cannot|can't|unable to|fails? to|struggles? to|does not|do not|did not)\b",
+            r"\bremain(?:s)?\b.{0,40}\bto be\b.{0,40}\b(?:overcome|solved|addressed|resolved|investigated|studied)\b",
+            r"\b(?:constraint|constraints|assumption|assumptions|caveat|caveats|drawback|drawbacks|weakness|weaknesses|shortcoming|shortcomings|obstacle|obstacles|barrier|barriers|bottleneck|bottlenecks|difficulty|difficulties)\b",
+            r"\b(?:cannot|can't|unable to|fails? to|struggles? to|does not|do not|did not|is not yet|are not yet|was not yet|were not yet|not yet viable|not yet efficient|not yet practical)\b",
             r"\b(?:expensive|costly|latency|scalability|memory constraints?|memory consumption|compute cost|computational cost|resource intensive)\b",
             r"\bprecludes? parallelization\b",
             r"\brequires?\b.{0,80}\b(?:human|manual|annotation|labels|labeled|compute|memory|resources?|pretraining|training data)\b",
@@ -1491,9 +1492,15 @@ class LLMExtractionService:
             if len(limitation_candidates) >= 2:
                 break
 
-        datasets = self._extract_datasets_from_text(source_text)
-        metrics = self._extract_metrics_from_text(source_text)
-        benchmarks = self._extract_benchmarks_from_text(source_text)
+        paper_type = self._detect_paper_type(source_text)
+        if paper_type == "survey":
+            datasets = []
+            metrics = []
+            benchmarks = []
+        else:
+            datasets = self._extract_datasets_from_text(source_text)
+            metrics = self._extract_metrics_from_text(source_text)
+            benchmarks = self._extract_benchmarks_from_text(source_text)
 
         coerced = {
             "problem": {
@@ -2483,8 +2490,18 @@ class LLMExtractionService:
             and not self._is_placeholder_text(x)
             and self._is_valid_dataset_name(x)
         ]
+        paper_type = self._detect_paper_type(source_text)
+        if paper_type == "survey":
+            extracted_datasets = []
+            extracted_metrics = []
+            extracted_benchmarks = []
+        else:
+            extracted_datasets = self._extract_datasets_from_text(source_text)
+            extracted_metrics = self._extract_metrics_from_text(source_text)
+            extracted_benchmarks = self._extract_benchmarks_from_text(source_text)
+
         datasets = self._dedupe_strings(
-            raw_datasets + self._extract_datasets_from_text(source_text),
+            raw_datasets + extracted_datasets,
             max_items=3,
         )
 
@@ -2494,7 +2511,7 @@ class LLMExtractionService:
             if metric:
                 raw_metrics.append(metric)
         metrics = self._dedupe_strings(
-            raw_metrics + self._extract_metrics_from_text(source_text),
+            raw_metrics + extracted_metrics,
             max_items=5,
         )
 
@@ -2504,7 +2521,7 @@ class LLMExtractionService:
             if normalized and not self._is_placeholder_text(normalized):
                 raw_benchmarks.append(normalized)
         benchmarks = self._dedupe_strings(
-            raw_benchmarks + self._extract_benchmarks_from_text(source_text),
+            raw_benchmarks + extracted_benchmarks,
             max_items=3,
         )
 
