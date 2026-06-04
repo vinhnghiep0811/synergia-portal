@@ -447,6 +447,23 @@ class LLMExtractionServiceResearchFieldTests(unittest.TestCase):
         self.assertEqual(len(normalized), 1)
         self.assertIn("transfer of encoder knowledge", normalized[0]["value"])
 
+    def test_normalize_contributions_keeps_relaxed_past_tense_verbs(self):
+        normalized = self.service._normalize_contributions_field(
+            [
+                {
+                    "value": "Realized an all-metallic transistor.",
+                    "evidence": []
+                },
+                {
+                    "value": "Observed pronounced oscillations in graphene.",
+                    "evidence": []
+                }
+            ]
+        )
+        self.assertEqual(len(normalized), 2)
+        self.assertEqual(normalized[0]["value"], "Realized an all-metallic transistor.")
+        self.assertEqual(normalized[1]["value"], "Observed pronounced oscillations in graphene.")
+
     def test_evaluation_extraction_keeps_wmt_and_bleu_but_drops_venues(self):
         text = (
             "We benchmark on the WMT 2014 English-to-German and English-to-French tasks. "

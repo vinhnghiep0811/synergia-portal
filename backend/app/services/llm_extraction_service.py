@@ -770,19 +770,19 @@ class LLMExtractionService:
                 lowered,
             )
         )
-        if not has_claim_owner:
-            return False
+        if has_claim_owner:
+            return True
 
-        compact_claim_patterns = [
-            (
-                r"^(?:introduces?|proposes?|replaces?|improves?|outperforms?|"
-                r"achieves?|obtains?|converges?|evaluates?|tests?|trains?|"
-                r"analy[sz]es?|demonstrates?|finds?|reviews?|discusses?|"
-                r"explores?|describes?)\b"
-            ),
-            r"\b(?:bleu|accuracy|f1)\b.{0,80}\b(?:improvement|points?|score)\b",
-        ]
-        return any(re.search(pattern, lowered) for pattern in compact_claim_patterns)
+        # Relaxed check for LLM-extracted items or statements with strong contribution verbs
+        contribution_verbs_pattern = (
+            r"\b(?:propos|present|introduc|develop|replac|show|report|achiev|"
+            r"obtain|improv|outperform|benchmark|evaluat|test|analy[sz]|"
+            r"demonstrat|find|found|observ|realis|realiz|train|review|discuss|explor|describ|construct|build)e?d?s?(?:ing)?\b"
+        )
+        if re.search(contribution_verbs_pattern, lowered):
+            return True
+
+        return False
 
     def _normalize_contributions_field(self, raw: Any) -> list[dict[str, Any]]:
         candidates = self._normalize_list_field(raw, max_items=8)
