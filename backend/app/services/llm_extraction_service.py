@@ -462,6 +462,16 @@ class LLMExtractionService:
         if isinstance(value, str):
             snippets.append(value)
 
+        # Check if the document has any explicitly allowed limitation sections.
+        # If it does, we enforce strict whitelist-matching.
+        # If it does not, we allow limitations as long as they are not explicitly in rejected/blacklisted sections.
+        has_any_allowed_section = False
+        if isinstance(input_text, str) and input_text.strip():
+            for chunk in self._section_chunks_from_input_text(input_text):
+                if self._is_allowed_limitation_section(chunk.get("section")):
+                    has_any_allowed_section = True
+                    break
+
         if isinstance(input_text, str) and input_text.strip():
             for snippet in snippets:
                 section = self._infer_section_for_snippet_from_input_text(snippet, input_text)
@@ -480,6 +490,9 @@ class LLMExtractionService:
                 return False
 
         if not isinstance(input_text, str) or not input_text.strip():
+            return True
+
+        if not has_any_allowed_section:
             return True
 
         return False

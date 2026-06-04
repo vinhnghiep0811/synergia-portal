@@ -52,8 +52,13 @@ class OllamaLLMProvider(BaseLLMProvider):
         provider_name = provider_result.get("provider") or "ollama"
         model_name = provider_result.get("model") or self.model
 
-        with open("/tmp/llm_raw_output.txt", "w", encoding="utf-8") as f:
-            f.write(raw_text)
+        import os
+        try:
+            os.makedirs("/tmp", exist_ok=True)
+            with open("/tmp/llm_raw_output.txt", "w", encoding="utf-8") as f:
+                f.write(raw_text)
+        except Exception as save_err:
+            logger.warning("[LLM OUTPUT SAVE] Failed to save raw output: %s", save_err)
 
         logger.info(
             "[LLM OUTPUT PREVIEW] provider=%s model=%s chars=%s preview=%s",

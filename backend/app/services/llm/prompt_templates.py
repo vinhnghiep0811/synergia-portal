@@ -51,8 +51,8 @@ Field interpretation:
 - evaluation_setup: datasets/metrics/benchmarks explicitly mentioned in evaluation context
 
 Limitation rules:
-- Only extract limitations from sections headed Limitations, Discussion, Conclusion, Future Work, Threats to Validity, or equivalent.
-- If none of those sections are present, return "limitations": [].
+- Extract limitations from sections headed Limitations, Discussion, Conclusion, Future Work, Threats to Validity, or equivalent.
+- If none of those sections are present in the paper, you may extract limitations from the general paper content if they are explicitly stated by the authors.
 - Treat explicit author caveats as valid limitations, including metric/scope warnings such as "should not be the only metric" or "has shortcomings".
 - Treat author-stated future directions as valid when phrased as "future work", "further research", "interesting direction", or an explicit extension/application left for later.
 - Never extract prior-work, baseline, recurrent-model, convolutional-model, or competing-method weaknesses as limitations of this paper.
@@ -91,7 +91,7 @@ RECALL RULES (IMPORTANT):
 1. Do not return contributions: [] when abstract/introduction clearly states claims (e.g., "we propose", "we present", "we show", "we achieve").
 2. Prefer 2-3 contribution items when supported.
 3. Return limitations: [] unless the authors explicitly state a limitation, scope constraint, caveat, metric/scope warning, or future/further-research item about the proposed work.
-4. Only extract limitations from Limitations, Discussion, Conclusion, Future Work, Threats to Validity, or equivalent sections.
+4. Extract limitations from Limitations, Discussion, Conclusion, Future Work, Threats to Validity, or equivalent sections. If none are present, extract them from the general paper context if explicitly stated.
 
 ANTI-NOISE RULES (CRITICAL):
 1. Do not copy long abstract paragraphs into contributions or limitations.
@@ -111,9 +111,9 @@ CONTRIBUTIONS FILTER:
 - BAD: full abstract copied as one contribution.
 
 LIMITATIONS FILTER:
-- Only use explicit caveats from limitations/discussion/conclusion/future-work context.
+- Extract explicit caveats from limitations/discussion/conclusion/future-work context. If none are present, you may extract explicit caveats from the general paper context.
 - Valid caveats include evaluation-metric shortcomings, scope constraints, and author-stated directions for future or further research.
-- If no such section or explicit limitation sentence exists, return limitations: [].
+- If no such section or explicit limitation sentence exists in the paper, return limitations: [].
 - Do not use weaknesses of prior work, baselines, recurrent models, convolutional models, or competing methods as limitations.
 - Never invent facts outside PAPER_CONTENT.
 
