@@ -64,10 +64,6 @@ class LLMInputBuilder:
         return "\n\n".join(parts).strip()
 
     def _extract_priority_tail(self, text: str, fallback_chars: int) -> str:
-        """
-        Ưu tiên lấy đoạn cuối paper bắt đầu từ các section thường chứa limitation.
-        Nếu không tìm thấy thì lấy fallback từ cuối văn bản.
-        """
         patterns = [
             r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?limitations?\b",
             r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?challenges?\b",
@@ -80,13 +76,28 @@ class LLMInputBuilder:
         ]
 
         lowered = text.lower()
-        for pattern in patterns:
-            m = re.search(pattern, lowered)
-            if m:
-                tail = text[m.start():]
-    # Lấy fallback_chars ký tự ĐẦU TIÊN của đoạn tail này
-                return tail[:fallback_chars]
+        best_idx = -1
+        half_len = len(text) // 2
 
+        for pattern in patterns:
+            # Quét tìm TẤT CẢ các match
+            matches = list(re.finditer(pattern, lowered))
+            if not matches:
+                continue
+                
+            # Duyệt ngược từ dưới lên, chỉ lấy mục nằm ở nửa sau bài báo
+            for m in reversed(matches):
+                if m.start() > half_len:
+                    if m.start() > best_idx:
+                        best_idx = m.start()
+                    break 
+
+        if best_idx != -1:
+            # Lấy đoạn đuôi từ vị trí tìm thấy
+            tail = text[best_idx:]
+            return tail[:fallback_chars]
+
+        # Trả về fallback nếu không tìm thấy section
         return text[-fallback_chars:] if len(text) > fallback_chars else text
 
     def _truncate_for_academic_paper(self, text: str, max_chars: int) -> str:
