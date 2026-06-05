@@ -69,14 +69,14 @@ class LLMInputBuilder:
         Nếu không tìm thấy thì lấy fallback từ cuối văn bản.
         """
         patterns = [
-            r"\n\s*\d+(\.\d+)?\s+limitations\b",
-            r"\n\s*limitations\b",
-            r"\n\s*\d+(\.\d+)?\s+discussion\b",
-            r"\n\s*discussion\b",
-            r"\n\s*\d+(\.\d+)?\s+future work\b",
-            r"\n\s*future work\b",
-            r"\n\s*\d+(\.\d+)?\s+conclusion\b",
-            r"\n\s*conclusion\b",
+            r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?limitations?\b",
+            r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?challenges?\b",
+            r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?open\s+problems?\b",
+            r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?perspectives?\b",
+            r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?outlook\b",
+            r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?future\s+(?:trends?|work|research|direction|outlook|perspective)s?\b",
+            r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?discussion\b",
+            r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?conclusion\b",
         ]
 
         lowered = text.lower()
