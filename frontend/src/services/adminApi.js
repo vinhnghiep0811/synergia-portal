@@ -120,3 +120,12 @@ export async function removeAdminLLMModel(modelId) {
   return del(`/api/admin/llm-models/${modelId}`);
 }
 
+export async function deleteAdminCanonicalDocument(canonicalId, deletePapers = false) {
+  return del(`/api/admin/canonical-documents/${canonicalId}?delete_papers=${deletePapers}`);
+}
+
+export async function deleteAdminPaper(paperId) {
+  return del(`/api/admin/papers/${paperId}`);
+}
+
+

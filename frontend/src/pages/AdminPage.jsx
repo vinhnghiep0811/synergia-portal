@@ -17,6 +17,8 @@ import {
   updateAdminLLMPrompts,
   validateAdminConfiguration,
   removeAdminLLMModel,
+  deleteAdminCanonicalDocument,
+  deleteAdminPaper,
 } from "../services/adminApi.js";
 
 const TAB_CONFIG = [
@@ -468,6 +470,54 @@ export function AdminPage() {
     }
   }, [configForm.llm_model]);
 
+  const handleDeleteCanonical = useCallback(async (doc) => {
+    let deletePapers = false;
+    if (doc.paper_count > 0) {
+      const confirmDeleteAll = window.confirm(
+        `Tài liệu chuẩn này đang liên kết với ${doc.paper_count} bài báo. Bạn có đồng ý xóa cả tài liệu chuẩn và tất cả bài báo liên kết không?`
+      );
+      if (!confirmDeleteAll) return;
+      deletePapers = true;
+    } else {
+      const confirmDelete = window.confirm("Bạn có chắc chắn muốn xóa tài liệu chuẩn này không?");
+      if (!confirmDelete) return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      await deleteAdminCanonicalDocument(doc.id, deletePapers);
+      await loadCanonical();
+      void loadOverview();
+      void loadActivities();
+    } catch (err) {
+      setError(err.message || "Không thể xóa tài liệu chuẩn.");
+    } finally {
+      setLoading(false);
+    }
+  }, [loadCanonical, loadOverview, loadActivities]);
+
+  const handleDeletePaper = useCallback(async (paper) => {
+    const confirmDelete = window.confirm(
+      `Bạn có chắc chắn muốn xóa bài báo "${paper.original_filename}" không? Hành động này không thể hoàn tác.`
+    );
+    if (!confirmDelete) return;
+
+    setLoading(true);
+    setError("");
+    try {
+      await deleteAdminPaper(paper.id);
+      await loadPapers();
+      void loadOverview();
+      void loadActivities();
+    } catch (err) {
+      setError(err.message || "Không thể xóa bài báo.");
+    } finally {
+      setLoading(false);
+    }
+  }, [loadPapers, loadOverview, loadActivities]);
+
+
   const savePrompts = useCallback(async () => {
     setIsSavingPrompts(true);
     setError("");
@@ -712,6 +762,7 @@ export function AdminPage() {
                       <th>Status</th>
                       <th>Stage</th>
                       <th>Created</th>
+                      <th>Thao tác</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -723,11 +774,20 @@ export function AdminPage() {
                         </td>
                         <td>{paper.processing_stage || "-"}</td>
                         <td>{formatDate(paper.created_at)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn--danger admin-btn-compact"
+                            onClick={() => handleDeletePaper(paper)}
+                          >
+                            Xóa
+                          </button>
+                        </td>
                       </tr>
                     ))}
                     {papers.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="admin-table__empty">Không có dữ liệu</td>
+                        <td colSpan={5} className="admin-table__empty">Không có dữ liệu</td>
                       </tr>
                     )}
                   </tbody>
@@ -750,6 +810,7 @@ export function AdminPage() {
                       <th>Title</th>
                       <th>Status</th>
                       <th>Papers</th>
+                      <th>Thao tác</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -759,11 +820,20 @@ export function AdminPage() {
                         <td>{doc.title || doc.title_candidate || "-"}</td>
                         <td><StatusBadge status={doc.enrichment_status || "-"} /></td>
                         <td>{doc.paper_count || 0}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn--danger admin-btn-compact"
+                            onClick={() => handleDeleteCanonical(doc)}
+                          >
+                            Xóa
+                          </button>
+                        </td>
                       </tr>
                     ))}
                     {canonicalDocs.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="admin-table__empty">Không có dữ liệu</td>
+                        <td colSpan={5} className="admin-table__empty">Không có dữ liệu</td>
                       </tr>
                     )}
                   </tbody>
@@ -772,6 +842,7 @@ export function AdminPage() {
               <Pagination page={canonicalPage} totalPages={canonicalTotalPages} onChange={setCanonicalPage} />
             </div>
           )}
+
 
           {activeTab === "activities" && (
             <div className="card admin-panel-card">
