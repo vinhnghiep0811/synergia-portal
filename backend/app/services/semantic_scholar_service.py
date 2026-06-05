@@ -835,3 +835,71 @@ class SemanticScholarService:
         canonical.crossref_match_confidence = confidence if confidence is not None else None
         canonical.crossref_metadata_json = verification.get("crossref_metadata")
         canonical.crossref_verification_json = verification
+
+        # If Crossref verification was successful/matched, replace missing primary fields with Crossref values
+        if verification.get("status") in {"verified", "partial", "weak"}:
+            fields_comparison = verification.get("fields", {})
+
+            # 1. venue
+            venue_cmp = fields_comparison.get("venue", {})
+            if venue_cmp.get("status") == "missing" and not venue_cmp.get("primary") and venue_cmp.get("crossref"):
+                canonical.venue = venue_cmp.get("crossref")
+                logger.info(
+                    "[Crossref verify] Replaced missing venue with Crossref value for canonical_id=%s: %s",
+                    canonical.id,
+                    canonical.venue,
+                )
+
+            # 2. publication_year
+            year_cmp = fields_comparison.get("year", {})
+            if year_cmp.get("status") == "missing" and not year_cmp.get("primary") and year_cmp.get("crossref"):
+                canonical.publication_year = year_cmp.get("crossref")
+                logger.info(
+                    "[Crossref verify] Replaced missing publication_year with Crossref value for canonical_id=%s: %s",
+                    canonical.id,
+                    canonical.publication_year,
+                )
+
+            # 3. abstract
+            abstract_cmp = fields_comparison.get("abstract", {})
+            if abstract_cmp.get("status") == "missing" and not abstract_cmp.get("primary") and abstract_cmp.get("crossref"):
+                canonical.abstract = abstract_cmp.get("crossref")
+                logger.info(
+                    "[Crossref verify] Replaced missing abstract with Crossref value for canonical_id=%s: %s",
+                    canonical.id,
+                    canonical.abstract[:100] if canonical.abstract else "",
+                )
+
+            # 4. authors_json
+            authors_cmp = fields_comparison.get("authors", {})
+            if authors_cmp.get("status") == "missing" and not authors_cmp.get("primary") and authors_cmp.get("crossref"):
+                canonical.authors_json = [
+                    {"name": name, "author_id": None}
+                    for name in authors_cmp.get("crossref", [])
+                    if name
+                ]
+                logger.info(
+                    "[Crossref verify] Replaced missing authors with Crossref value for canonical_id=%s: %s",
+                    canonical.id,
+                    canonical.authors_json,
+                )
+
+            # 5. title
+            title_cmp = fields_comparison.get("title", {})
+            if title_cmp.get("status") == "missing" and not title_cmp.get("primary") and title_cmp.get("crossref"):
+                canonical.title = title_cmp.get("crossref")
+                logger.info(
+                    "[Crossref verify] Replaced missing title with Crossref value for canonical_id=%s: %s",
+                    canonical.id,
+                    canonical.title,
+                )
+
+            # 6. doi
+            doi_cmp = fields_comparison.get("doi", {})
+            if doi_cmp.get("status") == "missing" and not doi_cmp.get("primary") and doi_cmp.get("crossref"):
+                self._set_crossref_doi_if_available(canonical, doi_cmp.get("crossref"))
+                logger.info(
+                    "[Crossref verify] Replaced missing DOI with Crossref value for canonical_id=%s: %s",
+                    canonical.id,
+                    canonical.doi,
+                )

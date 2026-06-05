@@ -177,5 +177,86 @@ class SemanticScholarCrossrefFallbackTests(unittest.TestCase):
         self.assertEqual(canonical.crossref_metadata_json, crossref_metadata)
 
 
+class SemanticScholarCrossrefVerificationReplacementTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.service = object.__new__(SemanticScholarService)
+        self.service.db = FakeDb()
+
+    def test_apply_crossref_verification_replaces_missing_fields(self) -> None:
+        canonical = SimpleNamespace(
+            id="canonical-1",
+            doi=None,
+            title=None,
+            publication_year=None,
+            venue=None,
+            abstract=None,
+            authors_json=None,
+            crossref_match_status=None,
+            crossref_match_confidence=None,
+            crossref_metadata_json=None,
+            crossref_verification_json=None,
+        )
+
+        verification = {
+            "status": "verified",
+            "confidence": 0.95,
+            "crossref_metadata": {
+                "doi": "10.1126/science.1102896",
+                "title": "Electric Field Effect in Atomically Thin Carbon Films",
+                "year": 2004,
+                "venue": "Science",
+                "abstract": "Graphitic films are described.",
+                "authors": ["K. S. Novoselov", "A. K. Geim"],
+            },
+            "fields": {
+                "doi": {
+                    "status": "missing",
+                    "primary": None,
+                    "crossref": "10.1126/science.1102896",
+                },
+                "title": {
+                    "status": "missing",
+                    "primary": None,
+                    "crossref": "Electric Field Effect in Atomically Thin Carbon Films",
+                },
+                "year": {
+                    "status": "missing",
+                    "primary": None,
+                    "crossref": 2004,
+                },
+                "venue": {
+                    "status": "missing",
+                    "primary": None,
+                    "crossref": "Science",
+                },
+                "abstract": {
+                    "status": "missing",
+                    "primary": None,
+                    "crossref": "Graphitic films are described.",
+                },
+                "authors": {
+                    "status": "missing",
+                    "primary": [],
+                    "crossref": ["K. S. Novoselov", "A. K. Geim"],
+                },
+            }
+        }
+
+        self.service._apply_crossref_verification(canonical, verification)
+
+        self.assertEqual(canonical.doi, "10.1126/science.1102896")
+        self.assertEqual(canonical.title, "Electric Field Effect in Atomically Thin Carbon Films")
+        self.assertEqual(canonical.publication_year, 2004)
+        self.assertEqual(canonical.venue, "Science")
+        self.assertEqual(canonical.abstract, "Graphitic films are described.")
+        self.assertEqual(
+            canonical.authors_json,
+            [
+                {"name": "K. S. Novoselov", "author_id": None},
+                {"name": "A. K. Geim", "author_id": None},
+            ]
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
