@@ -278,7 +278,12 @@ class LLMExtractionService:
                 r"discussion|"
                 r"conclusions?|"
                 r"future work|"
-                r"threats? to validity|"
+                r"future\s+(?:work|research|direction|trend|outlook|perspective)s?|"
+                r"future\s+trends?\s+and\s+challenges?|"
+                r"challenges?|"
+                r"open\s+problems?|"
+                r"perspectives?|"
+                r"threats?(?:\s+to\s+validity)?|"
                 r"caveats?|"
                 r"outlook"
                 r")\b",
@@ -362,9 +367,14 @@ class LLMExtractionService:
             r"discussion",
             r"conclusions?",
             r"future work",
+            r"future\s+(?:work|research|direction|trend|outlook|perspective)s?",
+            r"future\s+trends?\s+and\s+challenges?",
+            r"challenges?",
+            r"open\s+problems?",
+            r"perspectives?",
             r"limitations?",
             r"limitations? and future work",
-            r"threats? to validity",
+            r"threats?(?:\s+to\s+validity)?",
             r"caveats?",
             r"outlook",
             r"references?",

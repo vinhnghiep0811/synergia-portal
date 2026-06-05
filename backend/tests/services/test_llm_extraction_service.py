@@ -333,11 +333,62 @@ class LLMExtractionServiceLimitationsTests(unittest.TestCase):
                 "evidence": [],
             },
         }
-
         result = self.service._normalize_result(raw, pages=[], input_text=input_text)
 
         self.assertEqual(len(result["limitations"]), 1)
         self.assertIn("extend the model", result["limitations"][0]["value"])
+
+    def test_is_allowed_limitation_section_matches_new_headings(self):
+        new_headings = [
+            "Future Trends and Challenges",
+            "future trends",
+            "Challenges",
+            "Open Problems",
+            "Perspectives",
+            "Future Directions",
+            "Future Research",
+            "threats",
+            "threats to validity"
+        ]
+        for heading in new_headings:
+            with self.subTest(heading=heading):
+                self.assertTrue(self.service._is_allowed_limitation_section(heading))
+
+    def test_normalize_result_keeps_limitation_from_future_trends_and_challenges_context(self):
+        input_text = (
+            "[PAPER_TEXT]\n"
+            "1 Introduction\n"
+            "We introduce a model for machine translation.\n"
+            "9 Future Trends and Challenges\n"
+            "However, battery degradation remains a key challenge for vehicle-to-grid integration."
+        )
+        raw = {
+            "problem": {"value": None, "evidence": []},
+            "method": {"value": None, "evidence": []},
+            "contributions": [],
+            "limitations": [
+                {
+                    "value": "Battery degradation is a challenge for vehicle-to-grid integration.",
+                    "evidence": [
+                        {
+                            "snippet": "battery degradation remains a key challenge for vehicle-to-grid integration",
+                            "page": None,
+                            "section": None,
+                        }
+                    ],
+                }
+            ],
+            "evaluation_setup": {
+                "value": {"datasets": [], "metrics": [], "benchmarks": []},
+                "evidence": [],
+            },
+        }
+
+        result = self.service._normalize_result(raw, pages=[], input_text=input_text)
+
+        self.assertEqual(len(result["limitations"]), 1)
+        self.assertIn("Battery degradation", result["limitations"][0]["value"])
+
 
     def test_coerce_from_input_text_extracts_conclusion_metric_caveat(self):
         result = self.service._coerce_from_input_text(
