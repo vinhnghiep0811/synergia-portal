@@ -82,6 +82,11 @@ class SemanticScholarService:
             )
 
         if canonical.enrichment_status == "enriched":
+            # Attempt to heal any missing fields from already-saved Crossref verification data
+            if canonical.crossref_verification_json:
+                self._apply_crossref_verification(canonical, canonical.crossref_verification_json)
+                self.db.add(canonical)
+                self.db.commit()
             logger.info("[SS enrich] Already enriched, skipping: %s", canonical.id)
             return "skipped_already_enriched"
 

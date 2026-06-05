@@ -256,6 +256,37 @@ class SemanticScholarCrossrefVerificationReplacementTests(unittest.TestCase):
                 {"name": "A. K. Geim", "author_id": None},
             ]
         )
+    def test_run_for_canonical_document_heals_missing_fields_if_already_enriched(self) -> None:
+        canonical = SimpleNamespace(
+            id="canonical-1",
+            doi=None,
+            title=None,
+            publication_year=None,
+            venue=None,
+            abstract=None,
+            authors_json=None,
+            crossref_match_status=None,
+            crossref_match_confidence=None,
+            crossref_metadata_json=None,
+            crossref_verification_json={
+                "status": "verified",
+                "confidence": 0.95,
+                "fields": {
+                    "venue": {
+                        "status": "missing",
+                        "primary": None,
+                        "crossref": "Science",
+                    }
+                }
+            },
+            enrichment_status="enriched",
+        )
+        self.service.api_key = "test-key"
+
+        result = self.service.run_for_canonical_document(canonical)
+
+        self.assertEqual(result, "skipped_already_enriched")
+        self.assertEqual(canonical.venue, "Science")
 
 
 if __name__ == "__main__":
