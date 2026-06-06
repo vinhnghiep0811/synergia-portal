@@ -558,6 +558,25 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
         for line in lines
         if not _is_contextual_non_title_line(line, lines, page_width)
     ]
+
+    # Filter out extremely short lines (like acronyms or layout labels)
+    # if there is another line with a title-like size (>= 14.0) and >= 2 words.
+    filtered_usable = []
+    for line in usable:
+        text = line["text"]
+        words = _alpha_words(text)
+        if len(words) <= 1:
+            has_better_title_candidate = any(
+                candidate != line
+                and candidate["avg_size"] >= 14.0
+                and len(_alpha_words(candidate["text"])) >= 2
+                for candidate in usable
+            )
+            if has_better_title_candidate:
+                continue
+        filtered_usable.append(line)
+    usable = filtered_usable
+
     if not usable:
         return None
 

@@ -202,6 +202,38 @@ class DetectTitleTests(unittest.TestCase):
 
         self.assertEqual(title, "Quantized Electric Multipole Insulators")
 
+    def test_select_title_filters_out_short_acronym_lines_when_better_candidate_exists(self) -> None:
+        lines = [
+            {
+                "text": "OA",
+                "top": 198.5,
+                "x0": 74.1,
+                "x1": 162.9,
+                "width": 88.8,
+                "avg_size": 72.0,
+            },
+            {
+                "text": "Ocean Acidification",
+                "top": 231.5,
+                "x0": 217.5,
+                "x1": 451.2,
+                "width": 233.7,
+                "avg_size": 29.0,
+            },
+            {
+                "text": "Jean-Pierre Gattuso (France), Peter G. Brewer (USA)",
+                "top": 272.7,
+                "x0": 217.5,
+                "x1": 551.7,
+                "width": 334.2,
+                "avg_size": 9.5,
+            },
+        ]
+
+        title = _select_title_from_lines(lines, page_width=595.0)
+
+        self.assertEqual(title, "Ocean Acidification")
+
 
 if __name__ == "__main__":
     unittest.main()
