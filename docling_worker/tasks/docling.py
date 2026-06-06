@@ -34,7 +34,7 @@ _converter_no_tables: DocumentConverter | None = None
 def _normalize_block_text(value: str | None) -> str:
     if not isinstance(value, str):
         return ""
-    return " ".join(value.split()).strip()
+    return " ".join(value.split()).strip().replace("\x00", "")
 
 
 def _label_value(item: Any) -> str:
@@ -90,7 +90,7 @@ def build_docling_pages(document: Any) -> list[dict[str, Any]]:
 
     for page_no in page_numbers:
         try:
-            page_text = document.export_to_markdown(page_no=page_no).strip()
+            page_text = document.export_to_markdown(page_no=page_no).strip().replace("\x00", "")
         except Exception:
             logger.debug(
                 "[docling] Failed to export page markdown page=%s",
@@ -256,6 +256,8 @@ def extract_docling_text(paper_id: str) -> None:
         markdown = result.document.export_to_markdown()
         if not markdown or not markdown.strip():
             raise ValueError("Docling returned empty markdown")
+
+        markdown = markdown.replace("\x00", "")
 
         docling_pages = build_docling_pages(result.document)
 

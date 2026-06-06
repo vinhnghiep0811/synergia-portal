@@ -20,7 +20,7 @@ def build_structure(canonical_id: str):
         markdown_bytes = storage.download_by_storage_path(
             paper.docling_markdown_storage_path
         )
-        markdown = markdown_bytes.decode("utf-8")
+        markdown = markdown_bytes.decode("utf-8").replace("\x00", "")
 
         structure_service = DocumentStructureService()
 
