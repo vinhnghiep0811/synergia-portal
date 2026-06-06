@@ -118,6 +118,8 @@ def is_likely_noise(word: dict, page_width: float, page_height: float) -> bool:
         return True
 
     if height > width * 1.5 and len(text) <= 3:
+        if any(c.isalnum() for c in text):
+            return False
         return True
 
     return False
