@@ -64,6 +64,15 @@ class LLMInputBuilder:
         return "\n\n".join(parts).strip()
 
     def _extract_priority_tail(self, text: str, fallback_chars: int) -> str:
+        lowered = text.lower()
+        
+        # 1. Tìm ranh giới Main Paper (chặn trước References)
+        ref_pattern = r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?(?:references|bibliography|literature cited)\b"
+        ref_match = re.search(ref_pattern, lowered)
+        search_boundary = ref_match.start() if ref_match else len(text)
+        search_text = lowered[:search_boundary]
+
+        # 2. Danh sách từ khóa cần tìm
         patterns = [
             r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?limitations?\b",
             r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?challenges?\b",
@@ -75,29 +84,27 @@ class LLMInputBuilder:
             r"\n\s*(?:[ivxlcdm\d]+(?:\.[ivxlcdm\d]+)*\.?\s+)?conclusion\b",
         ]
 
-        lowered = text.lower()
-        best_idx = -1
-        half_len = len(text) // 2
+        valid_matches = []
+        half_len = len(search_text) * 0.4  # Tìm từ mốc 40% của bài báo trở đi
 
         for pattern in patterns:
-            # Quét tìm TẤT CẢ các match
-            matches = list(re.finditer(pattern, lowered))
-            if not matches:
-                continue
-                
-            # Duyệt ngược từ dưới lên, chỉ lấy mục nằm ở nửa sau bài báo
-            for m in reversed(matches):
-                if m.start() > half_len:
-                    if m.start() > best_idx:
-                        best_idx = m.start()
-                    break 
+            for match in re.finditer(pattern, search_text):
+                if match.start() > half_len:
+                    valid_matches.append(match.start())
 
-        if best_idx != -1:
-            # Lấy đoạn đuôi từ vị trí tìm thấy
+        if valid_matches:
+            # SỬA LỖI Ở ĐÂY: Lấy mốc XUẤT HIỆN SỚM NHẤT (min) thay vì muộn nhất
+            # Sẽ chọn "Limitations" (Trang 16) thay vì "Conclusion" (Trang 25)
+            best_idx = min(valid_matches)
             tail = text[best_idx:]
             return tail[:fallback_chars]
 
-        # Trả về fallback nếu không tìm thấy section
+        # Nếu không có từ khóa nào, lùi lại từ vị trí References
+        if ref_match:
+            start_idx = max(0, ref_match.start() - fallback_chars)
+            return text[start_idx : ref_match.start()]
+
+        # Fallback cuối cùng
         return text[-fallback_chars:] if len(text) > fallback_chars else text
 
     def _truncate_for_academic_paper(self, text: str, max_chars: int) -> str:
