@@ -303,7 +303,7 @@ def _looks_broken(lines: list[dict]) -> bool:
     dense_bad = 0
     for line in lines[:8]:
         text = line["text"]
-        if len(text) >= 20 and " " not in text:
+        if len(text) >= 50 and " " not in text:
             dense_bad += 1
     if dense_bad >= 2:
         return True
@@ -528,7 +528,8 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
     for i in range(seed_idx - 1, -1, -1):
         line = sorted_lines[i]
         gap = prev["top"] - line["top"]
-        if gap > 28:
+        max_gap = max(28.0, max(prev["avg_size"], line["avg_size"]) * 1.6)
+        if gap > max_gap:
             break
         if line["avg_size"] < seed["avg_size"] - 2.2:
             break
@@ -542,7 +543,8 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
     for i in range(seed_idx + 1, len(sorted_lines)):
         line = sorted_lines[i]
         gap = line["top"] - prev["top"]
-        if gap > 28:
+        max_gap = max(28.0, max(prev["avg_size"], line["avg_size"]) * 1.6)
+        if gap > max_gap:
             break
         if line["avg_size"] < seed["avg_size"] - 2.2:
             break
@@ -552,7 +554,9 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
         selected.append(line)
         prev = line
 
-    title = normalize_space(" ".join(line["text"] for line in selected))
+    title_joined = " ".join(line["text"] for line in selected)
+    title_dehyphenated = re.sub(r'-\s+', '-', title_joined)
+    title = normalize_space(title_dehyphenated)
     return title or None
 
 

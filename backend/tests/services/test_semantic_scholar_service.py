@@ -289,5 +289,26 @@ class SemanticScholarCrossrefVerificationReplacementTests(unittest.TestCase):
         self.assertEqual(canonical.venue, "Science")
 
 
+class SemanticScholarMergeTitlesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.service = object.__new__(SemanticScholarService)
+
+    def test_merge_titles_preserves_subtitles(self) -> None:
+        parsed = 'FULLY COUPLED “ONLINE” CHEMISTRY WITHIN THE WRF MODEL: DESCRIPTION AND APPLICATIONS'
+        api = 'Fully coupled “online” chemistry within the WRF model'
+        result = self.service._merge_titles(parsed, api)
+        self.assertEqual(result, 'Fully coupled “online” chemistry within the WRF model: Description And Applications')
+
+    def test_merge_titles_returns_api_title_when_identical_or_no_subtitle(self) -> None:
+        parsed = 'Some Title'
+        api = 'Some Title'
+        result = self.service._merge_titles(parsed, api)
+        self.assertEqual(result, 'Some Title')
+
+    def test_merge_titles_returns_non_none(self) -> None:
+        self.assertEqual(self.service._merge_titles(None, 'Title'), 'Title')
+        self.assertEqual(self.service._merge_titles('Title', None), 'Title')
+
+
 if __name__ == "__main__":
     unittest.main()
