@@ -350,7 +350,8 @@ def _looks_broken(lines: list[dict]) -> bool:
     dense_bad = 0
     for line in lines[:8]:
         text = line["text"]
-        if len(text) >= 50 and " " not in text:
+        # Skip lines containing commas (like author lists) to avoid false positives
+        if len(text) >= 50 and " " not in text and "," not in text:
             dense_bad += 1
     if dense_bad >= 2:
         return True
@@ -698,11 +699,12 @@ def _extract_two_column_page_text(page) -> str:
     if not _is_likely_two_column_page(page):
         return ""
 
-    mid = page.width / 2
+    x0, y0, x1, y1 = page.bbox
+    mid_x = x0 + (x1 - x0) / 2
     gutter = 2
     bboxes = [
-        (0, 0, mid - gutter, page.height),
-        (mid + gutter, 0, page.width, page.height),
+        (x0, y0, mid_x - gutter, y1),
+        (mid_x + gutter, y0, x1, y1),
     ]
 
     parts: list[str] = []
@@ -804,9 +806,14 @@ def clean_line(line: str) -> str:
 
 
 def _title_looks_merged(title: str) -> bool:
-    """Kiểm tra title có vẻ bị gộp 2 cột (có token dài không space >= 20 ký tự)."""
+    """Kiểm tra title có vẻ bị gộp 2 cột (có token dài không space >= 20 ký tự, bỏ qua URL)."""
     tokens = title.split()
-    long_spaceless = sum(1 for t in tokens if len(t) >= 20 and t.isalpha())
+    long_spaceless = 0
+    for t in tokens:
+        if t.startswith("http://") or t.startswith("https://") or "www." in t:
+            continue
+        if len(t) >= 20:
+            long_spaceless += 1
     return long_spaceless >= 1 or " " not in title.strip()
 
 
@@ -825,8 +832,9 @@ def detect_title(file_path: str) -> Optional[str]:
 
         # Nếu title từ toàn trang trông như bị gộp 2 cột, thử crop cột phải
         if (title is None or _title_looks_merged(title)) and _is_likely_two_column_page(first_page):
-            mid = first_page.width / 2
-            right_crop = first_page.crop((mid, 0, first_page.width, first_page.height))
+            x0, y0, x1, y1 = first_page.bbox
+            mid_x = x0 + (x1 - x0) / 2
+            right_crop = first_page.crop((mid_x, y0, x1, y1))
             right_lines = _extract_lines_from_words(right_crop)
             if right_lines:
                 right_title = _select_title_from_lines(right_lines, right_crop.width)
