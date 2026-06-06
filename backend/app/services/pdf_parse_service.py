@@ -37,6 +37,7 @@ ARTICLE_TYPE_LABELS = {
     "editorial",
     "letter",
     "opinion",
+    "opinion paper",
     "perspective",
     "research",
     "research article",
@@ -74,6 +75,47 @@ def normalize_ligatures(text: str) -> str:
     return text
 
 
+def _is_repository_cover_page(page) -> bool:
+    try:
+        text = page.extract_text() or ""
+    except Exception:
+        return False
+    t = text.lower()
+    cover_page_keywords = [
+        "delft university of technology",
+        "institutional repository",
+        "downloaded from",
+        "taverne project",
+        "research online",
+        "open access repository",
+        "university repository",
+        "citation (apa)",
+        "document version",
+        "green open access"
+    ]
+    matches = [kw for kw in cover_page_keywords if kw in t]
+    if len(matches) >= 2:
+        return True
+    if len(matches) >= 1 and len(t) < 1500 and "repository" in t:
+        return True
+    return False
+
+
+def _find_actual_start_page_idx(pdf) -> int:
+    for idx in range(min(5, len(pdf.pages))):
+        page = pdf.pages[idx]
+        if _is_repository_cover_page(page):
+            continue
+        try:
+            txt = page.extract_text() or ""
+        except Exception:
+            txt = ""
+        if len(txt.strip()) < 800 and ("open access" in txt.lower() or "taverne" in txt.lower() or "repository" in txt.lower()):
+            continue
+        return idx
+    return 0
+
+
 def extract_pdf_full_text(
     file_path: str,
     max_pages: Optional[int] = None,
@@ -81,7 +123,10 @@ def extract_pdf_full_text(
     texts: list[str] = []
 
     with pdfplumber.open(file_path) as pdf:
-        pages = pdf.pages if max_pages is None else pdf.pages[:max_pages]
+        start_idx = _find_actual_start_page_idx(pdf)
+        pages = pdf.pages[start_idx:]
+        if max_pages is not None:
+            pages = pages[:max_pages]
 
         for page in pages:
             page_text = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
@@ -317,6 +362,12 @@ def _is_non_title_text(text: str) -> bool:
     t = text.lower().strip()
     return (
         "doi:" in t
+        or "journal homepage:" in t
+        or "contents lists available at" in t
+        or "sciencedirect" in t
+        or "elsevier" in t
+        or "journal of" in t
+        or "international journal" in t
         or re.match(r"^abstract\b", t) is not None
         or re.match(r"^keywords?\b", t) is not None
         or "downloaded from" in t
@@ -677,7 +728,8 @@ def extract_pdf_text_for_llm(
     full_parts: list[str] = []
 
     with pdfplumber.open(file_path) as pdf:
-        for idx, page in enumerate(pdf.pages, start=1):
+        start_idx = _find_actual_start_page_idx(pdf)
+        for idx, page in enumerate(pdf.pages[start_idx:], start=1):
             text = _extract_page_text_for_llm(page).strip()
 
             pages.append({
@@ -738,7 +790,8 @@ def detect_title(file_path: str) -> Optional[str]:
         if not pdf.pages:
             return None
 
-        first_page = pdf.pages[0]
+        start_idx = _find_actual_start_page_idx(pdf)
+        first_page = pdf.pages[start_idx]
 
         word_lines = _extract_lines_from_words(first_page)
         if word_lines and not _looks_broken(word_lines):
