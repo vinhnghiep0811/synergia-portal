@@ -389,6 +389,45 @@ class LLMExtractionServiceLimitationsTests(unittest.TestCase):
         self.assertEqual(len(result["limitations"]), 1)
         self.assertIn("Battery degradation", result["limitations"][0]["value"])
 
+    def test_normalize_result_keeps_limitation_from_composite_heading_section(self):
+        """Regression: 'Limitations & Ethical Considerations' heading was not detected by
+        _section_from_heading_line (fullmatch), so the section content was absorbed into the
+        previous chunk. Snippets were then inferred as 'introduction' context and dropped."""
+        input_text = (
+            "[PAPER_TEXT]\n"
+            "## 1. Introduction\n"
+            "We introduce The AI Scientist-v2.\n"
+            "## 5. Limitations & Ethical Considerations\n"
+            "Researchers could misuse the system for unsafe or unethical purposes.\n"
+            "## 7. Conclusion\n"
+            "We conclude our work.\n"
+        )
+        raw = {
+            "problem": {"value": None, "evidence": []},
+            "method": {"value": None, "evidence": []},
+            "contributions": [],
+            "limitations": [
+                {
+                    "value": "The system could be misused for unsafe or unethical purposes.",
+                    "evidence": [
+                        {
+                            "snippet": "Researchers could misuse the system for unsafe or unethical purposes",
+                            "page": None,
+                            "section": None,
+                        }
+                    ],
+                }
+            ],
+            "evaluation_setup": {
+                "value": {"datasets": [], "metrics": [], "benchmarks": []},
+                "evidence": [],
+            },
+        }
+
+        result = self.service._normalize_result(raw, pages=[], input_text=input_text)
+
+        self.assertEqual(len(result["limitations"]), 1)
+        self.assertIn("misused", result["limitations"][0]["value"])
 
     def test_coerce_from_input_text_extracts_conclusion_metric_caveat(self):
         result = self.service._coerce_from_input_text(
@@ -404,6 +443,7 @@ class LLMExtractionServiceLimitationsTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(len(result["limitations"]), 1)
         self.assertIn("ROUGE", result["limitations"][0]["value"])
+
 
     def test_normalize_result_drops_metric_caveat_from_introduction_context(self):
         input_text = (

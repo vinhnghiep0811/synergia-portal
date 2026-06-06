@@ -385,6 +385,13 @@ class LLMExtractionService:
         if any(re.fullmatch(pattern, normalized) for pattern in known_heading_patterns):
             return normalized
 
+        # Fallback: composite headings like "Limitations & Ethical Considerations"
+        # won't fullmatch any single pattern, but still contain a meaningful keyword.
+        # Use _is_allowed_limitation_section (which uses re.search) as a secondary check
+        # so these headings create their own chunk and are not absorbed into the previous section.
+        if self._is_allowed_limitation_section(normalized):
+            return normalized
+
         return None
 
     def _section_chunks_from_input_text(self, input_text: str) -> list[dict[str, Any]]:
