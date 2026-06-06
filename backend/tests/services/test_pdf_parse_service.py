@@ -235,5 +235,29 @@ class DetectTitleTests(unittest.TestCase):
         self.assertEqual(title, "Ocean Acidification")
 
 
+    def test_publication_header_with_month_year_typos_is_not_title_text(self) -> None:
+        self.assertTrue(_is_non_title_text("PHYSICARLESEARCH FEBRUAR1Y0 1977"))
+        self.assertTrue(_is_non_title_text("Science October 2004"))
+        self.assertTrue(_is_non_title_text("February 1977"))
+
+    def test_is_valid_metadata_title(self) -> None:
+        from app.services.pdf_parse_service import _is_valid_metadata_title
+        self.assertTrue(_is_valid_metadata_title("AN ANALYSIS OF THE VARIATION OF OCEAN FLOOR BATHYMETRY"))
+        self.assertFalse(_is_valid_metadata_title("Microsoft Word - science.doc"))
+        self.assertFalse(_is_valid_metadata_title("untitled"))
+        self.assertFalse(_is_valid_metadata_title("S401_23b 360..363"))
+        self.assertFalse(_is_valid_metadata_title("Vol. 82, No. 5"))
+
+    def test_verify_metadata_title_on_page(self) -> None:
+        from app.services.pdf_parse_service import _verify_metadata_title_on_page
+        meta = "AN ANALYSIS OF THE VARIATION OF OCEAN FLOOR BATHYMETRY"
+        page_text = "This page contains AN ANALYSIS OF THE VARIATION OF OCEAN FLOOR BATHYMETRY and other details."
+        self.assertTrue(_verify_metadata_title_on_page(meta, page_text))
+        
+        # Test fuzzy matching (e.g. OCR error 'BATHYMETRY' -> 'BATHYMETR1')
+        page_text_fuzzy = "This page contains AN ANALYSIS OF THE VARIATION OF OCEAN FLOOR BATHYMETR1 and other details."
+        self.assertTrue(_verify_metadata_title_on_page(meta, page_text_fuzzy))
+
+
 if __name__ == "__main__":
     unittest.main()

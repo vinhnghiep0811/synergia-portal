@@ -67,7 +67,7 @@ export function PaperDashboard() {
       }
       setListError("");
 
-      const data = await getPapers(0, 50);
+      const data = await getPapers(0, 1000);
       const mappedPapers = data.map(mapPaperListItem);
 
       // Fetch chi tiết cho processed papers (chỉ 1 lần)

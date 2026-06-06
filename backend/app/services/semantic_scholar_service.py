@@ -358,41 +358,8 @@ class SemanticScholarService:
         return 0.6 * seq_score + 0.4 * token_score
 
     def _merge_titles(self, parsed_title: str | None, api_title: str | None) -> str | None:
-        if not parsed_title:
-            return api_title
         if not api_title:
             return parsed_title
-
-        normalized_parsed = self._normalize_title(parsed_title)
-        normalized_api = self._normalize_title(api_title)
-
-        if not normalized_api:
-            return parsed_title
-        if not normalized_parsed:
-            return api_title
-
-        if normalized_parsed.startswith(normalized_api) and len(normalized_parsed) > len(normalized_api):
-            matched_alnum_count = sum(1 for c in normalized_api if c.isalnum())
-            
-            alnum_seen = 0
-            split_idx = 0
-            for i, c in enumerate(parsed_title):
-                if c.isalnum():
-                    alnum_seen += 1
-                if alnum_seen == matched_alnum_count:
-                    split_idx = i + 1
-                    break
-            
-            if split_idx > 0:
-                suffix = parsed_title[split_idx:]
-                if suffix.isupper():
-                    suffix = suffix.title()
-                
-                merged = api_title + suffix
-                import re
-                merged = re.sub(r"\s+", " ", merged).strip()
-                return merged
-
         return api_title
 
     def _get_by_doi(self, doi: str) -> tuple[dict[str, Any] | None, bool]:

@@ -29,6 +29,11 @@ PUBLICATION_DAY_MONTH_HEADER_REGEX = re.compile(
     rf"\d{{1,2}}\s+{MONTH_NAME_PATTERN},?\s*\(?\d{{4}}\)?$",
     re.IGNORECASE,
 )
+PUBLICATION_MONTH_YEAR_HEADER_REGEX = re.compile(
+    rf"^(?:[A-Z][A-Za-z.&'+-]*(?:\s+[A-Z][A-Za-z.&'+-]*){{0,5}}\s+)?"
+    rf"(?:{MONTH_NAME_PATTERN}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z0-9]*)\s*\(?\d{{4}}\)?$",
+    re.IGNORECASE,
+)
 ARTICLE_TYPE_LABELS = {
     "article",
     "brief report",
@@ -385,6 +390,9 @@ def _is_non_title_text(text: str) -> bool:
         or re.match(r"^abstract\b", t) is not None
         or re.match(r"^keywords?\b", t) is not None
         or "downloaded from" in t
+        or "research explorer" in t
+        or "citation for published" in t
+        or "publication record" in t
         or "creative commons" in t
         or "open access" in t
         or "published by" in t
@@ -413,6 +421,7 @@ def _looks_like_publication_header(text: str) -> bool:
     return (
         PUBLICATION_MONTH_DAY_HEADER_REGEX.match(normalized) is not None
         or PUBLICATION_DAY_MONTH_HEADER_REGEX.match(normalized) is not None
+        or PUBLICATION_MONTH_YEAR_HEADER_REGEX.match(normalized) is not None
     )
 
 
@@ -836,13 +845,119 @@ def _title_looks_merged(title: str) -> bool:
     return long_spaceless >= 1 or " " not in title.strip()
 
 
+def _is_valid_metadata_title(title: Optional[str]) -> bool:
+    if not title:
+        return False
+    t = title.strip()
+    if not t:
+        return False
+    
+    t_lower = t.lower()
+    
+    # Exclude typical document/template names, file extensions, etc.
+    generic_patterns = [
+        r"^microsoft word\b",
+        r"^untitled\b",
+        r"^document\d*$",
+        r"^page\s+\d+$",
+        r"^template\b",
+        r"\.pdf$",
+        r"\.docx?$",
+        r"^paper\s+\d+$",
+        r"date of publication",
+    ]
+    for pattern in generic_patterns:
+        if re.search(pattern, t_lower):
+            return False
+            
+    # Exclude journal details like volume, issue, page range, etc.
+    # to avoid using a journal citation header as title metadata
+    journal_patterns = [
+        r"\b(vol|no|pp|issue|pages)\b\.?\s*\d+",
+        r"\b(journal|proceedings|symposium|conference)\b.*\b\d{4}\b",
+    ]
+    for pattern in journal_patterns:
+        if re.search(pattern, t_lower):
+            return False
+
+    words = t.split()
+    if len(words) < 3:
+        return False
+        
+    # Check if title contains enough letters (not just digits/punctuation)
+    letters = sum(1 for c in t if c.isalpha())
+    if letters < len(t) * 0.4:
+        return False
+        
+    return True
+
+
+def _verify_metadata_title_on_page(meta_title: str, page_text: str) -> bool:
+    if not _is_valid_metadata_title(meta_title):
+        return False
+        
+    def clean_word(w):
+        return re.sub(r"[^a-z0-9]", "", w.lower())
+        
+    meta_words = [clean_word(w) for w in meta_title.split() if clean_word(w)]
+    if len(meta_words) < 3:
+        return False
+        
+    page_words = [clean_word(w) for w in page_text.split() if clean_word(w)]
+    if not page_words:
+        return False
+        
+    from difflib import SequenceMatcher
+    matched_count = 0
+    # Search within the first 350 words of the page (typical title area)
+    search_limit = min(350, len(page_words))
+    for mw in meta_words:
+        found = False
+        for pw in page_words[:search_limit]:
+            if mw == pw:
+                found = True
+                break
+            elif len(mw) > 4 and SequenceMatcher(None, mw, pw).ratio() > 0.8:
+                found = True
+                break
+        if found:
+            matched_count += 1
+            
+    ratio = matched_count / len(meta_words)
+    return ratio >= 0.75
+
+
+def _get_text_similarity(a: str, b: str) -> float:
+    from difflib import SequenceMatcher
+    na = "".join(c for c in a.lower() if c.isalnum())
+    nb = "".join(c for c in b.lower() if c.isalnum())
+    if not na or not nb:
+        return 0.0
+    return SequenceMatcher(None, na, nb).ratio()
+
+
 def detect_title(file_path: str) -> Optional[str]:
     with pdfplumber.open(file_path) as pdf:
         if not pdf.pages:
             return None
 
+        # Try to retrieve and unescape metadata title first
+        meta_title = pdf.metadata.get("Title")
+        if meta_title:
+            import html
+            meta_title = html.unescape(meta_title).strip()
+            # Normalize internal spaces
+            meta_title = re.sub(r"\s+", " ", meta_title)
+
         start_idx = _find_actual_start_page_idx(pdf)
         first_page = pdf.pages[start_idx]
+
+        # Extract page text for metadata verification
+        page_text = ""
+        try:
+            page_text = first_page.extract_text() or ""
+        except Exception:
+            pass
 
         word_lines = _extract_lines_from_words(first_page)
         title = None
@@ -858,7 +973,24 @@ def detect_title(file_path: str) -> Optional[str]:
             if right_lines:
                 right_title = _select_title_from_lines(right_lines, right_crop.width)
                 if right_title and not _title_looks_merged(right_title):
-                    return right_title
+                    title = right_title
+
+        # Check if the visually extracted title is missing, low quality or completely different
+        # from a verified metadata title.
+        is_meta_verified = False
+        if meta_title and page_text:
+            is_meta_verified = _verify_metadata_title_on_page(meta_title, page_text)
+
+        if is_meta_verified:
+            # If visual extraction succeeded, check similarity
+            if title:
+                similarity = _get_text_similarity(title, meta_title)
+                if similarity < 0.65:
+                    # Visual extraction got a completely different title, use verified metadata title
+                    title = meta_title
+            else:
+                # Visual extraction failed entirely, fallback to verified metadata title
+                title = meta_title
 
         if title:
             return title

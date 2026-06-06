@@ -293,11 +293,11 @@ class SemanticScholarMergeTitlesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = object.__new__(SemanticScholarService)
 
-    def test_merge_titles_preserves_subtitles(self) -> None:
+    def test_merge_titles_prioritizes_api_title(self) -> None:
         parsed = 'FULLY COUPLED “ONLINE” CHEMISTRY WITHIN THE WRF MODEL: DESCRIPTION AND APPLICATIONS'
         api = 'Fully coupled “online” chemistry within the WRF model'
         result = self.service._merge_titles(parsed, api)
-        self.assertEqual(result, 'Fully coupled “online” chemistry within the WRF model: Description And Applications')
+        self.assertEqual(result, 'Fully coupled “online” chemistry within the WRF model')
 
     def test_merge_titles_returns_api_title_when_identical_or_no_subtitle(self) -> None:
         parsed = 'Some Title'
