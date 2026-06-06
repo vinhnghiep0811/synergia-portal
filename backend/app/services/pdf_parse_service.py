@@ -358,16 +358,29 @@ def _looks_broken(lines: list[dict]) -> bool:
     return False
 
 
+def _is_separator_line(text: str) -> bool:
+    """Trả về True nếu text là đường kẻ phân cách (toàn dấu chấm, gạch ngang, dấu gạch dưới).
+    Ví dụ: Nature dùng '.................................................................' giữa các bài báo.
+    """
+    stripped = text.strip()
+    if len(stripped) < 8:
+        return False
+    non_sep = re.sub(r"[.\-_=*~\s]", "", stripped)
+    return len(non_sep) == 0
+
+
 def _is_non_title_text(text: str) -> bool:
     t = text.lower().strip()
     return (
-        "doi:" in t
+        _is_separator_line(text)
+        or "doi:" in t
         or "journal homepage:" in t
         or "contents lists available at" in t
         or "sciencedirect" in t
         or "elsevier" in t
         or "journal of" in t
         or "international journal" in t
+        or "et al" in t
         or re.match(r"^abstract\b", t) is not None
         or re.match(r"^keywords?\b", t) is not None
         or "downloaded from" in t
@@ -375,6 +388,10 @@ def _is_non_title_text(text: str) -> bool:
         or "open access" in t
         or "published by" in t
         or "@" in t
+        or re.search(r"\b(science|nature|cell|proceedings|journal|springer|ieee|elsevier|acm)\b.*\b\d{4}\b", t) is not None
+        or re.search(r"\b(vol|no|pp|issue|pages)\b\.?\s*\d+", t) is not None
+        or re.search(r"\b\d+\s*(?:\(\d+\))?\s*:\s*\d+[-–]\d+\b", t) is not None
+        or re.search(r"\b\d+\s+\d+\s+\(\d{4}\)", t) is not None
         or _looks_like_article_type_label(text)
         or _looks_like_publication_header(text)
         or _looks_like_author_line(text)
@@ -681,7 +698,7 @@ def _extract_two_column_page_text(page) -> str:
         return ""
 
     mid = page.width / 2
-    gutter = max(6, page.width * 0.015)
+    gutter = 2
     bboxes = [
         (0, 0, mid - gutter, page.height),
         (mid + gutter, 0, page.width, page.height),
@@ -785,6 +802,13 @@ def clean_line(line: str) -> str:
     return line
 
 
+def _title_looks_merged(title: str) -> bool:
+    """Kiểm tra title có vẻ bị gộp 2 cột (có token dài không space >= 20 ký tự)."""
+    tokens = title.split()
+    long_spaceless = sum(1 for t in tokens if len(t) >= 20 and t.isalpha())
+    return long_spaceless >= 1 or " " not in title.strip()
+
+
 def detect_title(file_path: str) -> Optional[str]:
     with pdfplumber.open(file_path) as pdf:
         if not pdf.pages:
@@ -794,10 +818,22 @@ def detect_title(file_path: str) -> Optional[str]:
         first_page = pdf.pages[start_idx]
 
         word_lines = _extract_lines_from_words(first_page)
+        title = None
         if word_lines and not _looks_broken(word_lines):
             title = _select_title_from_lines(word_lines, first_page.width)
-            if title:
-                return title
+
+        # Nếu title từ toàn trang trông như bị gộp 2 cột, thử crop cột phải
+        if (title is None or _title_looks_merged(title)) and _is_likely_two_column_page(first_page):
+            mid = first_page.width / 2
+            right_crop = first_page.crop((mid, 0, first_page.width, first_page.height))
+            right_lines = _extract_lines_from_words(right_crop)
+            if right_lines:
+                right_title = _select_title_from_lines(right_lines, right_crop.width)
+                if right_title and not _title_looks_merged(right_title):
+                    return right_title
+
+        if title:
+            return title
 
         char_lines = _extract_lines_from_chars(first_page)
         if char_lines:
@@ -807,6 +843,7 @@ def detect_title(file_path: str) -> Optional[str]:
 
         title = _select_title_from_lines(word_lines, first_page.width)
         return title
+
 
 
 def normalize_text_for_fingerprint(text: str) -> str:
