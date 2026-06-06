@@ -67,6 +67,14 @@ class DetectTitleTests(unittest.TestCase):
     def test_article_type_label_is_not_title_text(self) -> None:
         self.assertTrue(_is_non_title_text("Review"))
 
+    def test_document_labels_are_not_title_text(self) -> None:
+        self.assertTrue(_is_non_title_text("SPM5"))
+        self.assertTrue(_is_non_title_text("SPM 5"))
+        self.assertTrue(_is_non_title_text("Chapter 5"))
+        self.assertTrue(_is_non_title_text("WGII"))
+        self.assertTrue(_is_non_title_text("WG1"))
+        self.assertTrue(_is_non_title_text("Section A"))
+
     def test_initialed_author_line_is_not_title_text(self) -> None:
         self.assertTrue(
             _is_non_title_text(

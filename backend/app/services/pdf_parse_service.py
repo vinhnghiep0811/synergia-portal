@@ -392,6 +392,7 @@ def _is_non_title_text(text: str) -> bool:
         or re.search(r"\b(vol|no|pp|issue|pages)\b\.?\s*\d+", t) is not None
         or re.search(r"\b\d+\s*(?:\(\d+\))?\s*:\s*\d+[-–]\d+\b", t) is not None
         or re.search(r"\b\d+\s+\d+\s+\(\d{4}\)", t) is not None
+        or re.match(r"^(?:spm|wg\d+|wg[ivxl]+|chapter|section|part|annex)\s*\d*[a-z]*$", t) is not None
         or _looks_like_article_type_label(text)
         or _looks_like_publication_header(text)
         or _looks_like_author_line(text)
