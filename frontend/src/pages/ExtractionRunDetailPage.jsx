@@ -3,6 +3,21 @@ import { useParams, useNavigate } from "react-router-dom";
 import { getExtractionRunDetail } from "../services/paperApi.js";
 import { AppHeader } from "../components/AppHeader.jsx";
 
+// TODO: đặt false sau khi kiểm chứng xong
+const USE_MOCK_EVALUATION_SETUP = false;
+const MOCK_EVALUATION_SETUP = {
+  value: {
+    datasets: ["QM9", "ImageNet"],
+    metrics: ["mean absolute error", "error ratio", "accuracy"],
+    benchmarks: [
+      "hand‑engineered molecular representations (Coulomb Matrix, Bag of Bonds, BAML, ECFP4, HDAD)",
+      "Molecular Graph Convolution (GC)",
+      "Gated Graph Neural Network (GG‑NN)",
+    ],
+  },
+  evidence: [],
+};
+
 export function ExtractionRunDetailPage() {
   const { runId } = useParams();
   const navigate = useNavigate();
@@ -196,7 +211,9 @@ export function ExtractionRunDetailPage() {
             border: "1px solid #e2e8f0",
             color: "#334155",
             lineHeight: "1.8",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
+            boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+            minWidth: 0,
+            overflow: "hidden",
           }}
         >
           {typeof field.value === "object"
@@ -208,7 +225,12 @@ export function ExtractionRunDetailPage() {
                   borderRadius: "8px",
                   overflow: "auto",
                   fontSize: ".85rem",
-                  border: "1px solid #e2e8f0"
+                  border: "1px solid #e2e8f0",
+                  margin: 0,
+                  maxWidth: "100%",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  overflowWrap: "break-word",
                 }}
               >
                 {JSON.stringify(
@@ -610,7 +632,8 @@ export function ExtractionRunDetailPage() {
                   gridTemplateColumns:
                     "1fr 1fr",
                   gap: "2rem",
-                  marginTop: "1rem"
+                  marginTop: "1rem",
+                  minWidth: 0,
                 }}
               >
                 <div
@@ -618,7 +641,8 @@ export function ExtractionRunDetailPage() {
                     display: "flex",
                     flexDirection:
                       "column",
-                    gap: "0"
+                    gap: "0",
+                    minWidth: 0,
                   }}
                 >
                   <div className="card" style={{ padding: "1.5rem", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
@@ -648,7 +672,8 @@ export function ExtractionRunDetailPage() {
                     display: "flex",
                     flexDirection:
                       "column",
-                    gap: "0"
+                    gap: "0",
+                    minWidth: 0,
                   }}
                 >
                   <div className="card" style={{ padding: "1.5rem", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
@@ -658,10 +683,12 @@ export function ExtractionRunDetailPage() {
                     )}
                   </div>
 
-                  <div className="card" style={{ padding: "1.5rem", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
+                  <div className="card" style={{ padding: "1.5rem", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 2px 4px rgba(0,0,0,0.05)", minWidth: 0 }}>
                     {renderValueWithEvidence(
                       "V.Thiết lập đánh giá",
-                      run.evaluation_setup
+                      USE_MOCK_EVALUATION_SETUP
+                        ? MOCK_EVALUATION_SETUP
+                        : run.evaluation_setup
                     )}
                   </div>
                 </div>

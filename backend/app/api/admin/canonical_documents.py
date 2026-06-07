@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func, or_
-from typing import Optional
+from typing import Optional, List, Any
 from uuid import UUID
+import json
 
 from app.core.database import get_db
 from app.core.security import require_admin
@@ -117,6 +118,82 @@ def get_admin_canonical_documents(
             "total_pages": total_pages,
         },
     }
+
+
+@router.get("/canonical-documents/export", response_model=List[Any])
+def export_canonical_documents_metadata(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    canonical_docs = (
+        db.query(CanonicalDocument)
+        .options(
+            selectinload(CanonicalDocument.latest_extraction_run),
+            selectinload(CanonicalDocument.papers),
+        )
+        .all()
+    )
+
+    export_data = []
+    for doc in canonical_docs:
+        run = doc.latest_extraction_run
+        
+        # Format authors
+        authors = []
+        if isinstance(doc.authors_json, list):
+            for a in doc.authors_json:
+                if isinstance(a, dict):
+                    authors.append(a.get("name", ""))
+                else:
+                    authors.append(str(a))
+        elif isinstance(doc.authors_json, str):
+            try:
+                parsed_authors = json.loads(doc.authors_json)
+                if isinstance(parsed_authors, list):
+                    for a in parsed_authors:
+                        if isinstance(a, dict):
+                            authors.append(a.get("name", ""))
+                        else:
+                            authors.append(str(a))
+            except Exception:
+                authors = [doc.authors_json]
+
+        # Extract LLM fields
+        problem = None
+        method = None
+        contributions = []
+        limitations = []
+        evaluation_setup = None
+
+        if run and run.status == "completed":
+            problem = run.problem_statement
+            method = run.main_method
+            contributions = run.contributions or []
+            limitations = run.limitations or []
+            evaluation_setup = run.evaluation_setup
+
+        # Get original filename
+        original_filenames = [p.original_filename for p in doc.papers if p.original_filename]
+        original_filename = original_filenames[0] if original_filenames else None
+
+        export_data.append({
+            "id": str(doc.id),
+            "canonical_key": doc.canonical_key,
+            "title": doc.title or doc.title_candidate,
+            "abstract": doc.abstract,
+            "year": doc.publication_year,
+            "venue": doc.venue,
+            "authors": authors,
+            "doi": doc.doi,
+            "original_filename": original_filename,
+            "problem": problem,
+            "method": method,
+            "contributions": contributions,
+            "limitations": limitations,
+            "evaluation_setup": evaluation_setup,
+        })
+    return export_data
+
 
 @router.get("/canonical-documents/{canonical_id}", response_model=CanonicalDocumentResponse)
 def get_admin_canonical_document_detail(

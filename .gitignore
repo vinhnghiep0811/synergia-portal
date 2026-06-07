@@ -49,8 +49,9 @@ frontend/.env.*
 !frontend/.env.example
 
 # Report artifacts and source
+artifacts/
 report/
-
+dataset/
 /data_set
 /result_set
 CLAUDE.md

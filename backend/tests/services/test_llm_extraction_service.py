@@ -333,11 +333,101 @@ class LLMExtractionServiceLimitationsTests(unittest.TestCase):
                 "evidence": [],
             },
         }
-
         result = self.service._normalize_result(raw, pages=[], input_text=input_text)
 
         self.assertEqual(len(result["limitations"]), 1)
         self.assertIn("extend the model", result["limitations"][0]["value"])
+
+    def test_is_allowed_limitation_section_matches_new_headings(self):
+        new_headings = [
+            "Future Trends and Challenges",
+            "future trends",
+            "Challenges",
+            "Open Problems",
+            "Perspectives",
+            "Future Directions",
+            "Future Research",
+            "threats",
+            "threats to validity"
+        ]
+        for heading in new_headings:
+            with self.subTest(heading=heading):
+                self.assertTrue(self.service._is_allowed_limitation_section(heading))
+
+    def test_normalize_result_keeps_limitation_from_future_trends_and_challenges_context(self):
+        input_text = (
+            "[PAPER_TEXT]\n"
+            "1 Introduction\n"
+            "We introduce a model for machine translation.\n"
+            "9 Future Trends and Challenges\n"
+            "However, battery degradation remains a key challenge for vehicle-to-grid integration."
+        )
+        raw = {
+            "problem": {"value": None, "evidence": []},
+            "method": {"value": None, "evidence": []},
+            "contributions": [],
+            "limitations": [
+                {
+                    "value": "Battery degradation is a challenge for vehicle-to-grid integration.",
+                    "evidence": [
+                        {
+                            "snippet": "battery degradation remains a key challenge for vehicle-to-grid integration",
+                            "page": None,
+                            "section": None,
+                        }
+                    ],
+                }
+            ],
+            "evaluation_setup": {
+                "value": {"datasets": [], "metrics": [], "benchmarks": []},
+                "evidence": [],
+            },
+        }
+
+        result = self.service._normalize_result(raw, pages=[], input_text=input_text)
+
+        self.assertEqual(len(result["limitations"]), 1)
+        self.assertIn("Battery degradation", result["limitations"][0]["value"])
+
+    def test_normalize_result_keeps_limitation_from_composite_heading_section(self):
+        """Regression: 'Limitations & Ethical Considerations' heading was not detected by
+        _section_from_heading_line (fullmatch), so the section content was absorbed into the
+        previous chunk. Snippets were then inferred as 'introduction' context and dropped."""
+        input_text = (
+            "[PAPER_TEXT]\n"
+            "## 1. Introduction\n"
+            "We introduce The AI Scientist-v2.\n"
+            "## 5. Limitations & Ethical Considerations\n"
+            "Researchers could misuse the system for unsafe or unethical purposes.\n"
+            "## 7. Conclusion\n"
+            "We conclude our work.\n"
+        )
+        raw = {
+            "problem": {"value": None, "evidence": []},
+            "method": {"value": None, "evidence": []},
+            "contributions": [],
+            "limitations": [
+                {
+                    "value": "The system could be misused for unsafe or unethical purposes.",
+                    "evidence": [
+                        {
+                            "snippet": "Researchers could misuse the system for unsafe or unethical purposes",
+                            "page": None,
+                            "section": None,
+                        }
+                    ],
+                }
+            ],
+            "evaluation_setup": {
+                "value": {"datasets": [], "metrics": [], "benchmarks": []},
+                "evidence": [],
+            },
+        }
+
+        result = self.service._normalize_result(raw, pages=[], input_text=input_text)
+
+        self.assertEqual(len(result["limitations"]), 1)
+        self.assertIn("misused", result["limitations"][0]["value"])
 
     def test_coerce_from_input_text_extracts_conclusion_metric_caveat(self):
         result = self.service._coerce_from_input_text(
@@ -353,6 +443,7 @@ class LLMExtractionServiceLimitationsTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(len(result["limitations"]), 1)
         self.assertIn("ROUGE", result["limitations"][0]["value"])
+
 
     def test_normalize_result_drops_metric_caveat_from_introduction_context(self):
         input_text = (
@@ -400,6 +491,15 @@ class LLMExtractionServiceResearchFieldTests(unittest.TestCase):
     def setUp(self):
         self.service = object.__new__(LLMExtractionService)
 
+    def test_repair_joined_text_does_not_split_metal_terms(self):
+        repaired = self.service._repair_joined_extraction_text(
+            "metal metallic all-metallic Metal. Aetal. reported the result."
+        )
+
+        self.assertIn("metal metallic all-metallic Metal.", repaired)
+        self.assertIn("A et al. reported the result.", repaired)
+        self.assertNotIn("m et al.", repaired)
+
     def test_coerce_prefers_current_paper_method_over_cited_prior_work(self):
         result = self.service._coerce_from_input_text(
             "[PAPER_TEXT]\n"
@@ -413,6 +513,48 @@ class LLMExtractionServiceResearchFieldTests(unittest.TestCase):
         self.assertIn("Weighted Transformer", result["method"]["value"])
         self.assertNotIn("Vaswani", result["method"]["value"])
 
+    def test_normalize_contributions_keeps_training_and_transfer_claim(self):
+        normalized = self.service._normalize_contributions_field(
+            [
+                {
+                    "value": (
+                        "The paper analyzes several language pairs and demonstrates "
+                        "transfer of encoder knowledge to low-resource languages."
+                    ),
+                    "evidence": [
+                        {
+                            "snippet": (
+                                "we train the Transformer system from English to seven languages "
+                                "... we also test attention in a transfer learning scenario"
+                            ),
+                            "page": 1,
+                            "section": "Abstract",
+                        }
+                    ],
+                }
+            ]
+        )
+
+        self.assertEqual(len(normalized), 1)
+        self.assertIn("transfer of encoder knowledge", normalized[0]["value"])
+
+    def test_normalize_contributions_keeps_relaxed_past_tense_verbs(self):
+        normalized = self.service._normalize_contributions_field(
+            [
+                {
+                    "value": "Realized an all-metallic transistor.",
+                    "evidence": []
+                },
+                {
+                    "value": "Observed pronounced oscillations in graphene.",
+                    "evidence": []
+                }
+            ]
+        )
+        self.assertEqual(len(normalized), 2)
+        self.assertEqual(normalized[0]["value"], "Realized an all-metallic transistor.")
+        self.assertEqual(normalized[1]["value"], "Observed pronounced oscillations in graphene.")
+
     def test_evaluation_extraction_keeps_wmt_and_bleu_but_drops_venues(self):
         text = (
             "We benchmark on the WMT 2014 English-to-German and English-to-French tasks. "
@@ -424,6 +566,91 @@ class LLMExtractionServiceResearchFieldTests(unittest.TestCase):
             ["WMT 2014 English-to-German", "WMT 2014 English-to-French"],
         )
         self.assertEqual(self.service._extract_metrics_from_text(text), ["BLEU"])
+
+    def test_detect_paper_type_does_not_treat_experimental_system_as_system_paper(self):
+        text = (
+            "Studies of Shubnikov-de Haas oscillations confirmed that electronic transport "
+            "in FLG was strictly 2D and served as an indicator of the quality and homogeneity "
+            "of the experimental system."
+        )
+
+        self.assertNotEqual(self.service._detect_paper_type(text), "system")
+
+    def test_evaluation_normalization_keeps_domain_metrics_and_material_benchmarks(self):
+        raw = {
+            "value": {
+                "datasets": [],
+                "metrics": [
+                    "carrier mobility",
+                    "carrier concentration",
+                    "Shubnikov-de Haas oscillation amplitude",
+                    "resistivity",
+                    "Hall coefficient",
+                ],
+                "benchmarks": ["multilayer graphene", "bulk graphite"],
+            },
+            "evidence": [
+                {
+                    "snippet": (
+                        "The linear dependence BF on Vg proves a constant 2D density "
+                        "of states and yields the double-valley degeneracy."
+                    ),
+                    "page": 3,
+                    "section": "Results",
+                }
+            ],
+        }
+
+        normalized = self.service._normalize_evaluation_setup(raw, pages=[], source_text="")
+
+        self.assertEqual(
+            normalized["value"]["metrics"],
+            [
+                "carrier mobility",
+                "carrier concentration",
+                "Shubnikov-de Haas oscillation amplitude",
+                "resistivity",
+                "Hall coefficient",
+            ],
+        )
+        self.assertEqual(normalized["value"]["benchmarks"], ["multilayer graphene", "bulk graphite"])
+
+    def test_semantic_correction_preserves_non_system_evaluation_setup(self):
+        raw = {
+            "evaluation_setup": {
+                "value": {
+                    "datasets": [],
+                    "metrics": ["carrier mobility", "Hall coefficient"],
+                    "benchmarks": ["multilayer graphene", "bulk graphite"],
+                },
+                "evidence": [
+                    {
+                        "snippet": (
+                            "Studies of Shubnikov-de Haas oscillations confirmed that "
+                            "electronic transport in FLG was strictly 2D."
+                        ),
+                        "page": 3,
+                        "section": "Results",
+                    }
+                ],
+            }
+        }
+        full_text = (
+            "The films exhibit pronounced Shubnikov-de Haas oscillations. "
+            "This serves as an indicator of the quality and homogeneity of the experimental system. "
+            "These properties differ from multilayer graphene and bulk graphite."
+        )
+
+        corrected = self.service._apply_semantic_correction(raw, full_text)
+
+        self.assertEqual(
+            corrected["evaluation_setup"]["value"]["metrics"],
+            ["carrier mobility", "Hall coefficient"],
+        )
+        self.assertEqual(
+            corrected["evaluation_setup"]["value"]["benchmarks"],
+            ["multilayer graphene", "bulk graphite"],
+        )
 
     def test_benchmark_extraction_uses_named_table_rows(self):
         text = (
@@ -466,6 +693,74 @@ class LLMExtractionServiceResearchFieldTests(unittest.TestCase):
 
         self.assertEqual(normalized["value"]["benchmarks"], ["ByteNet"])
         self.assertNotIn("state-of-the-art baseline", normalized["value"]["benchmarks"])
+
+    def test_survey_paper_skips_evaluation_enrichment(self):
+        text = "This paper presents a review of existing recycling methods for batteries on GLUE and precision."
+        normalized = self.service._normalize_evaluation_setup(
+            {"value": {"datasets": [], "metrics": []}, "evidence": []},
+            pages=[],
+            source_text=text
+        )
+        self.assertEqual(normalized["value"]["datasets"], [])
+        self.assertEqual(normalized["value"]["metrics"], [])
+
+    def test_new_limitation_signals(self):
+        self.assertTrue(self.service._has_limitation_signal("obstacles remain to be overcome"))
+        self.assertTrue(self.service._has_limitation_signal("these methods are not yet efficient"))
+        self.assertTrue(self.service._has_limitation_signal("there are major barriers to scalability"))
+        self.assertTrue(self.service._has_limitation_signal("recycling may not always reduce greenhouse gas emissions"))
+        self.assertTrue(self.service._has_limitation_signal("this might not in all cases result in improvements"))
+        self.assertTrue(self.service._has_limitation_signal("it is not necessarily viable"))
+        self.assertTrue(self.service._has_limitation_signal("it is difficult to scale to production size"))
+
+    def test_noisy_extraction_sentence_filtering(self):
+        # Email address
+        self.assertTrue(self.service._is_noisy_extraction_sentence("Contact us at author@university.edu for details"))
+        # Affiliation headers
+        self.assertTrue(self.service._is_noisy_extraction_sentence("Jiang 1 Department of Physics, University of Manchester"))
+        self.assertTrue(self.service._is_noisy_extraction_sentence("Institute for Microelectronics Technology, Chernogolovka, Russia"))
+        # Figure/table references
+        self.assertTrue(self.service._is_noisy_extraction_sentence("Figure 2 shows the calculated dependences"))
+        self.assertTrue(self.service._is_noisy_extraction_sentence("table 1: comparison of models"))
+        
+        # Valid contribution sentence should NOT be noisy
+        self.assertFalse(self.service._is_noisy_extraction_sentence("We propose a novel framework for deep learning."))
+
+    def test_fallback_contribution_deduplication_and_prefix_repair(self):
+        # Check prefix repair
+        repaired = self.service._repair_joined_extraction_text("One-sentence summary: We report a naturally-occurring material.")
+        self.assertEqual(repaired, "We report a naturally-occurring material.")
+
+        # Check deduplication of near-duplicates in candidate picking
+        sentences = [
+            "We report the electric field effect in few-layer graphene (FLG).",
+            "Here we report the electric field effect in few-layer graphene (FLG).",
+            "We describe a metallic field-effect transistor."
+        ]
+        candidates = self.service._pick_contribution_sentences(sentences, max_items=3)
+        # The first and second sentences are near-duplicates, so only one should be kept
+        self.assertEqual(len(candidates), 2)
+        self.assertIn("We report the electric field effect in few-layer graphene (FLG).", candidates)
+        self.assertNotIn("Here we report the electric field effect in few-layer graphene (FLG).", candidates)
+        self.assertIn("We describe a metallic field-effect transistor.", candidates)
+
+
+    def test_direct_llm_vs_fallback_validation_rules(self):
+        # Case 1: Contribution
+        # A creative contribution statement from LLM without strict words like "we/our"
+        item_contrib = {"value": "The first demonstration of stable monocrystalline graphitic films under ambient conditions."}
+        # For direct LLM (is_fallback=False), this should be accepted
+        self.assertTrue(self.service._is_valid_contribution_item(item_contrib, is_fallback=False))
+        # For fallback (is_fallback=True), this should be rejected because it has no claim owner or matching verb pattern
+        self.assertFalse(self.service._is_valid_contribution_item(item_contrib, is_fallback=True))
+
+        # Case 2: Limitation
+        # A creative limitation statement from LLM without strict signal words
+        item_limit = {"value": "The model has high computational complexity during inference."}
+        # For direct LLM (is_fallback=False), this should be accepted
+        self.assertTrue(self.service._is_valid_limitation_item(item_limit, is_fallback=False))
+        # For fallback (is_fallback=True), this should be rejected because it lacks limitation keywords
+        self.assertFalse(self.service._is_valid_limitation_item(item_limit, is_fallback=True))
 
 
 if __name__ == "__main__":

@@ -59,6 +59,10 @@ export async function getAdminCanonicalDocuments(
   });
 }
 
+export async function getAdminCanonicalExport() {
+  return get("/api/admin/canonical-documents/export");
+}
+
 export async function getAdminActivities(page = 1, pageSize = 20, options = {}) {
   const skip = (page - 1) * pageSize;
   return get("/api/admin/activity", {
@@ -119,4 +123,13 @@ export async function updateAdminLLMModel(modelId, payload) {
 export async function removeAdminLLMModel(modelId) {
   return del(`/api/admin/llm-models/${modelId}`);
 }
+
+export async function deleteAdminCanonicalDocument(canonicalId, deletePapers = false) {
+  return del(`/api/admin/canonical-documents/${canonicalId}?delete_papers=${deletePapers}`);
+}
+
+export async function deleteAdminPaper(paperId) {
+  return del(`/api/admin/papers/${paperId}`);
+}
+
 

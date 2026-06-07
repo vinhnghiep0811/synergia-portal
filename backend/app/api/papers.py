@@ -168,7 +168,7 @@ FE gọi endpoint này để:
 )
 def list_papers(
     skip: int = Query(0, ge=0, description="Số lượng bản ghi bỏ qua, dùng cho phân trang"),
-    limit: int = Query(20, ge=1, le=100, description="Số lượng bản ghi tối đa trả về trong một lần gọi"),
+    limit: int = Query(20, ge=1, le=10000, description="Số lượng bản ghi tối đa trả về trong một lần gọi"),
     db: Session = Depends(get_db),
 ):
     service = PaperService(db)

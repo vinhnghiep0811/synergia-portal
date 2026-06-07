@@ -27,13 +27,14 @@ logger = logging.getLogger(__name__)
 
 DOCLING_ARTIFACTS_PATH = os.getenv("DOCLING_ARTIFACTS_PATH")
 
-_converter: DocumentConverter | None = None
+_converter_with_tables: DocumentConverter | None = None
+_converter_no_tables: DocumentConverter | None = None
 
 
 def _normalize_block_text(value: str | None) -> str:
     if not isinstance(value, str):
         return ""
-    return " ".join(value.split()).strip()
+    return " ".join(value.split()).strip().replace("\x00", "")
 
 
 def _label_value(item: Any) -> str:
@@ -89,7 +90,7 @@ def build_docling_pages(document: Any) -> list[dict[str, Any]]:
 
     for page_no in page_numbers:
         try:
-            page_text = document.export_to_markdown(page_no=page_no).strip()
+            page_text = document.export_to_markdown(page_no=page_no).strip().replace("\x00", "")
         except Exception:
             logger.debug(
                 "[docling] Failed to export page markdown page=%s",
@@ -155,26 +156,41 @@ def build_docling_pages(document: Any) -> list[dict[str, Any]]:
 
     return pages
 
-def build_docling_converter() -> DocumentConverter:
-    global _converter
+def get_docling_converter(do_table_structure: bool = True) -> DocumentConverter:
+    global _converter_with_tables, _converter_no_tables
 
-    if _converter is not None:
-        return _converter
-
-    pipeline_options = PdfPipelineOptions()
-    if DOCLING_ARTIFACTS_PATH:
-        pipeline_options.artifacts_path = DOCLING_ARTIFACTS_PATH
-    pipeline_options.do_ocr = False
-    pipeline_options.do_table_structure = True
-    
-    _converter = DocumentConverter(
-        format_options={
-            InputFormat.PDF: PdfFormatOption(
-                pipeline_options=pipeline_options
+    if do_table_structure:
+        if _converter_with_tables is None:
+            pipeline_options = PdfPipelineOptions()
+            if DOCLING_ARTIFACTS_PATH:
+                pipeline_options.artifacts_path = DOCLING_ARTIFACTS_PATH
+            pipeline_options.do_ocr = False
+            pipeline_options.do_table_structure = True
+            
+            _converter_with_tables = DocumentConverter(
+                format_options={
+                    InputFormat.PDF: PdfFormatOption(
+                        pipeline_options=pipeline_options
+                    )
+                }
             )
-        }
-    )
-    return _converter
+        return _converter_with_tables
+    else:
+        if _converter_no_tables is None:
+            pipeline_options = PdfPipelineOptions()
+            if DOCLING_ARTIFACTS_PATH:
+                pipeline_options.artifacts_path = DOCLING_ARTIFACTS_PATH
+            pipeline_options.do_ocr = False
+            pipeline_options.do_table_structure = False
+            
+            _converter_no_tables = DocumentConverter(
+                format_options={
+                    InputFormat.PDF: PdfFormatOption(
+                        pipeline_options=pipeline_options
+                    )
+                }
+            )
+        return _converter_no_tables
 
 
 def extract_docling_text(paper_id: str) -> None:
@@ -206,7 +222,23 @@ def extract_docling_text(paper_id: str) -> None:
             tmp_pdf.write(pdf_bytes)
             tmp_pdf_path = tmp_pdf.name
 
-        converter = build_docling_converter()
+        import pypdfium2 as pdfium
+        do_table_structure = True
+        try:
+            pdf = pdfium.PdfDocument(tmp_pdf_path)
+            page_count = len(pdf)
+            pdf.close()
+            logger.info("[docling] PDF page count: %s", page_count)
+            if page_count > 70:
+                logger.info(
+                    "[docling] PDF page count (%s) exceeds threshold (70). Disabling table structure to prevent OOM.",
+                    page_count,
+                )
+                do_table_structure = False
+        except Exception as pe:
+            logger.warning("[docling] Failed to read page count via pypdfium2: %s", pe)
+
+        converter = get_docling_converter(do_table_structure=do_table_structure)
         try:
             result = converter.convert(tmp_pdf_path)
         except Exception as e:
@@ -224,6 +256,8 @@ def extract_docling_text(paper_id: str) -> None:
         markdown = result.document.export_to_markdown()
         if not markdown or not markdown.strip():
             raise ValueError("Docling returned empty markdown")
+
+        markdown = markdown.replace("\x00", "")
 
         docling_pages = build_docling_pages(result.document)
 

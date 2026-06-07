@@ -14,6 +14,42 @@ REFERENCE_HEADING_REGEX = re.compile(
 DOI_CONTEXT_MARKERS = ("doi", "doi.org/", "dx.doi.org/")
 DOI_SCAN_CHARS = 12000
 DOI_CONTEXT_CHARS = 90
+MONTH_NAME_PATTERN = (
+    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+    r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|"
+    r"nov(?:ember)?|dec(?:ember)?)\.?"
+)
+PUBLICATION_MONTH_DAY_HEADER_REGEX = re.compile(
+    rf"^(?:[A-Z][A-Za-z.&'+-]*(?:\s+[A-Z][A-Za-z.&'+-]*){{0,5}}\s+)?"
+    rf"{MONTH_NAME_PATTERN}\s+\d{{1,2}},?\s*\(?\d{{4}}\)?$",
+    re.IGNORECASE,
+)
+PUBLICATION_DAY_MONTH_HEADER_REGEX = re.compile(
+    rf"^(?:[A-Z][A-Za-z.&'+-]*(?:\s+[A-Z][A-Za-z.&'+-]*){{0,5}}\s+)?"
+    rf"\d{{1,2}}\s+{MONTH_NAME_PATTERN},?\s*\(?\d{{4}}\)?$",
+    re.IGNORECASE,
+)
+PUBLICATION_MONTH_YEAR_HEADER_REGEX = re.compile(
+    rf"^(?:[A-Z][A-Za-z.&'+-]*(?:\s+[A-Z][A-Za-z.&'+-]*){{0,5}}\s+)?"
+    rf"(?:{MONTH_NAME_PATTERN}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z0-9]*)\s*\(?\d{{4}}\)?$",
+    re.IGNORECASE,
+)
+ARTICLE_TYPE_LABELS = {
+    "article",
+    "brief report",
+    "case report",
+    "communication",
+    "editorial",
+    "letter",
+    "opinion",
+    "opinion paper",
+    "perspective",
+    "research",
+    "research article",
+    "review",
+    "review article",
+    "short communication",
+}
 
 class PageText(TypedDict):
     page: int
@@ -44,6 +80,47 @@ def normalize_ligatures(text: str) -> str:
     return text
 
 
+def _is_repository_cover_page(page) -> bool:
+    try:
+        text = page.extract_text() or ""
+    except Exception:
+        return False
+    t = text.lower()
+    cover_page_keywords = [
+        "delft university of technology",
+        "institutional repository",
+        "downloaded from",
+        "taverne project",
+        "research online",
+        "open access repository",
+        "university repository",
+        "citation (apa)",
+        "document version",
+        "green open access"
+    ]
+    matches = [kw for kw in cover_page_keywords if kw in t]
+    if len(matches) >= 2:
+        return True
+    if len(matches) >= 1 and len(t) < 1500 and "repository" in t:
+        return True
+    return False
+
+
+def _find_actual_start_page_idx(pdf) -> int:
+    for idx in range(min(5, len(pdf.pages))):
+        page = pdf.pages[idx]
+        if _is_repository_cover_page(page):
+            continue
+        try:
+            txt = page.extract_text() or ""
+        except Exception:
+            txt = ""
+        if len(txt.strip()) < 800 and ("open access" in txt.lower() or "taverne" in txt.lower() or "repository" in txt.lower()):
+            continue
+        return idx
+    return 0
+
+
 def extract_pdf_full_text(
     file_path: str,
     max_pages: Optional[int] = None,
@@ -51,7 +128,10 @@ def extract_pdf_full_text(
     texts: list[str] = []
 
     with pdfplumber.open(file_path) as pdf:
-        pages = pdf.pages if max_pages is None else pdf.pages[:max_pages]
+        start_idx = _find_actual_start_page_idx(pdf)
+        pages = pdf.pages[start_idx:]
+        if max_pages is not None:
+            pages = pages[:max_pages]
 
         for page in pages:
             page_text = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
@@ -88,6 +168,8 @@ def is_likely_noise(word: dict, page_width: float, page_height: float) -> bool:
         return True
 
     if height > width * 1.5 and len(text) <= 3:
+        if any(c.isalnum() for c in text):
+            return False
         return True
 
     return False
@@ -273,7 +355,8 @@ def _looks_broken(lines: list[dict]) -> bool:
     dense_bad = 0
     for line in lines[:8]:
         text = line["text"]
-        if len(text) >= 20 and " " not in text:
+        # Skip lines containing commas (like author lists) to avoid false positives
+        if len(text) >= 50 and " " not in text and "," not in text:
             dense_bad += 1
     if dense_bad >= 2:
         return True
@@ -281,50 +364,228 @@ def _looks_broken(lines: list[dict]) -> bool:
     return False
 
 
+def _is_separator_line(text: str) -> bool:
+    """Trả về True nếu text là đường kẻ phân cách (toàn dấu chấm, gạch ngang, dấu gạch dưới).
+    Ví dụ: Nature dùng '.................................................................' giữa các bài báo.
+    """
+    stripped = text.strip()
+    if len(stripped) < 8:
+        return False
+    non_sep = re.sub(r"[.\-_=*~\s]", "", stripped)
+    return len(non_sep) == 0
+
+
 def _is_non_title_text(text: str) -> bool:
     t = text.lower().strip()
     return (
-        "doi:" in t
+        _is_separator_line(text)
+        or "doi:" in t
+        or "journal homepage:" in t
+        or "contents lists available at" in t
+        or "sciencedirect" in t
+        or "elsevier" in t
+        or "journal of" in t
+        or "international journal" in t
+        or "et al" in t
         or re.match(r"^abstract\b", t) is not None
         or re.match(r"^keywords?\b", t) is not None
         or "downloaded from" in t
+        or "research explorer" in t
+        or "citation for published" in t
+        or "publication record" in t
         or "creative commons" in t
         or "open access" in t
         or "published by" in t
         or "@" in t
+        or re.search(r"\b(science|nature|cell|proceedings|journal|springer|ieee|elsevier|acm)\b.*\b\d{4}\b", t) is not None
+        or re.search(r"\b(vol|no|pp|issue|pages)\b\.?\s*\d+", t) is not None
+        or re.search(r"\b\d+\s*(?:\(\d+\))?\s*:\s*\d+[-–]\d+\b", t) is not None
+        or re.search(r"\b\d+\s+\d+\s+\(\d{4}\)", t) is not None
+        or re.match(r"^(?:spm|wg\d+|wg[ivxl]+|chapter|section|part|annex)\s*\d*[a-z]*$", t) is not None
+        or _looks_like_article_type_label(text)
+        or _looks_like_publication_header(text)
         or _looks_like_author_line(text)
+    )
+
+
+def _looks_like_article_type_label(text: str) -> bool:
+    normalized = normalize_space(text).strip(" .:").lower()
+    return normalized in ARTICLE_TYPE_LABELS
+
+
+def _looks_like_publication_header(text: str) -> bool:
+    normalized = normalize_space(text).strip(" .")
+    if not normalized or len(normalized) > 90:
+        return False
+
+    return (
+        PUBLICATION_MONTH_DAY_HEADER_REGEX.match(normalized) is not None
+        or PUBLICATION_DAY_MONTH_HEADER_REGEX.match(normalized) is not None
+        or PUBLICATION_MONTH_YEAR_HEADER_REGEX.match(normalized) is not None
     )
 
 
 def _looks_like_author_line(text: str) -> bool:
     normalized = normalize_space(text)
-    if not normalized or ("," not in normalized and " and " not in normalized):
+    if not normalized:
         return False
 
-    chunks = [chunk.strip(" .;:()[]{}") for chunk in re.split(r"\s*(?:,| and )\s*", normalized) if chunk.strip()]
-    if len(chunks) < 2:
+    normalized = _strip_author_affiliation_markers(normalized)
+    has_author_separator = "," in normalized or ";" in normalized or re.search(r"\band\b", normalized)
+
+    if has_author_separator:
+        chunks = [
+            chunk.strip(" .;:()[]{}")
+            for chunk in re.split(r"\s*(?:,|;|\band\b)\s*", normalized)
+            if chunk.strip()
+        ]
+        if len(chunks) < 2:
+            return False
+
+        return all(_is_author_name_chunk(chunk) for chunk in chunks)
+
+    return _looks_like_initialed_author_sequence(normalized)
+
+
+def _strip_author_affiliation_markers(text: str) -> str:
+    text = re.sub(r"([,;])\s*[\d*†‡§]+\s*", r"\1 ", text)
+    text = re.sub(r"^\s*[\d*†‡§]+\s*", "", text)
+    text = re.sub(r"(?<=[A-Za-z])\s*[\d*†‡§]+(?=(?:\s|,|;|$))", "", text)
+    text = re.sub(r"[\u00b9\u00b2\u00b3\u2070-\u2079]+", "", text)
+    return normalize_space(text)
+
+
+def _is_author_name_chunk(chunk: str) -> bool:
+    chunk = _strip_author_affiliation_markers(chunk).strip(" .;:()[]{}")
+    if not chunk:
         return False
 
-    def is_name_chunk(chunk: str) -> bool:
-        words = [w for w in chunk.split(" ") if w]
+    if re.fullmatch(r"[A-Z][a-z]+[A-Z]\.[A-Z][A-Za-z-]+", chunk):
+        return True
 
-        if len(words) in (2, 3):
-            if all(re.fullmatch(r"[A-Z][a-z]+(?:-[A-Z][a-z]+)?", w) for w in words):
-                return True
+    words = [word for word in chunk.split(" ") if word]
+    if not 2 <= len(words) <= 5:
+        return False
 
-        if re.fullmatch(r"[A-Z][a-z]+[A-Z][a-z]+", chunk):
-            return True
+    meaningful_words = 0
+    for word in words:
+        cleaned = word.strip(" ;:()[]{}")
+        if not cleaned:
+            continue
+
+        if re.fullmatch(r"(?:[A-Z]\.){1,4}", cleaned):
+            meaningful_words += 1
+            continue
+
+        if re.fullmatch(r"[A-Z][A-Za-z]+(?:[-'][A-Z]?[A-Za-z]+)*", cleaned):
+            meaningful_words += 1
+            continue
+
+        if cleaned.lower() in {"de", "del", "da", "di", "la", "le", "van", "von"}:
+            continue
 
         return False
 
-    return all(is_name_chunk(chunk) for chunk in chunks)
+    return meaningful_words >= 2
+
+
+def _looks_like_initialed_author_sequence(text: str) -> bool:
+    matches = re.findall(
+        r"(?:[A-Z]\.){1,4}\s*[A-Z][A-Za-z]+(?:[-'][A-Z]?[A-Za-z]+)*",
+        text,
+    )
+    if len(matches) < 2:
+        return False
+
+    compact_text = re.sub(r"\s+", "", text)
+    compact_matches = sum(len(re.sub(r"\s+", "", match)) for match in matches)
+
+    return compact_matches / max(1, len(compact_text)) >= 0.75
+
+
+def _alpha_words(text: str) -> list[str]:
+    return re.findall(r"[A-Za-z][A-Za-z'-]*", text)
+
+
+def _is_probable_title_line(line: dict, page_width: float) -> bool:
+    text = normalize_space(line["text"])
+    words = _alpha_words(text)
+    if len(words) < 4:
+        return False
+    if _is_non_title_text(text):
+        return False
+    if line["avg_size"] < 10.5:
+        return False
+    if line["width"] < page_width * 0.30:
+        return False
+
+    return any(char.isupper() for char in text)
+
+
+def _looks_like_contextual_masthead(
+    line: dict,
+    lines: list[dict],
+    page_width: float,
+) -> bool:
+    text = normalize_space(line["text"])
+    words = _alpha_words(text)
+    if not text or len(text) > 48 or len(words) > 4:
+        return False
+    if line["top"] > 95:
+        return False
+    if line["width"] > page_width * 0.45:
+        return False
+    if ":" in text:
+        return False
+
+    return any(
+        candidate["top"] > line["top"]
+        and candidate["top"] - line["top"] <= 150
+        and candidate["avg_size"] >= line["avg_size"] - 2.8
+        and _is_probable_title_line(candidate, page_width)
+        for candidate in lines
+    )
+
+
+def _is_contextual_non_title_line(
+    line: dict,
+    lines: list[dict],
+    page_width: float,
+) -> bool:
+    return (
+        _is_non_title_text(line["text"])
+        or _looks_like_contextual_masthead(line, lines, page_width)
+    )
 
 
 def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[str]:
     if not lines:
         return None
 
-    usable = [line for line in lines if not _is_non_title_text(line["text"])]
+    usable = [
+        line
+        for line in lines
+        if not _is_contextual_non_title_line(line, lines, page_width)
+    ]
+
+    # Filter out extremely short lines (like acronyms or layout labels)
+    # if there is another line with a title-like size (>= 14.0) and >= 2 words.
+    filtered_usable = []
+    for line in usable:
+        text = line["text"]
+        words = _alpha_words(text)
+        if len(words) <= 1:
+            has_better_title_candidate = any(
+                candidate != line
+                and candidate["avg_size"] >= 14.0
+                and len(_alpha_words(candidate["text"])) >= 2
+                for candidate in usable
+            )
+            if has_better_title_candidate:
+                continue
+        filtered_usable.append(line)
+    usable = filtered_usable
+
     if not usable:
         return None
 
@@ -367,7 +628,8 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
     for i in range(seed_idx - 1, -1, -1):
         line = sorted_lines[i]
         gap = prev["top"] - line["top"]
-        if gap > 28:
+        max_gap = max(28.0, max(prev["avg_size"], line["avg_size"]) * 1.6)
+        if gap > max_gap:
             break
         if line["avg_size"] < seed["avg_size"] - 2.2:
             break
@@ -381,7 +643,8 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
     for i in range(seed_idx + 1, len(sorted_lines)):
         line = sorted_lines[i]
         gap = line["top"] - prev["top"]
-        if gap > 28:
+        max_gap = max(28.0, max(prev["avg_size"], line["avg_size"]) * 1.6)
+        if gap > max_gap:
             break
         if line["avg_size"] < seed["avg_size"] - 2.2:
             break
@@ -391,7 +654,9 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
         selected.append(line)
         prev = line
 
-    title = normalize_space(" ".join(line["text"] for line in selected))
+    title_joined = " ".join(line["text"] for line in selected)
+    title_dehyphenated = re.sub(r'-\s+', '-', title_joined)
+    title = normalize_space(title_dehyphenated)
     return title or None
 
 
@@ -462,11 +727,12 @@ def _extract_two_column_page_text(page) -> str:
     if not _is_likely_two_column_page(page):
         return ""
 
-    mid = page.width / 2
-    gutter = max(6, page.width * 0.015)
+    x0, y0, x1, y1 = page.bbox
+    mid_x = x0 + (x1 - x0) / 2
+    gutter = 2
     bboxes = [
-        (0, 0, mid - gutter, page.height),
-        (mid + gutter, 0, page.width, page.height),
+        (x0, y0, mid_x - gutter, y1),
+        (mid_x + gutter, y0, x1, y1),
     ]
 
     parts: list[str] = []
@@ -510,7 +776,8 @@ def extract_pdf_text_for_llm(
     full_parts: list[str] = []
 
     with pdfplumber.open(file_path) as pdf:
-        for idx, page in enumerate(pdf.pages, start=1):
+        start_idx = _find_actual_start_page_idx(pdf)
+        for idx, page in enumerate(pdf.pages[start_idx:], start=1):
             text = _extract_page_text_for_llm(page).strip()
 
             pages.append({
@@ -566,18 +833,167 @@ def clean_line(line: str) -> str:
     return line
 
 
+def _title_looks_merged(title: str) -> bool:
+    """Kiểm tra title có vẻ bị gộp 2 cột (có token dài không space >= 20 ký tự, bỏ qua URL)."""
+    tokens = title.split()
+    long_spaceless = 0
+    for t in tokens:
+        if t.startswith("http://") or t.startswith("https://") or "www." in t:
+            continue
+        if len(t) >= 20:
+            long_spaceless += 1
+    return long_spaceless >= 1 or " " not in title.strip()
+
+
+def _is_valid_metadata_title(title: Optional[str]) -> bool:
+    if not title:
+        return False
+    t = title.strip()
+    if not t:
+        return False
+    
+    t_lower = t.lower()
+    
+    # Exclude typical document/template names, file extensions, etc.
+    generic_patterns = [
+        r"^microsoft word\b",
+        r"^untitled\b",
+        r"^document\d*$",
+        r"^page\s+\d+$",
+        r"^template\b",
+        r"\.pdf$",
+        r"\.docx?$",
+        r"^paper\s+\d+$",
+        r"date of publication",
+    ]
+    for pattern in generic_patterns:
+        if re.search(pattern, t_lower):
+            return False
+            
+    # Exclude journal details like volume, issue, page range, etc.
+    # to avoid using a journal citation header as title metadata
+    journal_patterns = [
+        r"\b(vol|no|pp|issue|pages)\b\.?\s*\d+",
+        r"\b(journal|proceedings|symposium|conference)\b.*\b\d{4}\b",
+    ]
+    for pattern in journal_patterns:
+        if re.search(pattern, t_lower):
+            return False
+
+    words = t.split()
+    if len(words) < 3:
+        return False
+        
+    # Check if title contains enough letters (not just digits/punctuation)
+    letters = sum(1 for c in t if c.isalpha())
+    if letters < len(t) * 0.4:
+        return False
+        
+    return True
+
+
+def _verify_metadata_title_on_page(meta_title: str, page_text: str) -> bool:
+    if not _is_valid_metadata_title(meta_title):
+        return False
+        
+    def clean_word(w):
+        return re.sub(r"[^a-z0-9]", "", w.lower())
+        
+    meta_words = [clean_word(w) for w in meta_title.split() if clean_word(w)]
+    if len(meta_words) < 3:
+        return False
+        
+    page_words = [clean_word(w) for w in page_text.split() if clean_word(w)]
+    if not page_words:
+        return False
+        
+    from difflib import SequenceMatcher
+    matched_count = 0
+    # Search within the first 350 words of the page (typical title area)
+    search_limit = min(350, len(page_words))
+    for mw in meta_words:
+        found = False
+        for pw in page_words[:search_limit]:
+            if mw == pw:
+                found = True
+                break
+            elif len(mw) > 4 and SequenceMatcher(None, mw, pw).ratio() > 0.8:
+                found = True
+                break
+        if found:
+            matched_count += 1
+            
+    ratio = matched_count / len(meta_words)
+    return ratio >= 0.75
+
+
+def _get_text_similarity(a: str, b: str) -> float:
+    from difflib import SequenceMatcher
+    na = "".join(c for c in a.lower() if c.isalnum())
+    nb = "".join(c for c in b.lower() if c.isalnum())
+    if not na or not nb:
+        return 0.0
+    return SequenceMatcher(None, na, nb).ratio()
+
+
 def detect_title(file_path: str) -> Optional[str]:
     with pdfplumber.open(file_path) as pdf:
         if not pdf.pages:
             return None
 
-        first_page = pdf.pages[0]
+        # Try to retrieve and unescape metadata title first
+        meta_title = pdf.metadata.get("Title")
+        if meta_title:
+            import html
+            meta_title = html.unescape(meta_title).strip()
+            # Normalize internal spaces
+            meta_title = re.sub(r"\s+", " ", meta_title)
+
+        start_idx = _find_actual_start_page_idx(pdf)
+        first_page = pdf.pages[start_idx]
+
+        # Extract page text for metadata verification
+        page_text = ""
+        try:
+            page_text = first_page.extract_text() or ""
+        except Exception:
+            pass
 
         word_lines = _extract_lines_from_words(first_page)
+        title = None
         if word_lines and not _looks_broken(word_lines):
             title = _select_title_from_lines(word_lines, first_page.width)
+
+        # Nếu title từ toàn trang trông như bị gộp 2 cột, thử crop cột phải
+        if (title is None or _title_looks_merged(title)) and _is_likely_two_column_page(first_page):
+            x0, y0, x1, y1 = first_page.bbox
+            mid_x = x0 + (x1 - x0) / 2
+            right_crop = first_page.crop((mid_x, y0, x1, y1))
+            right_lines = _extract_lines_from_words(right_crop)
+            if right_lines:
+                right_title = _select_title_from_lines(right_lines, right_crop.width)
+                if right_title and not _title_looks_merged(right_title):
+                    title = right_title
+
+        # Check if the visually extracted title is missing, low quality or completely different
+        # from a verified metadata title.
+        is_meta_verified = False
+        if meta_title and page_text:
+            is_meta_verified = _verify_metadata_title_on_page(meta_title, page_text)
+
+        if is_meta_verified:
+            # If visual extraction succeeded, check similarity
             if title:
-                return title
+                similarity = _get_text_similarity(title, meta_title)
+                if similarity < 0.65:
+                    # Visual extraction got a completely different title, use verified metadata title
+                    title = meta_title
+            else:
+                # Visual extraction failed entirely, fallback to verified metadata title
+                title = meta_title
+
+        if title:
+            return title
 
         char_lines = _extract_lines_from_chars(first_page)
         if char_lines:
@@ -587,6 +1003,7 @@ def detect_title(file_path: str) -> Optional[str]:
 
         title = _select_title_from_lines(word_lines, first_page.width)
         return title
+
 
 
 def normalize_text_for_fingerprint(text: str) -> str:

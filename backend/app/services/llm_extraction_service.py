@@ -197,8 +197,10 @@ class LLMExtractionService:
             r"\b(?:interesting|promising) directions? for (?:future|further) (?:work|research)\b",
             r"\bwe (?:plan|intend|leave|hope|will investigate|aim) to\b",
             r"\bremain(?:s)? (?:an|a)? ?(?:open )?(?:problem|question|challenge)\b",
-            r"\b(?:constraint|constraints|assumption|assumptions|caveat|caveats|drawback|drawbacks|weakness|weaknesses|shortcoming|shortcomings)\b",
-            r"\b(?:cannot|can't|unable to|fails? to|struggles? to|does not|do not|did not)\b",
+            r"\bremain(?:s)?\b.{0,40}\bto be\b.{0,40}\b(?:overcome|solved|addressed|resolved|investigated|studied)\b",
+            r"\b(?:constraint|constraints|assumption|assumptions|caveat|caveats|drawback|drawbacks|weakness|weaknesses|shortcoming|shortcomings|obstacle|obstacles|barrier|barriers|bottleneck|bottlenecks|difficulty|difficulties)\b",
+            r"\b(?:cannot|can't|unable to|fails? to|struggles? to|does not|do not|did not|is not yet|are not yet|was not yet|were not yet|not yet viable|not yet efficient|not yet practical|may not|might not|not always|not in all cases|not necessarily)\b",
+            r"\b(?:difficult|hard|challenging)\s+to\s+(?:scale|generalize|train|evaluate|implement|achieve|obtain|measure)\b",
             r"\b(?:expensive|costly|latency|scalability|memory constraints?|memory consumption|compute cost|computational cost|resource intensive)\b",
             r"\bprecludes? parallelization\b",
             r"\brequires?\b.{0,80}\b(?:human|manual|annotation|labels|labeled|compute|memory|resources?|pretraining|training data)\b",
@@ -276,7 +278,12 @@ class LLMExtractionService:
                 r"discussion|"
                 r"conclusions?|"
                 r"future work|"
-                r"threats? to validity|"
+                r"future\s+(?:work|research|direction|trend|outlook|perspective)s?|"
+                r"future\s+trends?\s+and\s+challenges?|"
+                r"challenges?|"
+                r"open\s+problems?|"
+                r"perspectives?|"
+                r"threats?(?:\s+to\s+validity)?|"
                 r"caveats?|"
                 r"outlook"
                 r")\b",
@@ -360,9 +367,14 @@ class LLMExtractionService:
             r"discussion",
             r"conclusions?",
             r"future work",
+            r"future\s+(?:work|research|direction|trend|outlook|perspective)s?",
+            r"future\s+trends?\s+and\s+challenges?",
+            r"challenges?",
+            r"open\s+problems?",
+            r"perspectives?",
             r"limitations?",
             r"limitations? and future work",
-            r"threats? to validity",
+            r"threats?(?:\s+to\s+validity)?",
             r"caveats?",
             r"outlook",
             r"references?",
@@ -371,6 +383,13 @@ class LLMExtractionService:
         ]
 
         if any(re.fullmatch(pattern, normalized) for pattern in known_heading_patterns):
+            return normalized
+
+        # Fallback: composite headings like "Limitations & Ethical Considerations"
+        # won't fullmatch any single pattern, but still contain a meaningful keyword.
+        # Use _is_allowed_limitation_section (which uses re.search) as a secondary check
+        # so these headings create their own chunk and are not absorbed into the previous section.
+        if self._is_allowed_limitation_section(normalized):
             return normalized
 
         return None
@@ -462,6 +481,16 @@ class LLMExtractionService:
         if isinstance(value, str):
             snippets.append(value)
 
+        # Check if the document has any explicitly allowed limitation sections.
+        # If it does, we enforce strict whitelist-matching.
+        # If it does not, we allow limitations as long as they are not explicitly in rejected/blacklisted sections.
+        has_any_allowed_section = False
+        if isinstance(input_text, str) and input_text.strip():
+            for chunk in self._section_chunks_from_input_text(input_text):
+                if self._is_allowed_limitation_section(chunk.get("section")):
+                    has_any_allowed_section = True
+                    break
+
         if isinstance(input_text, str) and input_text.strip():
             for snippet in snippets:
                 section = self._infer_section_for_snippet_from_input_text(snippet, input_text)
@@ -480,6 +509,9 @@ class LLMExtractionService:
                 return False
 
         if not isinstance(input_text, str) or not input_text.strip():
+            return True
+
+        if not has_any_allowed_section:
             return True
 
         return False
@@ -506,7 +538,7 @@ class LLMExtractionService:
 
         return filtered
 
-    def _is_valid_limitation_item(self, item: dict[str, Any]) -> bool:
+    def _is_valid_limitation_item(self, item: dict[str, Any], is_fallback: bool = False) -> bool:
         value = item.get("value")
         if not isinstance(value, str) or not value.strip():
             return False
@@ -519,8 +551,18 @@ class LLMExtractionService:
         ) if isinstance(evidence, list) else ""
 
         combined = re.sub(r"\s+", " ", f"{value} {evidence_text}").strip()
+        if self._is_noisy_extraction_sentence(combined):
+            return False
+
         lowered = combined.lower()
 
+        # If it is direct LLM output, we don't apply strict semantic signal filters!
+        if not is_fallback:
+            if self._is_prior_work_context(combined):
+                return False
+            return True
+
+        # If it is fallback (coerced from raw text), we enforce strict signals!
         if re.match(
             r"^#+\s*\d*(?:\.\d+)?\s*(abstract|introduction|background|related work|method|approach|experiments?|results?)\b",
             lowered,
@@ -550,9 +592,9 @@ class LLMExtractionService:
 
         return True
 
-    def _normalize_limitations_field(self, raw: Any) -> list[dict[str, Any]]:
+    def _normalize_limitations_field(self, raw: Any, is_fallback: bool = False) -> list[dict[str, Any]]:
         candidates = self._normalize_list_field(raw, max_items=6)
-        filtered = [item for item in candidates if self._is_valid_limitation_item(item)]
+        filtered = [item for item in candidates if self._is_valid_limitation_item(item, is_fallback=is_fallback)]
         return self._dedupe_list_items(filtered, max_items=2)
 
     @staticmethod
@@ -562,11 +604,13 @@ class LLMExtractionService:
 
         repaired = text
         repaired = repaired.replace("\u2019", "'").replace("`", "'")
+        repaired = re.sub(r"^(?:one-sentence summary|summary|abstract|introduction):\s*", "", repaired, flags=re.IGNORECASE)
         repaired = re.sub("[\u2010-\u2015]", "-", repaired)
         repaired = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "", repaired)
         joined_we_verbs = (
             "propose|present|introduce|replace|achieve|show|report|benchmark|"
-            "evaluate|obtain|develop|train|use|found|plan|improve"
+            "evaluate|test|analyze|analyse|demonstrate|find|obtain|develop|"
+            "train|review|discuss|explore|describe|use|found|plan|improve"
         )
         repaired = re.sub(
             rf"\b([Ww]e)({joined_we_verbs})\b",
@@ -587,17 +631,25 @@ class LLMExtractionService:
             repaired,
             flags=re.IGNORECASE,
         )
-        repaired = re.sub(r"\b([A-Za-z])etal\.?", r"\1 et al.", repaired)
+        repaired = re.sub(r"\b(?!Metal\b)([A-Z])etal\.?(?=\W|$)", r"\1 et al.", repaired)
         repaired = re.sub(r"(?<=[,;:])(?=[A-Za-z])", " ", repaired)
         return repaired
 
     def _has_current_paper_signal(self, text: str) -> bool:
         lowered = self._repair_joined_extraction_text(text).lower()
         signal_patterns = [
-            r"\bwe\s+(?:propose|present|introduce|replace|achieve|show|report|benchmark|evaluate|obtain|develop|train|use|improve)\b",
+            (
+                r"\bwe\s+(?:propose|present|introduce|replace|achieve|show|report|"
+                r"benchmark|evaluate|test|analyze|analyse|demonstrate|find|obtain|"
+                r"develop|train|review|discuss|explore|describe|use|improve)\b"
+            ),
             r"\bin this (?:work|paper|study)\b",
             r"\bour (?:model|method|architecture|approach|network|proposed|experiments?|results?)\b",
-            r"\bthis (?:paper|work|study) (?:proposes|presents|introduces|reports|shows|evaluates)\b",
+            (
+                r"\b(?:this|the) (?:paper|work|study) (?:aims|proposes|presents|"
+                r"introduces|reports|shows|evaluates|tests|analyzes|analyses|"
+                r"demonstrates|finds|trains|reviews|discusses|explores|describes)\b"
+            ),
         ]
         return any(re.search(pattern, lowered) for pattern in signal_patterns)
 
@@ -623,6 +675,25 @@ class LLMExtractionService:
             return True
 
         if "@" in lowered or "proceedings of" in lowered or "arxiv:" in lowered:
+            return True
+
+        # Filter out email addresses
+        if re.search(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b", lowered):
+            return True
+
+        # Filter out typical affiliation/author headers
+        affiliation_keywords = [
+            "department of", "dept. of", "university of", "univ. of",
+            "institute for", "institute of", "inst. of", "laboratory of",
+            "corporation", "co., ltd.", "inc.", "gmbh", "postal code",
+            "zip code", "e-mail:", "email:", "authors:", "correspondence to:",
+            "all rights reserved", "copyright", "associated with", "reprint"
+        ]
+        if any(keyword in lowered for keyword in affiliation_keywords):
+            return True
+
+        # Filter out figure/table/equation references
+        if re.match(r"^(?:fig(?:ure)?|table|eq(?:uation)?)\b\s*\d+", lowered):
             return True
 
         if re.match(r"^\[page \d+\]", lowered) and not self._has_current_paper_signal(lowered):
@@ -668,9 +739,19 @@ class LLMExtractionService:
             return False
 
         contribution_patterns = [
-            r"\bwe\s+(?:propose|present|introduce|develop|replace|show|report|achieve|obtain|improve|outperform|benchmark)\b",
+            (
+                r"\bwe\s+(?:propose|present|introduce|develop|replace|show|report|"
+                r"achieve|obtain|improve|outperform|benchmark|evaluate|test|"
+                r"analyze|analyse|demonstrate|find|train|review|discuss|explore|"
+                r"describe)\b"
+            ),
             r"\bour (?:model|method|architecture|approach|network|results?)\b",
             r"\bthe proposed (?:model|method|architecture|approach|network)\b",
+            (
+                r"\b(?:this|the) (?:paper|work|study) (?:aims|proposes|presents|"
+                r"introduces|reports|shows|evaluates|tests|analyzes|analyses|"
+                r"demonstrates|finds|trains|reviews|discusses|explores|describes)\b"
+            ),
             r"\b(?:achieves?|improves?|outperforms?|converges?)\b.{0,80}\b(?:bleu|accuracy|f1|state-of-the-art|baseline)\b",
         ]
         return any(re.search(pattern, lowered) for pattern in contribution_patterns)
@@ -683,17 +764,25 @@ class LLMExtractionService:
 
     def _pick_contribution_sentences(self, sentences: list[str], max_items: int = 3) -> list[str]:
         candidates: list[str] = []
-        seen: set[str] = set()
+        seen_token_sets: list[set[str]] = []
         for sentence in sentences:
             if not self._is_valid_contribution_sentence(sentence):
                 continue
 
-            key = re.sub(r"\s+", " ", sentence).strip().lower()
-            if key in seen:
+            cleaned = re.sub(r"\s+", " ", sentence).strip()
+            tokens = {
+                token
+                for token in re.findall(r"[a-z0-9]+", cleaned.lower())
+                if len(token) > 3 and token not in PAGE_MATCH_STOPWORDS
+            }
+            if tokens and any(
+                len(tokens & seen) / max(1, min(len(tokens), len(seen))) >= 0.72
+                for seen in seen_token_sets
+            ):
                 continue
 
             candidates.append(sentence)
-            seen.add(key)
+            seen_token_sets.append(tokens)
             if len(candidates) >= max_items:
                 break
 
@@ -710,7 +799,7 @@ class LLMExtractionService:
 
         return field
 
-    def _is_valid_contribution_item(self, item: dict[str, Any]) -> bool:
+    def _is_valid_contribution_item(self, item: dict[str, Any], is_fallback: bool = False) -> bool:
         value = item.get("value")
         if not isinstance(value, str) or not value.strip():
             return False
@@ -725,6 +814,14 @@ class LLMExtractionService:
         combined = re.sub(r"\s+", " ", f"{value} {evidence_text}").strip()
         if self._is_noisy_extraction_sentence(combined):
             return False
+
+        # If it is direct LLM output, we don't apply strict semantic signal filters!
+        if not is_fallback:
+            if self._is_external_work_statement(combined):
+                return False
+            return True
+
+        # If it is fallback (coerced from raw text), we enforce strict signals!
         if self._is_external_work_statement(combined):
             return False
         if self._is_valid_contribution_sentence(combined):
@@ -738,18 +835,23 @@ class LLMExtractionService:
                 lowered,
             )
         )
-        if not has_claim_owner:
-            return False
+        if has_claim_owner:
+            return True
 
-        compact_claim_patterns = [
-            r"^(?:introduces?|proposes?|replaces?|improves?|outperforms?|achieves?|obtains?|converges?)\b",
-            r"\b(?:bleu|accuracy|f1)\b.{0,80}\b(?:improvement|points?|score)\b",
-        ]
-        return any(re.search(pattern, lowered) for pattern in compact_claim_patterns)
+        # Relaxed check for LLM-extracted items or statements with strong contribution verbs
+        contribution_verbs_pattern = (
+            r"\b(?:propos|present|introduc|develop|replac|show|report|achiev|"
+            r"obtain|improv|outperform|benchmark|evaluat|test|analy[sz]|"
+            r"demonstrat|find|found|observ|realis|realiz|train|review|discuss|explor|describ|construct|build)e?d?s?(?:ing)?\b"
+        )
+        if re.search(contribution_verbs_pattern, lowered):
+            return True
 
-    def _normalize_contributions_field(self, raw: Any) -> list[dict[str, Any]]:
+        return False
+
+    def _normalize_contributions_field(self, raw: Any, is_fallback: bool = False) -> list[dict[str, Any]]:
         candidates = self._normalize_list_field(raw, max_items=8)
-        filtered = [item for item in candidates if self._is_valid_contribution_item(item)]
+        filtered = [item for item in candidates if self._is_valid_contribution_item(item, is_fallback=is_fallback)]
 
         deduped: list[dict[str, Any]] = []
         seen_token_sets: list[set[str]] = []
@@ -790,9 +892,15 @@ class LLMExtractionService:
             ("ter", "TER"),
             ("perplexity", "perplexity"),
             ("ppl", "PPL"),
+            ("carrier mobility", "carrier mobility"),
+            ("carrier concentration", "carrier concentration"),
+            ("shubnikov-de haas oscillation amplitude", "Shubnikov-de Haas oscillation amplitude"),
+            ("shubnikov de haas oscillation amplitude", "Shubnikov-de Haas oscillation amplitude"),
+            ("resistivity", "resistivity"),
+            ("hall coefficient", "Hall coefficient"),
         ]
 
-        normalized = text.lower()
+        normalized = re.sub(r"[\u2010-\u2015]", "-", text.lower())
         metrics: list[str] = []
         for needle, label in keywords:
             if re.search(rf"(?<![a-z]){re.escape(needle)}(?![a-z])", normalized):
@@ -806,7 +914,7 @@ class LLMExtractionService:
                 continue
             deduped.append(item)
             seen.add(key)
-            if len(deduped) >= 4:
+            if len(deduped) >= 5:
                 break
 
         return deduped
@@ -1140,8 +1248,28 @@ class LLMExtractionService:
             "icml",
             "cvpr",
             "proceedings",
+            "dataset",
+            "datasets",
+            "benchmark",
+            "benchmarks",
+            "training data",
+            "test data",
+            "test set",
+            "validation set",
+            "experiments",
+            "experimental results",
         }
         if any(lowered == item or lowered.startswith(f"{item} ") for item in rejected):
+            return False
+
+        if not re.search(r"[A-Za-z]", normalized):
+            return False
+
+        if len(normalized) > 100:
+            return False
+
+        digit_count = sum(ch.isdigit() for ch in normalized)
+        if digit_count > len(normalized) * 0.45:
             return False
 
         accepted_patterns = [
@@ -1161,14 +1289,31 @@ class LLMExtractionService:
             r"\bgigaword\b",
             r"\bun\b",
         ]
-        return any(re.search(pattern, lowered) for pattern in accepted_patterns)
+        if any(re.search(pattern, lowered) for pattern in accepted_patterns):
+            return True
+
+        has_named_dataset_signal = (
+            re.search(r"\b(?:dataset|corpus|benchmark|testbed|cohort|registry)\b", lowered)
+            or re.search(r"[A-Z]{2,}", normalized)
+            or re.search(r"\d", normalized)
+        )
+        return bool(has_named_dataset_signal)
 
     @staticmethod
     def _normalize_metric_name(value: str) -> str | None:
         if not isinstance(value, str) or not value.strip():
             return None
 
-        lowered = value.strip().lower()
+        normalized = html.unescape(value)
+        normalized = normalized.replace("`", "")
+        normalized = re.sub(r"[\u2010-\u2015]", "-", normalized)
+        normalized = re.sub(r"[*_]+", "", normalized)
+        normalized = re.sub(r"\s*\[[^\]]+\]", "", normalized)
+        normalized = re.sub(r"\s+", " ", normalized).strip(" :-\t\r\n")
+        if not normalized or len(normalized) > 90:
+            return None
+
+        lowered = normalized.lower()
         metric_map = {
             "bleu": "BLEU",
             "bleu score": "BLEU",
@@ -1188,7 +1333,45 @@ class LLMExtractionService:
             if re.search(rf"(?<![a-z]){re.escape(key)}(?![a-z])", lowered):
                 return label
 
-        return None
+        generic_exact = {
+            "metric",
+            "metrics",
+            "evaluation",
+            "performance",
+            "score",
+            "scores",
+            "result",
+            "results",
+            "measurement",
+            "measurements",
+            "value",
+            "values",
+            "benchmark",
+            "benchmarks",
+            "dataset",
+            "datasets",
+            "table",
+            "figure",
+        }
+        if lowered in generic_exact:
+            return None
+
+        generic_patterns = [
+            r"^(?:various|several|multiple|standard|common|reported)\s+(?:metrics?|measurements?|scores?)$",
+            r"^(?:experimental|evaluation|performance)\s+(?:metrics?|results?|scores?)$",
+            r"^(?:the\s+)?(?:main|primary|overall)\s+(?:metric|measure|score)$",
+        ]
+        if any(re.search(pattern, lowered) for pattern in generic_patterns):
+            return None
+
+        if not re.search(r"[A-Za-z]", normalized):
+            return None
+
+        digit_count = sum(ch.isdigit() for ch in normalized)
+        if digit_count > len(normalized) * 0.45:
+            return None
+
+        return normalized
 
     def _extract_datasets_from_text(self, text: str) -> list[str]:
         if not isinstance(text, str) or not text.strip():
@@ -1373,9 +1556,15 @@ class LLMExtractionService:
             if len(limitation_candidates) >= 2:
                 break
 
-        datasets = self._extract_datasets_from_text(source_text)
-        metrics = self._extract_metrics_from_text(source_text)
-        benchmarks = self._extract_benchmarks_from_text(source_text)
+        paper_type = self._detect_paper_type(source_text)
+        if paper_type == "survey":
+            datasets = []
+            metrics = []
+            benchmarks = []
+        else:
+            datasets = self._extract_datasets_from_text(source_text)
+            metrics = self._extract_metrics_from_text(source_text)
+            benchmarks = self._extract_benchmarks_from_text(source_text)
 
         coerced = {
             "problem": {
@@ -1454,7 +1643,7 @@ class LLMExtractionService:
         if not isinstance(contributions, list):
             contributions = []
         if len(contributions) == 0:
-            fallback_contributions = self._normalize_contributions_field(fallback.get("contributions"))
+            fallback_contributions = self._normalize_contributions_field(fallback.get("contributions"), is_fallback=True)
             if fallback_contributions:
                 normalized["contributions"] = fallback_contributions
                 filled_keys.append("contributions")
@@ -1463,7 +1652,7 @@ class LLMExtractionService:
         if not isinstance(limitations, list):
             limitations = []
         if len(limitations) == 0:
-            fallback_limitations = self._normalize_limitations_field(fallback.get("limitations"))
+            fallback_limitations = self._normalize_limitations_field(fallback.get("limitations"), is_fallback=True)
             if fallback_limitations:
                 normalized["limitations"] = fallback_limitations
                 filled_keys.append("limitations")
@@ -1699,18 +1888,26 @@ class LLMExtractionService:
     def _detect_paper_type(self, text: str) -> str:
         t = text.lower()
 
-        # ưu tiên system trước
-        if any(k in t for k in [
-            "we introduce",
-            "this paper introduces",
-            "this paper presents",
-            "we present",
-            "metadata format",
-            "framework",
-            "format",
-            "system",
-            "architecture",
-        ]):
+        # Only high-confidence software/system papers get system-specific fixes.
+        system_patterns = [
+            (
+                r"\bwe\s+(?:introduce|present|propose|develop|describe)\s+"
+                r"(?:a|an|the|our)?\s*"
+                r"(?:[a-z0-9_-]+\s+){0,4}"
+                r"(?:metadata\s+format|data\s+format|framework|toolkit|tool|platform|"
+                r"library|software|system)\b"
+            ),
+            (
+                r"\bthis\s+(?:paper|work|study)\s+"
+                r"(?:introduces|presents|proposes|describes)\s+"
+                r"(?:a|an|the)?\s*"
+                r"(?:[a-z0-9_-]+\s+){0,4}"
+                r"(?:metadata\s+format|data\s+format|framework|toolkit|tool|platform|"
+                r"library|software|system)\b"
+            ),
+            r"\bmetadata\s+format\b",
+        ]
+        if any(re.search(pattern, t) for pattern in system_patterns):
             return "system"
 
         if any(k in t for k in [
@@ -1794,16 +1991,16 @@ class LLMExtractionService:
 
         paper_type = self._detect_paper_type(full_text)
 
-        # 🔥 Fix Croissant-like papers
+        # Croissant-like system papers may omit human-evaluation metrics.
         if paper_type == "system":
             eval_setup = raw_result.get("evaluation_setup") or {}
             value = eval_setup.get("value") or {}
 
-            # ❌ benchmark không hợp lệ → clear
-            value["benchmarks"] = []
-
-            # ✅ infer human metrics
-            metrics = []
+            metrics = [
+                metric
+                for metric in value.get("metrics", [])
+                if isinstance(metric, str) and metric.strip()
+            ]
 
             t = full_text.lower()
 
@@ -1822,7 +2019,7 @@ class LLMExtractionService:
             if "consistency" in t:
                 metrics.append("consistency")
 
-            value["metrics"] = metrics
+            value["metrics"] = self._dedupe_strings(metrics, max_items=5)
 
             eval_setup["value"] = value
             raw_result["evaluation_setup"] = eval_setup
@@ -2357,8 +2554,18 @@ class LLMExtractionService:
             and not self._is_placeholder_text(x)
             and self._is_valid_dataset_name(x)
         ]
+        paper_type = self._detect_paper_type(source_text)
+        if paper_type == "survey":
+            extracted_datasets = []
+            extracted_metrics = []
+            extracted_benchmarks = []
+        else:
+            extracted_datasets = self._extract_datasets_from_text(source_text)
+            extracted_metrics = self._extract_metrics_from_text(source_text)
+            extracted_benchmarks = self._extract_benchmarks_from_text(source_text)
+
         datasets = self._dedupe_strings(
-            raw_datasets + self._extract_datasets_from_text(source_text),
+            raw_datasets + extracted_datasets,
             max_items=3,
         )
 
@@ -2368,8 +2575,8 @@ class LLMExtractionService:
             if metric:
                 raw_metrics.append(metric)
         metrics = self._dedupe_strings(
-            raw_metrics + self._extract_metrics_from_text(source_text),
-            max_items=4,
+            raw_metrics + extracted_metrics,
+            max_items=5,
         )
 
         raw_benchmarks: list[str] = []
@@ -2378,7 +2585,7 @@ class LLMExtractionService:
             if normalized and not self._is_placeholder_text(normalized):
                 raw_benchmarks.append(normalized)
         benchmarks = self._dedupe_strings(
-            raw_benchmarks + self._extract_benchmarks_from_text(source_text),
+            raw_benchmarks + extracted_benchmarks,
             max_items=3,
         )
 
@@ -2464,8 +2671,8 @@ class LLMExtractionService:
         normalized = {
             "problem": self._normalize_scalar_field(raw.get("problem")),
             "method": self._normalize_method_field(raw.get("method")),
-            "contributions": self._normalize_contributions_field(raw.get("contributions")),
-            "limitations": self._normalize_limitations_field(raw.get("limitations")),
+            "contributions": self._normalize_contributions_field(raw.get("contributions"), is_fallback=False),
+            "limitations": self._normalize_limitations_field(raw.get("limitations"), is_fallback=False),
             "evaluation_setup": self._normalize_evaluation_setup(raw.get("evaluation_setup"), pages, input_text),
         }
         normalized = self._enrich_missing_fields_from_input_text(normalized, input_text, pages)

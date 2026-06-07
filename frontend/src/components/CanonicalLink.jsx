@@ -57,7 +57,7 @@ export function CanonicalLink({ paperId }) {
         cursor: "pointer"
       }}
     >
-      {canonicalDoc.title_candidate || canonicalDoc.title || "Xem"}
+      {canonicalDoc.title || canonicalDoc.title_candidate || "Xem"}
     </a>
   );
 }

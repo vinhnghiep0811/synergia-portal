@@ -97,6 +97,7 @@ export function CanonicalDocumentDetailPage() {
   function formatMetadataSource(source) {
     if (!source) return "-";
     if (source === "semantic_scholar") return "Semantic Scholar";
+    if (source === "crossref") return "Crossref";
     return source;
   }
 
@@ -124,8 +125,16 @@ export function CanonicalDocumentDetailPage() {
   function getBadgeColor(status) {
     switch (status) {
       case "matched":
+      case "matched_by_doi":
+      case "matched_by_title":
+      case "matched_by_crossref":
+      case "matched_by_crossref_doi":
+      case "matched_by_crossref_title":
+      case "enriched":
         return "#22c55e";
       case "unmatched":
+      case "crossref_rate_limited":
+      case "rate_limited":
         return "#f59e0b";
       case "error":
         return "#ef4444";
@@ -452,8 +461,8 @@ export function CanonicalDocumentDetailPage() {
                 </dl>
               </div>
 
-              {/* Extraction Runs */}
-              <div className="detail-section">
+              {/* Extraction Runs — cột phải, dưới Thời gian */}
+              <div className="detail-section" style={{ gridColumn: 2 }}>
                 <h3 className="detail-section__title">
                   Quá trình trích xuất
                 </h3>
@@ -465,7 +474,7 @@ export function CanonicalDocumentDetailPage() {
                       flexWrap: "wrap",
                       gap: "1rem",
                       justifyContent: "center",
-                    alignItems: "center"
+                      alignItems: "center",
                     }}
                   >
                     {extractionRuns.map((run) => (
@@ -474,22 +483,21 @@ export function CanonicalDocumentDetailPage() {
                         className="btn btn--primary"
                         style={{
                           padding: "0.75rem 1.5rem",
-                          borderRadius: "10px"
+                          borderRadius: "10px",
                         }}
                         onClick={() =>
                           navigate(`/extraction-runs/${run.id}`)
                         }
                       >
-                        Xem chi tiết quá trình trích xuất 
+                        Xem chi tiết quá trình trích xuất
                       </button>
                     ))}
                   </div>
                 ) : (
                   <div
                     style={{
-                      padding: "2rem",
-                      textAlign: "center",
-                      color: "#6b7280"
+                      padding: "1rem 0",
+                      color: "#6b7280",
                     }}
                   >
                     Không có quá trình trích xuất nào.

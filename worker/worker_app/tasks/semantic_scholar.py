@@ -69,6 +69,14 @@ def semantic_scholar_enrich(canonical_document_id: str) -> None:
         # --------------------------------
         service = SemanticScholarService(db)
         result = service.run_for_canonical_document(canonical)
+        canonical = (
+            db.query(CanonicalDocument)
+            .filter(CanonicalDocument.id == cid)
+            .first()
+        )
+        if not canonical:
+            logger.error("[SS enrich] CanonicalDocument disappeared after enrichment: %s", cid)
+            return
 
         # --------------------------------
         # 3. update paper statuses
@@ -88,6 +96,7 @@ def semantic_scholar_enrich(canonical_document_id: str) -> None:
                     doi=canonical.doi,
                     ss_paper_id=canonical.ss_paper_id,
                     title=canonical.title,
+                    metadata_source=canonical.metadata_source,
                 )
             elif result == "unmatched":
                 activity_service.log_semantic_scholar_unmatched(

@@ -18,14 +18,14 @@ class CanonicalDocumentResponse(BaseModel):
     # Du lieu thu truoc khi enrich
     title_candidate: Optional[str] = None
 
-    # Du lieu sau khi enrich tu Semantic Scholar
+    # Du lieu sau khi enrich tu nguon metadata chinh
     title: Optional[str] = None
     abstract: Optional[str] = None
     venue: Optional[str] = None
     publication_year: Optional[int] = None
     authors_json: Optional[Any] = None
 
-    # Semantic Scholar match info
+    # Metadata match info
     ss_paper_id: Optional[str] = None
     ss_match_confidence: Optional[Decimal] = None
     metadata_source: Optional[str] = None

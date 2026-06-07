@@ -76,8 +76,12 @@ function getMatchTypeLabel(matchStatus) {
   switch (matchStatus) {
     case "matched_by_doi": return "Matched by DOI";
     case "matched_by_title": return "Matched by title";
+    case "matched_by_crossref_doi": return "Matched by Crossref DOI";
+    case "matched_by_crossref_title": return "Matched by Crossref title";
+    case "matched_by_crossref": return "Matched by Crossref";
     case "unmatched": return "Unmatched";
     case "rate_limited": return "Rate limited";
+    case "crossref_rate_limited": return "Crossref rate limited";
     default: return "-";
   }
 }
@@ -85,6 +89,7 @@ function getMatchTypeLabel(matchStatus) {
 function formatSemanticSource(source) {
   if (!source) return "-";
   if (source === "semantic_scholar") return "Semantic Scholar";
+  if (source === "crossref") return "Crossref";
   return source;
 }
 
@@ -119,8 +124,8 @@ export function PaperDetail({ paper }) {
   }
 
   const displayTitle =
-    paper.detectedTitle ||
     paper.title ||
+    paper.detectedTitle ||
     paper.originalFilename ||
     paper.filename ||
     "Unknown file";
@@ -258,7 +263,7 @@ export function PaperDetail({ paper }) {
       </div>
 
       <div className="detail-section semantic-section">
-        <h3 className="detail-section__title">Semantic Scholar enrichment</h3>
+        <h3 className="detail-section__title">Metadata enrichment</h3>
         <div className="semantic-status-row">
           <span
             className={`semantic-status-badge semantic-status-badge--${paper.semanticScholarStatus || "unknown"}`}
