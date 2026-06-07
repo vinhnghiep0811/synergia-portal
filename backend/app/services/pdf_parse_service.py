@@ -375,6 +375,17 @@ def _is_separator_line(text: str) -> bool:
     return len(non_sep) == 0
 
 
+def _looks_like_citation_line(text: str) -> bool:
+    normalized = normalize_space(text).strip()
+    match = re.search(r"^(.*?)\(\d{4}\)\.?", normalized)
+    if match:
+        before_year = match.group(1).strip()
+        if len(before_year) > 5 and (before_year.endswith(".") or before_year.endswith(",") or before_year.endswith("&") or "., " in before_year):
+            return True
+    if re.search(r"\b\d+\s*,\s*\d+[-–]\d+\.?$", normalized):
+        return True
+    return False
+
 def _is_non_title_text(text: str) -> bool:
     t = text.lower().strip()
     return (
@@ -405,6 +416,7 @@ def _is_non_title_text(text: str) -> bool:
         or _looks_like_article_type_label(text)
         or _looks_like_publication_header(text)
         or _looks_like_author_line(text)
+        or _looks_like_citation_line(text)
     )
 
 
@@ -468,10 +480,20 @@ def _is_author_name_chunk(chunk: str) -> bool:
         return False
 
     meaningful_words = 0
+    common_title_nouns = {
+        "human", "health", "pollution", "ocean", "effects", "impact", 
+        "analysis", "study", "review", "system", "method", "model", 
+        "data", "approach", "framework", "evaluation", "assessment",
+        "introduction", "background", "conclusion", "results"
+    }
+
     for word in words:
         cleaned = word.strip(" ;:()[]{}")
         if not cleaned:
             continue
+            
+        if cleaned.lower() in common_title_nouns:
+            return False
 
         if re.fullmatch(r"(?:[A-Z]\.){1,4}", cleaned):
             meaningful_words += 1
@@ -490,17 +512,50 @@ def _is_author_name_chunk(chunk: str) -> bool:
 
 
 def _looks_like_initialed_author_sequence(text: str) -> bool:
-    matches = re.findall(
-        r"(?:[A-Z]\.){1,4}\s*[A-Z][A-Za-z]+(?:[-'][A-Z]?[A-Za-z]+)*",
-        text,
-    )
-    if len(matches) < 2:
+    # 1. Does it have first initial last name patterns?
+    # e.g., "Philip J. Landrigan" or "J. Stegeman" or "A.J.M. van de Water"
+    pattern = r"(?:[A-Z][a-z]+\s+)?(?:[A-Z]\.\s*)+(?:[a-z]+\s+)?[A-Z][a-z]+"
+    matches = re.findall(pattern, text)
+    if matches:
+        compact_text = re.sub(r"\s+", "", text)
+        compact_matches = sum(len(re.sub(r"\s+", "", m)) for m in matches)
+        if compact_matches / max(1, len(compact_text)) >= 0.4:
+            return True
+
+    # 2. Check if it's mostly names (Capitalized) and no title words
+    words = text.split()
+    if len(words) < 4:
         return False
 
-    compact_text = re.sub(r"\s+", "", text)
-    compact_matches = sum(len(re.sub(r"\s+", "", match)) for match in matches)
+    name_like_words = 0
+    import unicodedata
+    for w in words:
+        w = w.strip(",;")
+        w_norm = unicodedata.normalize('NFKD', w).encode('ASCII', 'ignore').decode('utf-8')
 
-    return compact_matches / max(1, len(compact_text)) >= 0.75
+        if re.fullmatch(r"[A-Z]\.?", w_norm) or re.fullmatch(r"(?:[A-Z]\.){2,}", w_norm):
+            name_like_words += 1
+        elif re.fullmatch(r"[A-Z][a-z]+(?:[-'][A-Z]?[a-z]+)*", w_norm):
+            name_like_words += 1
+        elif w.lower() in {"de", "del", "da", "di", "la", "le", "van", "von", "der", "den", "and"}:
+            name_like_words += 1
+
+    is_mostly_names = name_like_words / len(words) >= 0.85
+
+    title_words = {"of", "in", "for", "on", "with", "at", "by", "from", "to", "a", "an", "the"}
+    has_title_words = any(w.lower() in title_words for w in words)
+
+    if is_mostly_names and not has_title_words and len(words) >= 5:
+        common_title_nouns = {
+            "human", "health", "pollution", "ocean", "effects", "impact", 
+            "analysis", "study", "review", "system", "method", "model", 
+            "data", "approach", "framework", "evaluation", "assessment"
+        }
+        has_common_noun = any(w.lower() in common_title_nouns for w in words)
+        if not has_common_noun:
+            return True
+
+    return False
 
 
 def _alpha_words(text: str) -> list[str]:
