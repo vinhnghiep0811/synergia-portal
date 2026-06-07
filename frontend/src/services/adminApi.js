@@ -59,6 +59,10 @@ export async function getAdminCanonicalDocuments(
   });
 }
 
+export async function getAdminCanonicalExport() {
+  return get("/api/admin/canonical-documents/export");
+}
+
 export async function getAdminActivities(page = 1, pageSize = 20, options = {}) {
   const skip = (page - 1) * pageSize;
   return get("/api/admin/activity", {

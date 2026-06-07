@@ -4,6 +4,7 @@ import "../styles/AdminPage.css";
 import {
   getAdminActivities,
   getAdminCanonicalDocuments,
+  getAdminCanonicalExport,
   getAdminConfiguration,
   getAdminLLMModels,
   getAdminLLMPrompts,
@@ -185,6 +186,7 @@ export function AdminPage() {
 
   const [evaluation, setEvaluation] = useState(null);
   const [windowDays, setWindowDays] = useState(7);
+  const [isExportingCanonical, setIsExportingCanonical] = useState(false);
 
   const runWithState = useCallback(async (task) => {
     setLoading(true);
@@ -670,6 +672,29 @@ export function AdminPage() {
     URL.revokeObjectURL(url);
   }, [evaluation]);
 
+  const exportCanonicalMetadata = useCallback(async () => {
+    setIsExportingCanonical(true);
+    setError("");
+    try {
+      const data = await getAdminCanonicalExport();
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `canonical-metadata-${new Date().toISOString()}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message || "Xuất metadata thất bại");
+    } finally {
+      setIsExportingCanonical(false);
+    }
+  }, []);
+
   return (
     <div className="app-shell admin-page">
       <AppHeader title="Quản trị hệ thống" subtitle="UC-04: Vận hành và cấu hình hệ thống" />
@@ -799,9 +824,21 @@ export function AdminPage() {
 
           {activeTab === "canonical" && (
             <div className="card admin-panel-card">
-              <h3 className="admin-card-title">
-                Canonical Documents ({canonicalTotal}) - Trang {canonicalPage}/{canonicalTotalPages}
-              </h3>
+              <div className="admin-panel-head">
+                <h3 className="admin-card-title">
+                  Canonical Documents ({canonicalTotal}) - Trang {canonicalPage}/{canonicalTotalPages}
+                </h3>
+                <div className="admin-filter-row">
+                  <button
+                    className="admin-test-btn"
+                    type="button"
+                    onClick={exportCanonicalMetadata}
+                    disabled={isExportingCanonical}
+                  >
+                    {isExportingCanonical ? "Đang xuất..." : "Export JSON Metadata"}
+                  </button>
+                </div>
+              </div>
               <div className="admin-table-wrap">
                 <table className="admin-table">
                   <thead>
