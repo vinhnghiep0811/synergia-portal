@@ -407,6 +407,8 @@ def _is_non_title_text(text: str) -> bool:
         or "creative commons" in t
         or "open access" in t
         or "published by" in t
+        or "biomed central" in t
+        or t.startswith("bmc ")
         or "@" in t
         or re.search(r"\b(science|nature|cell|proceedings|journal|springer|ieee|elsevier|acm)\b.*\b\d{4}\b", t) is not None
         or re.search(r"\b(vol|no|pp|issue|pages)\b\.?\s*\d+", t) is not None
@@ -499,7 +501,15 @@ def _is_author_name_chunk(chunk: str) -> bool:
             meaningful_words += 1
             continue
 
-        if re.fullmatch(r"[A-Z][A-Za-z]+(?:[-'][A-Z]?[A-Za-z]+)*", cleaned):
+        def is_title_case_word(w):
+            if len(w) < 2: return False
+            if not w[0].isupper(): return False
+            for c in w[1:]:
+                if not c.isalpha() and c not in "-'":
+                    return False
+            return True
+
+        if is_title_case_word(cleaned):
             meaningful_words += 1
             continue
 
@@ -623,12 +633,18 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
         if not _is_contextual_non_title_line(line, lines, page_width)
     ]
 
-    # Filter out extremely short lines (like acronyms or layout labels)
-    # if there is another line with a title-like size (>= 14.0) and >= 2 words.
-    filtered_usable = []
+    if not usable:
+        return None
+
+    page_center = page_width / 2
+
+    scored = []
     for line in usable:
         text = line["text"]
         words = _alpha_words(text)
+        
+        # Filter out extremely short lines (like acronyms or layout labels) from becoming seeds
+        # if there is another line with a title-like size (>= 14.0) and >= 2 words.
         if len(words) <= 1:
             has_better_title_candidate = any(
                 candidate != line
@@ -638,19 +654,8 @@ def _select_title_from_lines(lines: list[dict], page_width: float) -> Optional[s
             )
             if has_better_title_candidate:
                 continue
-        filtered_usable.append(line)
-    usable = filtered_usable
 
-    if not usable:
-        return None
-
-    page_center = page_width / 2
-
-    scored = []
-    for line in usable:
         center_x = (line["x0"] + line["x1"]) / 2
-        text = line["text"]
-
         alpha_count = sum(1 for c in text if c.isalpha())
         upper_ratio = (
             sum(1 for c in text if c.isupper()) / alpha_count
