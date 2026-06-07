@@ -49,7 +49,8 @@ class ExportCanonicalDocumentsMetadataTests(unittest.TestCase):
             venue="ACL",
             authors_json=[{"name": "Author One", "author_id": "auth1"}, {"name": "Author Two"}],
             doi="10.1234/5678",
-            latest_extraction_run=run
+            latest_extraction_run=run,
+            papers=[SimpleNamespace(original_filename="paper1.pdf")]
         )
 
         doc2 = SimpleNamespace(
@@ -62,7 +63,8 @@ class ExportCanonicalDocumentsMetadataTests(unittest.TestCase):
             venue=None,
             authors_json=None,
             doi=None,
-            latest_extraction_run=None
+            latest_extraction_run=None,
+            papers=[]
         )
 
         db.query.return_value.options.return_value.all.return_value = [doc1, doc2]
@@ -79,6 +81,7 @@ class ExportCanonicalDocumentsMetadataTests(unittest.TestCase):
         self.assertEqual(result[0]["venue"], "ACL")
         self.assertEqual(result[0]["authors"], ["Author One", "Author Two"])
         self.assertEqual(result[0]["doi"], "10.1234/5678")
+        self.assertEqual(result[0]["original_filename"], "paper1.pdf")
         self.assertEqual(result[0]["problem"]["value"], "Sample problem")
         self.assertEqual(result[0]["method"]["value"], "Sample method")
         self.assertEqual(result[0]["contributions"][0]["value"], "Contrib 1")
@@ -86,6 +89,7 @@ class ExportCanonicalDocumentsMetadataTests(unittest.TestCase):
         # Test doc2 fallbacks
         self.assertEqual(result[1]["title"], "Parsed Title Two")
         self.assertIsNone(result[1]["abstract"])
+        self.assertIsNone(result[1]["original_filename"])
         self.assertIsNone(result[1]["problem"])
 
 if __name__ == "__main__":

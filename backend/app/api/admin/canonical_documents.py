@@ -127,7 +127,10 @@ def export_canonical_documents_metadata(
 ):
     canonical_docs = (
         db.query(CanonicalDocument)
-        .options(selectinload(CanonicalDocument.latest_extraction_run))
+        .options(
+            selectinload(CanonicalDocument.latest_extraction_run),
+            selectinload(CanonicalDocument.papers),
+        )
         .all()
     )
 
@@ -169,6 +172,10 @@ def export_canonical_documents_metadata(
             limitations = run.limitations or []
             evaluation_setup = run.evaluation_setup
 
+        # Get original filename
+        original_filenames = [p.original_filename for p in doc.papers if p.original_filename]
+        original_filename = original_filenames[0] if original_filenames else None
+
         export_data.append({
             "id": str(doc.id),
             "canonical_key": doc.canonical_key,
@@ -178,6 +185,7 @@ def export_canonical_documents_metadata(
             "venue": doc.venue,
             "authors": authors,
             "doi": doc.doi,
+            "original_filename": original_filename,
             "problem": problem,
             "method": method,
             "contributions": contributions,
