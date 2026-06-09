@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, cast, Text as SQLText
+from sqlalchemy import or_, cast, Text as SQLText, func
 
 from app.models.document_chunk import DocumentChunk
 from app.models.canonical_document import CanonicalDocument
@@ -1387,8 +1387,16 @@ class SearchService:
         seen: set[tuple[str, str]] = set()
 
         # 1) Search metadata: filename, detected title, DOI, canonical title, abstract, venue, authors
+        ts_query = func.plainto_tsquery('english', raw_query)
+        ts_vector = (
+            func.setweight(func.to_tsvector('english', func.coalesce(CanonicalDocument.title, PaperRecord.detected_title, '')), 'A')
+            .op('||')(func.setweight(func.to_tsvector('english', func.coalesce(CanonicalDocument.abstract, '')), 'B'))
+            .op('||')(func.setweight(func.to_tsvector('english', func.coalesce(CanonicalDocument.venue, '')), 'C'))
+        )
+        rank = func.ts_rank(ts_vector, ts_query)
+
         metadata_rows = (
-            self.db.query(PaperRecord, CanonicalDocument)
+            self.db.query(PaperRecord, CanonicalDocument, rank.label("rank_score"))
             .outerjoin(
                 CanonicalDocument,
                 PaperRecord.canonical_document_id == CanonicalDocument.id,
@@ -1396,6 +1404,7 @@ class SearchService:
             .filter(PaperRecord.publication_status == "published")
             .filter(
                 or_(
+                    ts_vector.op('@@')(ts_query),
                     PaperRecord.original_filename.ilike(pattern),
                     PaperRecord.detected_title.ilike(pattern),
                     PaperRecord.detected_doi.ilike(pattern),
@@ -1409,12 +1418,12 @@ class SearchService:
                     cast(CanonicalDocument.authors_json, SQLText).ilike(pattern),
                 )
             )
-            .order_by(PaperRecord.created_at.desc())
+            .order_by(rank.desc(), PaperRecord.created_at.desc())
             .limit(limit)
             .all()
         )
 
-        for paper, canonical in metadata_rows:
+        for paper, canonical, rank_score in metadata_rows:
             title = (
                 getattr(canonical, "title", None)
                 or getattr(canonical, "title_candidate", None)
